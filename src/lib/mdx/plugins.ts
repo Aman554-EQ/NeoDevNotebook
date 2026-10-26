@@ -76,7 +76,8 @@ export function rehypeFocusableMath() {
   return (tree: HastNode) => {
     const walk = (node: HastNode) => {
       for (const child of node.children ?? []) {
-        if (classList(child).includes("katex-display")) {
+        // Tables can also scroll sideways (display: block; overflow-x: auto in prose).
+        if (classList(child).includes("katex-display") || child.tagName === "table") {
           child.properties = { ...child.properties, tabIndex: 0 }
         } else {
           walk(child)

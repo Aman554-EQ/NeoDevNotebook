@@ -63,6 +63,8 @@ test.describe("python module: every lesson", () => {
         await viz.getByTestId("viz-step").click()
         await expect(viz.getByTestId("viz-narration")).not.toHaveText(before!)
       }
+      const related = page.getByTestId("related-practice")
+      await expect(related.getByRole("link")).toHaveCount(l.practice.length + l.interview.length)
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - window.innerWidth,
       )

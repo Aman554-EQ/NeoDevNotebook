@@ -32,6 +32,8 @@ describe("code sample extraction", () => {
             objectives: ["o"],
             prerequisites: [],
             tags: [],
+            practice: [],
+            interview: [],
             module: "m",
             slug: "l",
             order: 1,

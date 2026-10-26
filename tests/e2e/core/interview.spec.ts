@@ -30,7 +30,7 @@ test.describe("interview questions", () => {
     await page.goto("/bookmarks")
     await page.reload()
     const list = page.getByTestId("bookmark-list")
-    await expect(list).toContainText("Why is `list.append` O(1) amortized")
+    await expect(list).toContainText("Why is list.append O(1) amortized") // backticks are rendered, not shown
     await list.getByRole("link").first().click()
     await expect(page).toHaveURL(/sh-i-002$/)
 

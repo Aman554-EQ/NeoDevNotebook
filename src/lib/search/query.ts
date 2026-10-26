@@ -54,7 +54,7 @@ export async function searchContent(db: Db, rawQuery: string, limit = 12): Promi
   const base = { lesson: "learn", problem: "practice", interview: "interview" } as const
   return rows.map((r) => ({
     type: r.type,
-    title: r.title,
+    title: r.title.replace(/`([^`]+)`/g, "$1"), // questions use `code` spans; show plain text
     module: r.module,
     href: `/${base[r.type]}/${r.module}/${r.path}`,
     // ts_headline wraps matches in <b>…</b>; the UI splits on those markers and renders text only.

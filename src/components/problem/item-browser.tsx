@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation"
 import { Suspense, useMemo, useState } from "react"
 import { CircleCheck, Search } from "lucide-react"
 import { DifficultyBadge, TagChip } from "@/components/lesson/badges"
+import { InlineCode } from "@/components/lesson/inline-code"
 import { DIFFICULTIES, type Difficulty } from "@/lib/content/difficulty"
 import { useProgress, type ItemKey } from "@/lib/progress/store"
 import { cn } from "@/lib/utils"
@@ -219,7 +220,7 @@ function ItemList({ items, isDone }: { items: BrowserItem[]; isDone?: (k: ItemKe
               href={i.href}
               className="hover:text-accent min-w-0 flex-1 font-medium hover:underline"
             >
-              {i.title}
+              <InlineCode text={i.title} />
             </Link>
             {isDone?.(i.key) && <CircleCheck className="text-easy size-4" aria-label="done" />}
             <DifficultyBadge level={i.difficulty} />

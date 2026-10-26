@@ -170,6 +170,12 @@ export function findIntegrityIssues(bundles: ContentBundle[]): string[] {
     for (const s of splitSections(lessons)) {
       issues.push(`${module.slug}: section "${s}" is split; its lessons must be consecutive`)
     }
+    const ids = new Set([...problems, ...interview].map((x) => x.id))
+    for (const l of lessons) {
+      for (const ref of [...l.practice, ...l.interview]) {
+        if (!ids.has(ref)) issues.push(`${module.slug}/${l.slug}: links to missing item "${ref}"`)
+      }
+    }
     const lessonSlugs = new Set<string>()
     for (const l of lessons) {
       if (lessonSlugs.has(l.slug)) issues.push(`${module.slug}: duplicate lesson slug "${l.slug}"`)

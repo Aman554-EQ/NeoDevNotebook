@@ -43,6 +43,9 @@ export const lessonFrontmatterSchema = z.object({
   tags: z.array(slug).default([]),
   /** Optional group heading in the sidebar and module page; lessons of a section must be contiguous. */
   section: nonEmpty.max(40).optional(),
+  /** Related practice problems and interview questions of the same module, shown after the lesson. */
+  practice: z.array(z.string().regex(/^[a-z]{2,4}-p-\d{3}$/)).default([]),
+  interview: z.array(z.string().regex(/^[a-z]{2,4}-i-\d{3}$/)).default([]),
 })
 export type LessonFrontmatter = z.infer<typeof lessonFrontmatterSchema>
 

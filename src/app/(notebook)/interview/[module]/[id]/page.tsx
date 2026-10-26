@@ -6,6 +6,7 @@ import { Breadcrumbs } from "@/components/layout/breadcrumbs"
 import { PrevNext } from "@/components/layout/prev-next"
 import { DifficultyBadge, TagChip } from "@/components/lesson/badges"
 import { CodeBlock } from "@/components/lesson/code-block"
+import { InlineCode, plainText } from "@/components/lesson/inline-code"
 import { Reveal } from "@/components/lesson/reveal"
 import { BookmarkButton, DoneToggle } from "@/components/progress/progress-buttons"
 import { allInterviewParams, getInterviewQuestion, getModule } from "@/lib/content"
@@ -22,7 +23,7 @@ export async function generateMetadata({
 }: PageProps<"/interview/[module]/[id]">): Promise<Metadata> {
   const { module, id } = await params
   const data = await getInterviewQuestion(module, id)
-  return { title: data?.question.question }
+  return { title: data && plainText(data.question.question) }
 }
 
 export default async function InterviewQuestionPage({
@@ -45,7 +46,7 @@ export default async function InterviewQuestionPage({
       />
       <p className="text-muted font-mono text-sm">{q.id}</p>
       <h1 className="font-display mt-1 text-2xl leading-snug font-semibold sm:text-3xl">
-        {q.question}
+        <InlineCode text={q.question} />
       </h1>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <DifficultyBadge level={q.difficulty} />
@@ -55,7 +56,7 @@ export default async function InterviewQuestionPage({
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
         <DoneToggle itemKey={`interview:${q.id}`} />
-        <BookmarkButton itemKey={`interview:${q.id}`} title={q.question} href={href} />
+        <BookmarkButton itemKey={`interview:${q.id}`} title={plainText(q.question)} href={href} />
       </div>
 
       <p className="text-muted mt-8 flex items-center gap-2 text-sm">

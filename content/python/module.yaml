@@ -4,8 +4,10 @@ order: 0
 description: From your first script to interview-ready, with a picture for every idea. Basics, data structures, the core language, packages and debugging.
 icon: code
 idPrefix: py
-# Targets grow as milestones complete (soul.md §12). Final: 36 lessons, 60 problems (15 per tier), 56 interview (8+ per tier).
+# Targets from plan/part-1-python/plan.md, enforced by pnpm verify:content (soul.md §12).
 targets:
   lessons: 36
   problems: 60
   problemsPerDifficulty: 15
+  interview: 56
+  interviewPerDifficulty: 8
