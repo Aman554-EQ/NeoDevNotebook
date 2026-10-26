@@ -1,7 +1,9 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 import { notFound } from "next/navigation"
 import "katex/dist/katex.min.css"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
+import { PageSkeleton } from "@/components/layout/page-skeleton"
 import { PrevNext } from "@/components/layout/prev-next"
 import { Toc } from "@/components/layout/toc"
 import { Callout } from "@/components/lesson/callout"
@@ -30,7 +32,16 @@ export async function generateMetadata({
   return { title: data?.lesson.title, description: data?.lesson.summary }
 }
 
-export default async function LessonPage({ params }: PageProps<"/learn/[module]/[lesson]">) {
+export default function LessonPage({ params }: PageProps<"/learn/[module]/[lesson]">) {
+  // params are read inside the boundary so the shared App Shell stays URL-independent.
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <LessonContent params={params} />
+    </Suspense>
+  )
+}
+
+async function LessonContent({ params }: Pick<PageProps<"/learn/[module]/[lesson]">, "params">) {
   const { module, lesson: slug } = await params
   const data = await getLesson(module, slug)
   if (!data) notFound()

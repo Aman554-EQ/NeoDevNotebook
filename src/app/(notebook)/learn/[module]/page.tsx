@@ -1,9 +1,11 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { ListChecks, MessageSquareText } from "lucide-react"
 import { DifficultyBadge, MinutesBadge } from "@/components/lesson/badges"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
+import { PageSkeleton } from "@/components/layout/page-skeleton"
 import { getModule, getNavTree } from "@/lib/content"
 import { groupBySection, sectionId } from "@/lib/content/sections"
 
@@ -20,7 +22,16 @@ export async function generateMetadata({
   return { title: m?.title, description: m?.description }
 }
 
-export default async function ModulePage({ params }: PageProps<"/learn/[module]">) {
+export default function ModulePage({ params }: PageProps<"/learn/[module]">) {
+  // params are read inside the boundary so the shared App Shell stays URL-independent.
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <ModuleContent params={params} />
+    </Suspense>
+  )
+}
+
+async function ModuleContent({ params }: Pick<PageProps<"/learn/[module]">, "params">) {
   const m = await getModule((await params).module)
   if (!m) notFound()
   return (

@@ -1,6 +1,8 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 import { notFound } from "next/navigation"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
+import { PageSkeleton } from "@/components/layout/page-skeleton"
 import { ItemBrowser } from "@/components/problem/item-browser"
 import { getModule, getNavTree, getProblems } from "@/lib/content"
 
@@ -17,7 +19,16 @@ export async function generateMetadata({
   return { title: m ? `${m.title} practice` : undefined }
 }
 
-export default async function ProblemListPage({ params }: PageProps<"/practice/[module]">) {
+export default function ProblemListPage({ params }: PageProps<"/practice/[module]">) {
+  // params are read inside the boundary so the shared App Shell stays URL-independent.
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <ProblemListContent params={params} />
+    </Suspense>
+  )
+}
+
+async function ProblemListContent({ params }: Pick<PageProps<"/practice/[module]">, "params">) {
   const { module } = await params
   const m = await getModule(module)
   if (!m || !m.problemCount) notFound()

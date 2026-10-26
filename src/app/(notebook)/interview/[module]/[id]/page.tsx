@@ -1,8 +1,10 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 import { notFound } from "next/navigation"
 import { MessageSquareText } from "lucide-react"
 import "katex/dist/katex.min.css"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
+import { PageSkeleton } from "@/components/layout/page-skeleton"
 import { PrevNext } from "@/components/layout/prev-next"
 import { DifficultyBadge, TagChip } from "@/components/lesson/badges"
 import { CodeBlock } from "@/components/lesson/code-block"
@@ -26,9 +28,18 @@ export async function generateMetadata({
   return { title: data && plainText(data.question.question) }
 }
 
-export default async function InterviewQuestionPage({
+export default function InterviewQuestionPage({ params }: PageProps<"/interview/[module]/[id]">) {
+  // params are read inside the boundary so the shared App Shell stays URL-independent.
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <InterviewQuestionContent params={params} />
+    </Suspense>
+  )
+}
+
+async function InterviewQuestionContent({
   params,
-}: PageProps<"/interview/[module]/[id]">) {
+}: Pick<PageProps<"/interview/[module]/[id]">, "params">) {
   const { module, id } = await params
   const [data, m] = await Promise.all([getInterviewQuestion(module, id), getModule(module)])
   if (!data || !m) notFound()
