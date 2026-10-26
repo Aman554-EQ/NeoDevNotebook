@@ -1,0 +1,48 @@
+id: sh-i-001
+question: What does `b = a` do when `a` is a list, and how do you get an independent copy?
+difficulty: easy
+tags: [references, copying]
+shortAnswer: |
+  `b = a` copies nothing. It binds a second name to the same list object, so a mutation through
+  either name is visible through both. For an independent copy use `a.copy()`, `list(a)` or `a[:]`
+  for a shallow copy, or `copy.deepcopy(a)` when the list contains other mutable objects.
+detailedAnswer: |
+  In Python, assignment binds a name to an object. After `b = a`, both names refer to one object,
+  and `a is b` is `True`.
+
+  - A **shallow copy** (`a.copy()`, `list(a)`, `a[:]`, `copy.copy(a)`) creates a new outer list
+    that holds **the same element objects**. That's enough for a list of immutables like ints and strings.
+  - A **deep copy** (`copy.deepcopy(a)`) recursively copies the nested mutable objects too, so
+    inner lists are independent as well. It also handles cycles and shared references correctly.
+
+  The common bug is shallow-copying a nested structure and then mutating an inner list. Both
+  "copies" change, because the inner list was never copied.
+code:
+  language: python
+  code: |
+    import copy
+
+    a = [[1, 2], [3]]
+    alias = a
+    shallow = a.copy()
+    deep = copy.deepcopy(a)
+
+    a[0].append(99)  # mutate an INNER list
+
+    print(alias is a)  # True: same object
+    print(shallow)  # inner list is shared with a
+    print(deep)  # fully independent
+    print(shallow is a, shallow[0] is a[0])
+pitfalls:
+  - Saying `b = a` "copies the reference" and then claiming `b` is a copy. Be precise about it being the same object.
+  - Forgetting that a shallow copy shares nested objects.
+  - Mixing up `is` (same identity) with `==` (equal value).
+followUps:
+  - "How would you copy a dict of lists? (`{k: v.copy() for k, v in d.items()}` or `copy.deepcopy`)"
+  - Why can't you have this problem with tuples of ints?
+  - How does `copy.deepcopy` avoid infinite recursion on a list that contains itself? (the `memo` dict)
+verify: |
+  assert alias is a
+  assert shallow == [[1, 2, 99], [3]]
+  assert deep == [[1, 2], [3]]
+  assert shallow is not a and shallow[0] is a[0]

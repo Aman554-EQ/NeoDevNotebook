@@ -1,0 +1,129 @@
+---
+title: Why list.append is fast
+summary: Watch a Python list grow, then use a little math to see why appending is O(1) on average even though the list sometimes copies itself.
+estimatedMinutes: 12
+difficulty: simple
+objectives:
+  - Describe how a Python list stores items in a block with spare capacity
+  - Explain what happens when the block is full
+  - Show with a geometric series that appends cost O(1) amortized
+  - Measure resizes yourself with sys.getsizeof
+prerequisites:
+  - How this notebook works (names and objects)
+tags: [python, lists, complexity]
+---
+
+## Intuition: rent a bigger flat, with spare rooms
+
+A Python list keeps its items side by side in one block of memory. When you `append`, Python needs
+an empty slot at the end. If the block is full, it has to **move house**: rent a bigger block, carry
+every item over, then add the new one.
+
+Moving is slow, so Python plans ahead. Every move rents **more space than needed right now**, which
+means the next several appends are instant.
+
+## See it
+
+<ListAppendViz />
+
+## The math: amortized O(1)
+
+Say every resize multiplies the capacity by a factor $r > 1$. While appending $n$ items, the copies
+happen when the list was a fraction of its final size: about $n$ items moved at the last resize,
+$n/r$ at the one before it, $n/r^2$ before that, and so on. That is a geometric series:
+
+$$
+\begin{aligned}
+\text{items copied} &\le n + \frac{n}{r} + \frac{n}{r^2} + \cdots \\
+&= n \cdot \frac{r}{r-1}
+\end{aligned}
+$$
+
+So the **total** work for $n$ appends is $n$ (placing items) plus at most $n \cdot r/(r-1)$
+(copying). Dividing by $n$:
+
+$$
+\begin{aligned}
+\text{cost per append} &\le 1 + \frac{r}{r-1} \\
+&= O(1)
+\end{aligned}
+$$
+
+<Callout type="math" title="CPython's real growth rule">
+  CPython grows a list to roughly $1.125\times$ its new size plus a small constant: `(n + n // 8 +
+  6)` rounded down to a multiple of 4. With $r \approx 1.125$ the bound is $1 + 9 = 10$ steps per
+  append. That is still a constant, so the average cost stays O(1), even though a single resize is
+  O(n).
+</Callout>
+
+## Worked example: catch the resizes
+
+`sys.getsizeof` reports the bytes a list object uses, including spare slots. The number only changes
+when the list resizes, so we can catch each resize as it happens:
+
+```python title="resizes.py"
+import sys
+
+nums: list[int] = []
+last_size = sys.getsizeof(nums)
+for i in range(1, 70):
+    nums.append(i)
+    size = sys.getsizeof(nums)
+    if size != last_size:  # the block was replaced by a bigger one
+        print(f"resized at len={len(nums)}")
+        last_size = size
+```
+
+```text title="Output"
+resized at len=1
+resized at len=5
+resized at len=9
+resized at len=17
+resized at len=25
+resized at len=33
+resized at len=41
+resized at len=53
+resized at len=65
+```
+
+Line by line:
+
+- `sys.getsizeof(nums)` is the size of the list object itself, including its spare slots.
+- After each `append` we compare against the last size. A change means a new, bigger block was
+  allocated and the items were copied into it.
+- Only **9 of 69 appends** caused a resize. The other 60 dropped into a spare slot.
+
+The exact numbers are from CPython 3.9 and later on a 64-bit machine. Other versions may differ
+slightly, but the pattern is the same: resizes get further apart as the list grows.
+
+## Common mistakes
+
+<Callout type="warning" title="Not every list operation is cheap">
+  `nums.insert(0, x)` and `nums.pop(0)` shift **every** item, so they are O(n). For a queue, use
+  `collections.deque`, which adds and removes at both ends in O(1).
+</Callout>
+
+Building a list with `result = result + [x]` inside a loop creates a brand-new list on every
+iteration, which makes the whole loop O(n²). Use `result.append(x)` or `result += [x]`, which extend
+the list in place.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: if a list resizes at len=1, 5 and 9, how many slots does it have after the 9th append?"
+>
+  With CPython's rule, the resize at length 9 allocates `(9 + 9 // 8 + 6) & ~3 = 16` slots. So there
+  are 16 slots and 7 of them are still free.
+</Reveal>
+
+Next, simulate the growth rule yourself in [Count the list resizes](/practice/start-here/sh-p-002).
+
+<KeyTakeaways>
+
+- A list stores items in one block with **spare capacity** at the end.
+- When the block is full, Python allocates a bigger one and copies everything. That one append is O(n).
+- Because capacity grows by a constant **factor**, resizes are rare, so append is **O(1) amortized**.
+- `insert(0, …)` and `pop(0)` are O(n). Use `deque` for queues.
+
+</KeyTakeaways>

@@ -1,0 +1,31 @@
+id: sh-i-002
+question: Why is `list.append` O(1) amortized, and when is a single append not O(1)?
+difficulty: medium
+tags: [lists, complexity]
+shortAnswer: |
+  A list over-allocates: it keeps spare slots, so most appends just write into a free slot in O(1).
+  When the block is full, that one append allocates a larger block and copies every item, which is
+  O(n). Capacity grows by a constant factor, so resizes are rare enough that the average cost per
+  append over many appends is still O(1).
+detailedAnswer: |
+  A CPython list is a dynamic array: a contiguous block of pointers with a `size` and a larger
+  `allocated` capacity. When `size == allocated`, `append` calls a resize. The new capacity is
+  about `n + n // 8 + 6`, rounded down to a multiple of 4. The items are copied over (`realloc` may
+  sometimes extend the block in place, but you cannot rely on it).
+
+  **Amortized analysis.** If capacity grows by a factor $r > 1$, the copies during $n$ appends total
+  at most $n \cdot r / (r - 1)$, a geometric series. That's O(n) total, or O(1) per append on
+  average. Doubling gives about $2n$ copies. CPython's gentler factor of about 1.125 wastes less
+  memory, at the cost of a larger constant (about $9n$).
+
+  **When it isn't O(1).** The specific append that triggers a resize is O(n). This matters for
+  latency-sensitive code. If you know the final size, building the list in one go (a comprehension,
+  or `[None] * n`) avoids the repeated resizes.
+pitfalls:
+  - "Saying append is O(1) **worst case**. It is O(1) **amortized**, and the worst case is O(n)."
+  - Confusing append with `insert(0, x)` or `pop(0)`, which shift every item and are always O(n).
+  - Claiming the capacity doubles in CPython. Doubling is the textbook example. CPython uses about 1.125x.
+followUps:
+  - Why does a growth factor of r > 1 matter, and what if capacity grew by a constant +10 instead? (that's O(n²) total)
+  - When would you choose `collections.deque` over a list?
+  - How does `list.extend` with a large iterable reduce the number of resizes?

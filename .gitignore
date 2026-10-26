@@ -28,3 +28,7 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 *.log
+
+# generated
+src/components/viz/__generated__/
+.cache/
