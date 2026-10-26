@@ -147,8 +147,11 @@ data-structure choice) → `hard` (several steps, optimisation, edge cases).
 ## 11. Performance Rules
 
 - Lessons, problem pages and interview pages are **statically generated** at build time, so no DB query runs when a page is viewed.
-- Budgets (mobile Lighthouse): **Performance ≥ 90, Accessibility ≥ 95, Best Practices ≥ 95**;
-  **LCP < 2.5s, CLS < 0.1, INP < 200ms**.
+- **Lab budgets** (mobile Lighthouse, `pnpm perf`, must pass): **Performance ≥ 90, Accessibility ≥ 95,
+  Best Practices ≥ 95, CLS < 0.1, TBT < 200ms**. Lab LCP is reported for information only.
+- **Field budgets** (real users, p75, measured once deployed): **LCP < 2.5s, CLS < 0.1, INP < 200ms**.
+  _Decided by the owner on 2026-10-26 (option A): simulated slow-4G LCP mostly measures the framework's fixed
+  runtime, so LCP is judged on real-user data._
 - Syntax highlighting (Shiki) and math (KaTeX) are rendered **at build time** and add zero client JS.
 - Use `next/font`, `next/image`, prefetching of the next lesson, and lazy loading for heavy visuals.
 

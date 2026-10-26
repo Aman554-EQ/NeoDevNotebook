@@ -34,7 +34,7 @@ search, DB, tests, docs system and branching.
 - [x] **Viz framework:** `VizFrame` (lazy load, skeleton, controls, caption, reduced-motion fallback, SR text) +
       one 2D demo + one 3D demo inside "Start Here"
 - [x] Code-sample verification script (runs every Python snippet in content)
-- [x] Tests: Vitest + RTL unit tests; Playwright E2E (4 viewports, axe, keyboard, clipboard); Lighthouse check (⚠️ lab LCP above budget, see documentation)
+- [x] Tests: Vitest + RTL unit tests; Playwright E2E (4 viewports, axe, keyboard, clipboard); Lighthouse check (lab LCP is info-only by owner decision A)
 - [x] CI workflow (GitHub Actions; runs once a remote exists)
 - [x] Docs: `documentation/part-0-setup.md`, `documentation/guides/adding-a-module.md`, navigation, changelog
 
