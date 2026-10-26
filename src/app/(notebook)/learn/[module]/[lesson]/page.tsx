@@ -1,9 +1,7 @@
 import type { Metadata } from "next"
-import { Suspense } from "react"
 import { notFound } from "next/navigation"
 import "katex/dist/katex.min.css"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
-import { PageSkeleton } from "@/components/layout/page-skeleton"
 import { PrevNext } from "@/components/layout/prev-next"
 import { Toc } from "@/components/layout/toc"
 import { Callout } from "@/components/lesson/callout"
@@ -19,6 +17,9 @@ import { allLessonParams, getInterviewQuestions, getLesson, getProblems } from "
 import { renderMdx } from "@/lib/mdx/render"
 
 export const ensureStatic = "navigation"
+// Fully prerendered, so the complete page is in the first paint. Opting out of instant-navigation
+// validation avoids a Suspense skeleton that would flash (and shift the layout) on every page load.
+export const instant = false
 
 export async function generateStaticParams() {
   return allLessonParams()
@@ -32,16 +33,7 @@ export async function generateMetadata({
   return { title: data?.lesson.title, description: data?.lesson.summary }
 }
 
-export default function LessonPage({ params }: PageProps<"/learn/[module]/[lesson]">) {
-  // params are read inside the boundary so the shared App Shell stays URL-independent.
-  return (
-    <Suspense fallback={<PageSkeleton />}>
-      <LessonContent params={params} />
-    </Suspense>
-  )
-}
-
-async function LessonContent({ params }: Pick<PageProps<"/learn/[module]/[lesson]">, "params">) {
+export default async function LessonPage({ params }: PageProps<"/learn/[module]/[lesson]">) {
   const { module, lesson: slug } = await params
   const data = await getLesson(module, slug)
   if (!data) notFound()

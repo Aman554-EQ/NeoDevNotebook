@@ -1,10 +1,8 @@
 import type { Metadata } from "next"
-import { Suspense } from "react"
 import { notFound } from "next/navigation"
 import { MessageSquareText } from "lucide-react"
 import "katex/dist/katex.min.css"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
-import { PageSkeleton } from "@/components/layout/page-skeleton"
 import { PrevNext } from "@/components/layout/prev-next"
 import { DifficultyBadge, TagChip } from "@/components/lesson/badges"
 import { CodeBlock } from "@/components/lesson/code-block"
@@ -15,6 +13,9 @@ import { allInterviewParams, getInterviewQuestion, getModule } from "@/lib/conte
 import { Markdown } from "@/lib/mdx/render"
 
 export const ensureStatic = "navigation"
+// Fully prerendered, so the complete page is in the first paint. Opting out of instant-navigation
+// validation avoids a Suspense skeleton that would flash (and shift the layout) on every page load.
+export const instant = false
 
 export async function generateStaticParams() {
   return allInterviewParams()
@@ -28,18 +29,9 @@ export async function generateMetadata({
   return { title: data && plainText(data.question.question) }
 }
 
-export default function InterviewQuestionPage({ params }: PageProps<"/interview/[module]/[id]">) {
-  // params are read inside the boundary so the shared App Shell stays URL-independent.
-  return (
-    <Suspense fallback={<PageSkeleton />}>
-      <InterviewQuestionContent params={params} />
-    </Suspense>
-  )
-}
-
-async function InterviewQuestionContent({
+export default async function InterviewQuestionPage({
   params,
-}: Pick<PageProps<"/interview/[module]/[id]">, "params">) {
+}: PageProps<"/interview/[module]/[id]">) {
   const { module, id } = await params
   const [data, m] = await Promise.all([getInterviewQuestion(module, id), getModule(module)])
   if (!data || !m) notFound()

@@ -1,15 +1,16 @@
 import type { Metadata } from "next"
-import { Suspense } from "react"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { ListChecks, MessageSquareText } from "lucide-react"
 import { DifficultyBadge, MinutesBadge } from "@/components/lesson/badges"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
-import { PageSkeleton } from "@/components/layout/page-skeleton"
 import { getModule, getNavTree } from "@/lib/content"
 import { groupBySection, sectionId } from "@/lib/content/sections"
 
 export const ensureStatic = "navigation"
+// Fully prerendered, so the complete page is in the first paint. Opting out of instant-navigation
+// validation avoids a Suspense skeleton that would flash (and shift the layout) on every page load.
+export const instant = false
 
 export async function generateStaticParams() {
   return (await getNavTree()).map((m) => ({ module: m.slug }))
@@ -22,16 +23,7 @@ export async function generateMetadata({
   return { title: m?.title, description: m?.description }
 }
 
-export default function ModulePage({ params }: PageProps<"/learn/[module]">) {
-  // params are read inside the boundary so the shared App Shell stays URL-independent.
-  return (
-    <Suspense fallback={<PageSkeleton />}>
-      <ModuleContent params={params} />
-    </Suspense>
-  )
-}
-
-async function ModuleContent({ params }: Pick<PageProps<"/learn/[module]">, "params">) {
+export default async function ModulePage({ params }: PageProps<"/learn/[module]">) {
   const m = await getModule((await params).module)
   if (!m) notFound()
   return (

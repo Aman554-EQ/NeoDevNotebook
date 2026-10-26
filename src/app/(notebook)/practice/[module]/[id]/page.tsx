@@ -1,9 +1,7 @@
 import type { Metadata } from "next"
-import { Suspense } from "react"
 import { notFound } from "next/navigation"
 import "katex/dist/katex.min.css"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
-import { PageSkeleton } from "@/components/layout/page-skeleton"
 import { PrevNext } from "@/components/layout/prev-next"
 import { DifficultyBadge, TagChip } from "@/components/lesson/badges"
 import { CodeBlock } from "@/components/lesson/code-block"
@@ -13,6 +11,9 @@ import { allProblemParams, getModule, getProblem } from "@/lib/content"
 import { Markdown } from "@/lib/mdx/render"
 
 export const ensureStatic = "navigation"
+// Fully prerendered, so the complete page is in the first paint. Opting out of instant-navigation
+// validation avoids a Suspense skeleton that would flash (and shift the layout) on every page load.
+export const instant = false
 
 export async function generateStaticParams() {
   return allProblemParams()
@@ -35,16 +36,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-export default function ProblemPage({ params }: PageProps<"/practice/[module]/[id]">) {
-  // params are read inside the boundary so the shared App Shell stays URL-independent.
-  return (
-    <Suspense fallback={<PageSkeleton />}>
-      <ProblemContent params={params} />
-    </Suspense>
-  )
-}
-
-async function ProblemContent({ params }: Pick<PageProps<"/practice/[module]/[id]">, "params">) {
+export default async function ProblemPage({ params }: PageProps<"/practice/[module]/[id]">) {
   const { module, id } = await params
   const [data, m] = await Promise.all([getProblem(module, id), getModule(module)])
   if (!data || !m) notFound()

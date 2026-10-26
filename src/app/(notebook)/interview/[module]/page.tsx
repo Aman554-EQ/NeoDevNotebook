@@ -1,12 +1,13 @@
 import type { Metadata } from "next"
-import { Suspense } from "react"
 import { notFound } from "next/navigation"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
-import { PageSkeleton } from "@/components/layout/page-skeleton"
 import { ItemBrowser } from "@/components/problem/item-browser"
 import { getInterviewQuestions, getModule, getNavTree } from "@/lib/content"
 
 export const ensureStatic = "navigation"
+// Fully prerendered, so the complete page is in the first paint. Opting out of instant-navigation
+// validation avoids a Suspense skeleton that would flash (and shift the layout) on every page load.
+export const instant = false
 
 export async function generateStaticParams() {
   return (await getNavTree()).filter((m) => m.interviewCount > 0).map((m) => ({ module: m.slug }))
@@ -19,16 +20,7 @@ export async function generateMetadata({
   return { title: m ? `${m.title} interview questions` : undefined }
 }
 
-export default function InterviewListPage({ params }: PageProps<"/interview/[module]">) {
-  // params are read inside the boundary so the shared App Shell stays URL-independent.
-  return (
-    <Suspense fallback={<PageSkeleton />}>
-      <InterviewListContent params={params} />
-    </Suspense>
-  )
-}
-
-async function InterviewListContent({ params }: Pick<PageProps<"/interview/[module]">, "params">) {
+export default async function InterviewListPage({ params }: PageProps<"/interview/[module]">) {
   const { module } = await params
   const m = await getModule(module)
   if (!m || !m.interviewCount) notFound()
