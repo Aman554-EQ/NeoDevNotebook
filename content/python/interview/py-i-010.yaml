@@ -1,0 +1,41 @@
+id: py-i-010
+question: Why might `a is b` be True for small integers but False for larger ones?
+difficulty: medium
+tags:
+  - identity
+  - cpython
+  - caching
+shortAnswer: |
+  CPython pre-creates and reuses the integers −5 to 256 (and interns many strings), so equal
+  small values are often the same object. Larger ints created at runtime are separate
+  objects. This is an implementation detail, so equality must always use `==`.
+detailedAnswer: |
+  - **Small-int cache:** `int` objects from −5 to 256 are singletons in CPython.
+  - **Constant folding and sharing:** equal constants in the same compiled code block can be
+    the same object, which is why `a = 1000; b = 1000` in one script may give `a is b ==
+    True`, while values produced at runtime (`int("1000")`) don't.
+  - **String interning:** identifier-like string literals are interned automatically, and
+    `sys.intern(s)` interns explicitly (useful for many repeated keys).
+
+  None of this is guaranteed by the language. PyPy and other implementations behave
+  differently. The takeaway interviewers want: `is` compares identity, so never use it for
+  value equality.
+code:
+  language: python
+  code: |
+    import sys
+
+    a = int("256")
+    b = int("256")
+    c = int("1000")
+    d = int("1000")
+    print(a is b, c is d, c == d)
+    s1 = sys.intern("hello world!")
+    s2 = sys.intern("hello world!")
+    print(s1 is s2)
+pitfalls:
+  - Presenting caching as a language rule rather than a CPython detail.
+followUps:
+  - When is `sys.intern` useful?
+verify: |
+  assert (a is b) and not (c is d) and c == d and s1 is s2

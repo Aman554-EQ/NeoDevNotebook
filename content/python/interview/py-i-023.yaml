@@ -1,0 +1,38 @@
+id: py-i-023
+question: What's the difference between a list comprehension and a generator expression?
+difficulty: medium
+tags:
+  - comprehensions
+  - generators
+  - memory
+shortAnswer: |
+  `[x * x for x in data]` builds the whole list immediately, and it can be indexed and reused.
+  `(x * x for x in data)` creates a lazy generator that computes values on demand. It uses
+  constant memory and can only be iterated once. Pass generators straight into `sum`, `any`,
+  `max` or `"".join`.
+detailedAnswer: |
+  Choose a list when you need the results several times, need `len` or indexing, or the data
+  is small. Choose a generator expression for large or infinite streams, or for pipelines
+  where only one value at a time is needed.
+
+  `any(x > 10 for x in data)` short-circuits at the first match, and a list would compute
+  everything first.
+
+  Both have their own scope for the loop variable. Comprehensions were inlined in 3.12
+  (PEP 709) for speed, but the variable still doesn't leak.
+code:
+  language: python
+  code: |
+    import sys
+
+    squares_list = [x * x for x in range(100_000)]
+    squares_gen = (x * x for x in range(100_000))
+    print(sys.getsizeof(squares_list) > 100_000, sys.getsizeof(squares_gen) < 500)
+    print(sum(squares_gen), sum(squares_gen))  # the second sum finds it exhausted
+pitfalls:
+  - Reusing an exhausted generator.
+  - Wrapping a generator in a list 'just in case'.
+followUps:
+  - How do generators enable lazy pipelines?
+verify: |
+  assert sum(x * x for x in range(3)) == 5

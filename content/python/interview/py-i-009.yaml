@@ -1,0 +1,36 @@
+id: py-i-009
+question: Python is dynamically typed and strongly typed. What does each part mean?
+difficulty: simple
+tags:
+  - typing
+  - data-model
+shortAnswer: |
+  **Dynamic:** types belong to objects, not variables, and are checked at runtime, so one
+  name can refer to an int and later to a str. **Strong:** Python doesn't silently convert
+  between unrelated types, so `"1" + 1` raises `TypeError` instead of guessing.
+detailedAnswer: |
+  The two axes are independent. JavaScript is dynamic but weak (`"1" + 1 == "11"`), C is
+  static but fairly weak (implicit numeric conversions, pointer casts), and Java is static
+  and strong.
+
+  Python does allow some deliberate implicit conversions between numeric types
+  (`1 + 2.5`), because they're mathematically meaningful.
+
+  Type hints (`def f(x: int) -> str`) add **optional static checking** through tools like
+  mypy, without changing runtime behaviour.
+code:
+  language: python
+  code: |
+    value = 42
+    value = "now text"  # dynamic: the name can be rebound to another type
+    try:
+        "1" + 1  # strong: no silent conversion
+    except TypeError as err:
+        print("TypeError:", err)
+    print(1 + 2.5)  # numeric promotion is deliberate
+pitfalls:
+  - Confusing 'dynamic' with 'weak'.
+followUps:
+  - What do type hints change at runtime?
+verify: |
+  assert isinstance(value, str)

@@ -1,0 +1,37 @@
+id: py-i-050
+question: How does Python find a module when you `import` it?
+difficulty: medium
+tags:
+  - imports
+  - modules
+shortAnswer: |
+  It first checks the `sys.modules` cache. On a miss, it asks the finders on `sys.meta_path`,
+  which search the folders in `sys.path` in order: the script's directory (or the current one),
+  `PYTHONPATH`, the standard library, then site-packages. The first match is loaded, executed
+  **once**, cached in `sys.modules`, and bound to a name.
+detailedAnswer: |
+  Consequences:
+
+  - A local file named like a library (`random.py`, `json.py`) **shadows** it, because the
+    script folder comes first.
+  - Module-level code runs once per process. Later imports reuse the cached object, and
+    `importlib.reload` forces a re-run.
+  - Packages are directories with `__init__.py`, and `import a.b` imports `a` first.
+  - Diagnose with `python -c "import x; print(x.__file__)"` and `print(sys.path)`.
+
+  The machinery is customisable (`importlib`, import hooks), which is how zip imports and
+  namespace packages work.
+code:
+  language: python
+  code: |
+    import json
+    import sys
+
+    print(json is sys.modules["json"], "json" in sys.modules)
+    print(type(sys.path).__name__, json.__name__)
+pitfalls:
+  - Naming your own file after a standard module.
+followUps:
+  - How do you fix a circular import?
+verify: |
+  assert sys.modules['json'] is json

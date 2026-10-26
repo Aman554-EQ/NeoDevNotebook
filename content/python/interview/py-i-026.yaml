@@ -1,0 +1,49 @@
+id: py-i-026
+question: "`namedtuple` vs `dataclass`: when do you use each?"
+difficulty: medium
+tags:
+  - dataclasses
+  - namedtuple
+  - records
+shortAnswer: |
+  `namedtuple` (or `typing.NamedTuple`) is an immutable tuple with field names. It's
+  lightweight, unpackable and iterable, and it equals plain tuples. `@dataclass` generates
+  `__init__`, `__repr__` and `__eq__` for a normal class. It's mutable by default, supports
+  defaults, methods, type hints, `field(default_factory=...)`, `frozen=True`, `order=True`
+  and `slots=True`. Prefer dataclasses for domain objects.
+detailedAnswer: |
+  namedtuple strengths: tuple compatibility (unpacking, use as dict keys, small memory, and
+  returning "records" from functions such as `os.stat_result`).
+
+  namedtuple surprises: `Point(1, 2) == (1, 2)` is `True`, it's iterable and indexable (so a
+  field reorder silently breaks callers), and it's immutable (use `_replace` to change).
+
+  Dataclass strengths: a clear class with defaults, validation in `__post_init__`, explicit
+  equality, and options for immutability (`frozen`), ordering, and `slots=True` for memory.
+  Use `pydantic` when you need runtime validation of external data.
+code:
+  language: python
+  code: |
+    from collections import namedtuple
+    from dataclasses import dataclass, field
+
+    PointNT = namedtuple("PointNT", "x y")
+
+
+    @dataclass
+    class PointDC:
+        x: int
+        y: int
+        tags: list[str] = field(default_factory=list)
+
+
+    print(PointNT(1, 2) == (1, 2), PointDC(1, 2) == PointDC(1, 2))
+    p = PointDC(1, 2)
+    p.x = 5  # mutable by default
+    print(p, PointNT(1, 2)._replace(x=5))
+pitfalls:
+  - Using a mutable default in a dataclass without `default_factory`.
+followUps:
+  - What does `@dataclass(slots=True)` do?
+verify: |
+  assert PointNT(1, 2) == (1, 2) and p.x == 5

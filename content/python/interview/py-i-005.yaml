@@ -1,0 +1,46 @@
+id: py-i-005
+question: What's wrong with `def add(item, bucket=[])`? How do you fix it?
+difficulty: simple
+tags:
+  - functions
+  - mutability
+  - defaults
+shortAnswer: |
+  Default values are evaluated **once**, when `def` runs, not on each call. The same list is
+  reused by every call that doesn't pass `bucket`, so items pile up across calls. Use `None`
+  as the default and create a new list inside the function.
+detailedAnswer: |
+  The default object is stored on the function (`add.__defaults__`). The first call appends
+  to it, and the next call sees the already-modified list.
+
+  The idiom:
+
+  - `def add(item, bucket=None):`
+  - `if bucket is None: bucket = []`
+
+  The same trap appears with dicts and sets as defaults, and with mutable class attributes
+  (shared by all instances). Linters flag it (for example `ruff` rule B006). Occasionally the
+  behaviour is used on purpose as a cache, but that's better done with `functools.cache`.
+code:
+  language: python
+  code: |
+    def add_buggy(item, bucket=[]):
+        bucket.append(item)
+        return bucket
+
+
+    def add(item, bucket=None):
+        if bucket is None:
+            bucket = []
+        bucket.append(item)
+        return bucket
+
+
+    print(add_buggy(1), add_buggy(2))
+    print(add(1), add(2))
+pitfalls:
+  - Using `if not bucket:`, which also replaces a legitimately passed empty list.
+followUps:
+  - Where else does 'evaluated once at definition time' matter?
+verify: |
+  assert add(1) == [1] and add_buggy.__defaults__[0] == [1, 2]

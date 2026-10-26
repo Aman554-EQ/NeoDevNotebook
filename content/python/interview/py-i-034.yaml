@@ -1,0 +1,49 @@
+id: py-i-034
+question: What's the difference between `@classmethod` and `@staticmethod`?
+difficulty: medium
+tags:
+  - oop
+  - classmethod
+  - staticmethod
+shortAnswer: |
+  A classmethod receives the class (`cls`) as its first argument, so it can construct
+  instances and respects subclasses. It's the standard tool for alternative constructors
+  like `Date.from_string(...)`. A staticmethod receives neither `self` nor `cls`. It's a plain
+  function placed in the class namespace for organisation.
+detailedAnswer: |
+  Because a classmethod gets `cls`, calling `Child.from_dict(...)` builds a `Child`, not the
+  parent. That makes it correct with inheritance, while a hard-coded `return Parent(...)`
+  wouldn't be.
+
+  Use a staticmethod for a helper that logically belongs to the class but needs no class or
+  instance state, such as a validation rule. A module-level function is often just as good.
+
+  Both can be called on the class or on an instance.
+code:
+  language: python
+  code: |
+    class Money:
+        def __init__(self, cents: int) -> None:
+            self.cents = cents
+
+        @classmethod
+        def from_string(cls, text: str) -> "Money":
+            return cls(round(float(text) * 100))
+
+        @staticmethod
+        def is_valid(text: str) -> bool:
+            return text.replace(".", "", 1).isdigit()
+
+
+    class Euro(Money):
+        pass
+
+
+    e = Euro.from_string("4.20")
+    print(type(e).__name__, e.cents, Money.is_valid("4.20"), Money.is_valid("x"))
+pitfalls:
+  - Hard-coding the class name inside an alternative constructor.
+followUps:
+  - When would a module-level function be better than a staticmethod?
+verify: |
+  assert isinstance(e, Euro) and e.cents == 420

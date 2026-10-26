@@ -1,0 +1,55 @@
+id: py-i-031
+question: What does `yield from` do beyond a simple loop of `yield`s?
+difficulty: hard
+tags:
+  - generators
+  - delegation
+shortAnswer: |
+  `yield from sub` yields every value from `sub`, and it also **delegates** fully: values
+  sent with `send()` and exceptions from `throw()` go to the sub-generator, and the
+  expression evaluates to the sub-generator's `return` value. A `for` loop with `yield`
+  gives only the first part.
+detailedAnswer: |
+  Typical uses:
+
+  - Flattening and recursive generators: `yield from walk(child)`.
+  - Composing generators, where an outer one combines several inner ones.
+  - Getting a result from a sub-generator: `total = yield from summarise()`, where the inner
+    generator `return`s a value via `StopIteration.value`.
+
+  Historically, `yield from` was the foundation of generator-based coroutines before
+  `async`/`await` (PEP 380, Python 3.3). `await` works on similar delegation principles.
+code:
+  language: python
+  code: |
+    def averager():
+        total = count = 0
+        while True:
+            value = yield
+            if value is None:
+                return total / count
+            total += value
+            count += 1
+
+
+    def collector(results):
+        result = yield from averager()  # sends are forwarded to averager
+        results.append(result)
+
+
+    results = []
+    gen = collector(results)
+    next(gen)  # start it
+    for v in [10, 20, 60]:
+        gen.send(v)
+    try:
+        gen.send(None)
+    except StopIteration:
+        pass
+    print(results)
+pitfalls:
+  - Saying it's 'just shorter syntax for a loop'.
+followUps:
+  - How does `await` relate to `yield from`?
+verify: |
+  assert results == [30.0]

@@ -1,0 +1,45 @@
+id: py-i-043
+question: How does CPython execute a Python program?
+difficulty: medium
+tags:
+  - cpython
+  - bytecode
+  - interpreter
+shortAnswer: |
+  CPython parses the source into an abstract syntax tree, compiles it to **bytecode** (code
+  objects), and runs that bytecode in a virtual machine: a loop that executes instructions
+  using a value stack. Imported modules' bytecode is cached in `__pycache__/*.pyc`. Since
+  3.11, the interpreter specialises hot instructions adaptively for speed.
+detailedAnswer: |
+  Steps: tokenize → parse to an AST → compile to a code object (bytecode, constants, names) →
+  evaluate. `dis.dis(func)` shows the bytecode, and `ast.parse` shows the tree.
+
+  Facts worth knowing:
+
+  - Syntax errors are found at compile time, before any line runs.
+  - Bytecode is version-specific and not a stable API.
+  - "Interpreted" is a simplification: there's always a compile step, just not to machine
+    code. PyPy adds a JIT, and CPython 3.13 has an experimental JIT build.
+  - The 3.11+ specialising adaptive interpreter replaces generic instructions (like
+    `BINARY_OP`) with type-specialised versions once a hot path's types are stable.
+code:
+  language: python
+  code: |
+    import ast
+    import dis
+
+
+    def add(a, b):
+        return a + b
+
+
+    print(type(ast.parse("x = 1 + 2").body[0]).__name__)
+    ops = [ins.opname for ins in dis.get_instructions(add)]
+    print("BINARY_OP" in ops, add.__code__.co_varnames)
+pitfalls:
+  - Saying Python has no compilation step.
+followUps:
+  - What's in a `.pyc` file?
+  - Why is Python slower than C?
+verify: |
+  assert 'BINARY_OP' in ops

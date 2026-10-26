@@ -1,0 +1,50 @@
+id: py-i-015
+question: How does a Python dict work internally, and what are its time complexities?
+difficulty: medium
+tags:
+  - dict
+  - hashing
+  - complexity
+shortAnswer: |
+  A dict is a hash table. `hash(key)` picks a slot, and collisions are resolved by probing
+  other slots (open addressing). Lookup, insert and delete are O(1) on average and O(n) in
+  the pathological worst case. CPython stores entries in a dense array in insertion order,
+  plus a sparse index table, which is why dicts preserve order.
+detailedAnswer: |
+  Steps for `d[key]`:
+
+  1. Compute `hash(key)` and map it to an index in the index table (`hash & (size - 1)`).
+  2. If that slot points to an entry whose key **is** or **==** the key, return the value.
+  3. Otherwise follow CPython's probe sequence (driven by the higher hash bits) to the next
+     slot, until a match or an empty slot (`KeyError`).
+
+  The table is kept at most about 2/3 full. When it grows past that, CPython allocates a
+  bigger table and reinserts everything. That's O(n), but rare, so inserts are amortized
+  O(1).
+
+  Since Python 3.6 (guaranteed from 3.7), the compact layout (a small index array plus a
+  dense entries array) uses less memory and iterates in insertion order.
+
+  Worst case: many keys with colliding hashes degrade lookups to O(n). String hashing is
+  randomized per process (`PYTHONHASHSEED`) to make deliberate collision attacks
+  impractical.
+code:
+  language: python
+  code: |
+    import sys
+
+    d = {}
+    sizes = []
+    for i in range(10):
+        d[i] = i
+        sizes.append(sys.getsizeof(d))
+    print(sizes)  # size jumps when the table is resized
+    print(list({"b": 1, "a": 2}))  # insertion order is preserved
+pitfalls:
+  - Calling dict access 'always O(1)'. It's average-case and amortized.
+  - Forgetting the `==` check after a hash match.
+followUps:
+  - Why must equal objects have equal hashes?
+  - What happens if you mutate a key after inserting it?
+verify: |
+  assert sizes[4] < sizes[5] and list({'b': 1, 'a': 2}) == ['b', 'a']

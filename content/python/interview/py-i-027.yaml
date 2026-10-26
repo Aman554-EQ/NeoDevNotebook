@@ -1,0 +1,59 @@
+id: py-i-027
+question: How do decorators work? Write one that times a function.
+difficulty: medium
+tags:
+  - decorators
+  - closures
+  - functools
+shortAnswer: |
+  A decorator is a callable that takes a function and returns a replacement, usually a
+  wrapper closure that runs code before and after calling the original. `@timed` above
+  `def f` is exactly `f = timed(f)`, executed once at definition time.
+detailedAnswer: |
+  Functions are first-class objects, so they can be passed around, returned and stored. A
+  typical decorator:
+
+  1. Accepts `func`.
+  2. Defines `wrapper(*args, **kwargs)` that does extra work and calls
+     `func(*args, **kwargs)`.
+  3. Uses `@functools.wraps(func)` to copy the name and docstring onto the wrapper.
+  4. Returns the wrapper.
+
+  Decorators with arguments (`@retry(3)`) add an outer factory layer, and stacked decorators
+  apply bottom-up. Real-world examples: `functools.cache`, `@property`, `@app.route(...)` in
+  Flask, and `@pytest.fixture`.
+code:
+  language: python
+  code: |
+    import functools
+    import time
+
+
+    def timed(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            start = time.perf_counter()
+            try:
+                return func(*args, **kwargs)
+            finally:
+                wrapper.last_seconds = time.perf_counter() - start
+
+        wrapper.last_seconds = 0.0
+        return wrapper
+
+
+    @timed
+    def slow_sum(n: int) -> int:
+        """Add up 0..n-1."""
+        return sum(range(n))
+
+
+    print(slow_sum(100_000), slow_sum.__name__, slow_sum.last_seconds >= 0)
+pitfalls:
+  - Forgetting `return` in the wrapper.
+  - Omitting `functools.wraps`.
+followUps:
+  - How do you write a decorator that accepts arguments?
+  - In what order do stacked decorators run?
+verify: |
+  assert slow_sum.__doc__ == 'Add up 0..n-1.' and slow_sum(10) == 45

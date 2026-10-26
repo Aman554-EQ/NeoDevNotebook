@@ -1,0 +1,36 @@
+id: py-i-011
+question: What does `if __name__ == "__main__":` do?
+difficulty: easy
+tags:
+  - modules
+  - imports
+shortAnswer: |
+  Every module has a `__name__`. It's the module's import name when imported, and `"__main__"`
+  when the file is run directly. The guard runs code (CLI handling, demos) only when the file
+  is executed, not when another module imports it.
+detailedAnswer: |
+  Without the guard, importing a module also runs its top-level script code: printing,
+  starting servers, parsing `sys.argv`. With it, a file can be both a reusable module and a
+  runnable script.
+
+  It's also **required** for `multiprocessing` and `ProcessPoolExecutor` on Windows and
+  macOS (spawn start method). Child processes re-import the main module, and unguarded code
+  would spawn processes recursively.
+
+  A common structure is a `main()` function, then `if __name__ == "__main__": main()`.
+code:
+  language: python
+  code: |
+    def main() -> None:
+        print("running as a script")
+
+
+    print("__name__ is", __name__)
+    if __name__ == "__main__":
+        main()
+pitfalls:
+  - Putting function definitions inside the guard, which makes them unavailable to importers.
+followUps:
+  - How does `python -m package.module` affect `__name__`?
+verify: |
+  assert __name__ == '__main__'

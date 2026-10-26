@@ -1,0 +1,37 @@
+id: py-i-002
+question: What is the difference between `is` and `==`?
+difficulty: easy
+tags:
+  - identity
+  - equality
+shortAnswer: |
+  `==` compares **values** (it calls `__eq__`). `is` compares **identity**: are both names
+  bound to the exact same object? Use `is` only for singletons like `None`, `True` and
+  `False`, and `==` for everything else.
+detailedAnswer: |
+  `a is b` is `True` exactly when `id(a) == id(b)`. Two distinct lists with equal contents are
+  `==` but not `is`.
+
+  Using `is` for numbers or strings sometimes "works" because CPython caches small ints
+  (−5 to 256) and interns some strings. That's an implementation detail, not a language
+  guarantee, and it can differ between versions or when values are computed at runtime.
+  CPython even emits `SyntaxWarning: "is" with 'int' literal` for code like `x is 1000`.
+
+  `x is None` is preferred over `x == None`, because a class can override `__eq__` to return
+  anything, while `None` is guaranteed to be a single object.
+code:
+  language: python
+  code: |
+    a = [1, 2]
+    b = [1, 2]
+    c = a
+    print(a == b, a is b, a is c)
+
+    x = None
+    print(x is None)
+pitfalls:
+  - "Using `is` to compare strings or numbers: it may pass in tests and fail later."
+followUps:
+  - Why does `256 is 256` behave differently from `257 is 257` in some contexts?
+verify: |
+  assert (a == b, a is b, a is c) == (True, False, True)

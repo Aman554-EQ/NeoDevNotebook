@@ -1,0 +1,49 @@
+id: py-i-042
+question: How does Python manage memory and garbage collection?
+difficulty: hard
+tags:
+  - memory
+  - gc
+  - cpython
+shortAnswer: |
+  CPython frees most objects immediately through **reference counting**: when the last
+  reference disappears, the object is deallocated. A generational **cycle collector** (`gc`
+  module) periodically finds groups of objects that only reference each other, which refcounting
+  can't free. Small objects come from a specialised allocator (pymalloc).
+detailedAnswer: |
+  - Every object stores a reference count. Assigning, passing and storing increment it, and
+    `del`, leaving scope and overwriting decrement it. At zero it's freed and `__del__` runs.
+  - Cycles (`a.ref = b; b.ref = a`) keep counts above zero, so the cycle GC, which tracks
+    container objects in generations, detects and frees unreachable cycles.
+  - `weakref` creates references that don't increase the count. That's useful for caches and
+    observers, to avoid keeping objects alive.
+  - Leaks in Python usually mean something still **references** the object: global caches,
+    lists that keep growing, closures, or exception tracebacks.
+
+  Tools: `sys.getrefcount`, `gc.collect()`, `tracemalloc` (who allocated), `weakref`.
+code:
+  language: python
+  code: |
+    import gc
+    import weakref
+
+
+    class Node:
+        pass
+
+
+    a, b = Node(), Node()
+    a.other, b.other = b, a  # a reference cycle
+    probe = weakref.ref(a)
+    del a, b
+    print("alive before collect:", probe() is not None)
+    gc.collect()
+    print("alive after collect:", probe() is not None)
+pitfalls:
+  - Thinking `del x` deletes the object (it deletes a name).
+  - Relying on `__del__` for important cleanup.
+followUps:
+  - How would you find a memory leak?
+  - What is a weak reference?
+verify: |
+  assert probe() is None

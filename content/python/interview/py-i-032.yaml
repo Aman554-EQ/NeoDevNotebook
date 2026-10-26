@@ -1,0 +1,66 @@
+id: py-i-032
+question: What is a context manager? Write one with and without contextlib.
+difficulty: medium
+tags:
+  - context-managers
+  - contextlib
+  - resources
+shortAnswer: |
+  A context manager defines setup and guaranteed cleanup around a `with` block, using
+  `__enter__` and `__exit__`. `__exit__` runs even if the block raises, and it can suppress
+  the error by returning `True`. `@contextlib.contextmanager` builds one from a generator:
+  setup, `yield`, then cleanup in `finally`.
+detailedAnswer: |
+  `with` replaces `try`/`finally` boilerplate for resources: files, locks, DB transactions,
+  temporary directories, and patched settings in tests.
+
+  `__exit__(exc_type, exc, tb)` receives the exception details (or three `None`s). Return a
+  truthy value only if you deliberately handled the error.
+
+  Useful helpers: `contextlib.suppress`, `ExitStack` (a dynamic number of managers),
+  `nullcontext`, `closing` and `redirect_stdout`. Async code uses `async with` and
+  `__aenter__`/`__aexit__`.
+code:
+  language: python
+  code: |
+    from contextlib import contextmanager
+
+
+    class Transaction:
+        def __init__(self, log):
+            self.log = log
+
+        def __enter__(self):
+            self.log.append("begin")
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.log.append("rollback" if exc_type else "commit")
+            return False  # never hide errors
+
+
+    @contextmanager
+    def tag(log, name):
+        log.append(f"<{name}>")
+        try:
+            yield
+        finally:
+            log.append(f"</{name}>")
+
+
+    log = []
+    with Transaction(log):
+        pass
+    try:
+        with Transaction(log), tag(log, "p"):
+            raise ValueError("boom")
+    except ValueError:
+        pass
+    print(log)
+pitfalls:
+  - Forgetting `try/finally` around `yield`.
+  - Returning True from `__exit__` by accident.
+followUps:
+  - When would you use `ExitStack`?
+verify: |
+  assert log == ['begin', 'commit', 'begin', '<p>', '</p>', 'rollback']

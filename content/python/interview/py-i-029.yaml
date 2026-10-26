@@ -1,0 +1,42 @@
+id: py-i-029
+question: What is a closure, and what is the late-binding problem?
+difficulty: hard
+tags:
+  - closures
+  - scope
+  - late-binding
+shortAnswer: |
+  A closure is a function that remembers variables from the scope where it was defined,
+  even after that scope has returned. Python looks up those variables **when the inner
+  function runs** (late binding), so functions created in a loop all see the loop
+  variable's final value, unless you bind the value at creation time with a default
+  argument or `functools.partial`.
+detailedAnswer: |
+  Under the hood, captured variables live in **cells**, shared between the outer function
+  and the inner one (`func.__closure__`). All lambdas created in one loop share the same
+  cell for the loop variable, and when they're called later, they read its current value.
+
+  Fixes:
+
+  - `lambda i=i: i`: defaults are evaluated at definition time.
+  - `functools.partial(f, i)`.
+  - A factory function: `def make(i): return lambda: i`, which gives each call its own cell.
+
+  Closures are useful for private state (counters, memoisation), decorators, and callbacks
+  that carry context.
+code:
+  language: python
+  code: |
+    from functools import partial
+
+    late = [lambda: i for i in range(3)]
+    bound = [lambda i=i: i for i in range(3)]
+    via_partial = [partial(lambda x: x, i) for i in range(3)]
+    print([f() for f in late], [f() for f in bound], [f() for f in via_partial])
+    print(late[0].__closure__ is None)  # comprehension variable lives in a cell
+pitfalls:
+  - Thinking a list comprehension fixes late binding on its own.
+followUps:
+  - What's stored in `func.__closure__`?
+verify: |
+  assert [f() for f in late] == [2, 2, 2] and [f() for f in bound] == [0, 1, 2]

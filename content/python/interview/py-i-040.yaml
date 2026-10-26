@@ -1,0 +1,60 @@
+id: py-i-040
+question: What is the GIL, and how does it affect multithreaded Python?
+difficulty: hard
+tags:
+  - gil
+  - threads
+  - cpython
+shortAnswer: |
+  The Global Interpreter Lock is a mutex in (standard) CPython that lets only one thread
+  execute Python bytecode at a time. Threads still help with I/O-bound work, because they
+  release the GIL while waiting, but CPU-bound pure-Python code doesn't run in parallel on
+  multiple cores. Use processes, or C extensions that release the GIL, for that.
+detailedAnswer: |
+  Why it exists: CPython's memory management (reference counting) isn't thread-safe on its
+  own. One big lock made the interpreter simple and single-threaded code fast.
+
+  Consequences:
+
+  - **I/O-bound** (network, disk, sleeping): threads work well, because blocking calls
+    release the GIL.
+  - **CPU-bound** pure Python: threads take turns, so there's no speed-up. Use
+    `multiprocessing` / `ProcessPoolExecutor`, or vectorised libraries (NumPy releases the GIL
+    in its C loops).
+  - The GIL doesn't make your code thread-safe. `count += 1` is several bytecodes, and a
+    thread switch can happen in between, so shared state still needs locks.
+
+  Python 3.13 ships an **experimental free-threaded build** (PEP 703, `python3.13t`) that
+  removes the GIL. It isn't the default yet.
+code:
+  language: python
+  code: |
+    import sys
+    import threading
+
+    total = 0
+    lock = threading.Lock()
+
+
+    def work():
+        global total
+        for _ in range(50_000):
+            with lock:  # the GIL alone would NOT make += safe
+                total += 1
+
+
+    threads = [threading.Thread(target=work) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    gil_enabled = getattr(sys, "_is_gil_enabled", lambda: True)()
+    print(total, "GIL enabled:", gil_enabled)
+pitfalls:
+  - Saying the GIL makes Python code thread-safe.
+  - Saying threads are useless in Python.
+followUps:
+  - Threads vs processes vs asyncio?
+  - What changes in free-threaded 3.13?
+verify: |
+  assert total == 200_000
