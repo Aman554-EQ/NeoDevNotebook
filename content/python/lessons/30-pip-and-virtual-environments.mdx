@@ -1,7 +1,7 @@
 ---
 title: pip and virtual environments
 summary: Give every project its own isolated set of packages. Create and activate virtual environments, install and pin dependencies with pip, and fix the classic "I installed it but Python can't find it" problem.
-estimatedMinutes: 15
+estimatedMinutes: 22
 difficulty: simple
 section: Packages, Imports & Tooling
 objectives:
@@ -87,6 +87,176 @@ prints the path pip installs into). If they differ, you installed into a differe
   The concepts are identical: isolated environment, pinned dependencies, install from a list.
 </Callout>
 
+## Variations
+
+### What can go in `requirements.txt`
+
+```text title="requirements.txt"
+# exact pins: the same versions everywhere (applications, deployments)
+requests==2.32.3
+flask==3.0.3
+
+# ranges: accept compatible updates (libraries)
+pydantic>=2.7,<3
+numpy~=2.1.0            # "compatible release": >=2.1.0, <2.2
+
+# extras: optional feature sets a package offers
+uvicorn[standard]==0.30.1
+
+# environment markers: only on some platforms or Python versions
+colorama==0.4.6; sys_platform == "win32"
+tomli==2.0.1; python_version < "3.11"
+
+# include another file, and install the current project in editable mode
+-r requirements-dev.txt
+-e .
+```
+
+Each line is a **requirement specifier**: a name, optional extras in brackets, an optional version
+range and an optional marker after `;`. `pip install -r requirements.txt` reads them all, and `-r`
+lets one file include another (for example, development tools on top of runtime dependencies).
+
+### pip commands for everyday problems
+
+```bash title="Terminal"
+python -m pip install "requests>=2.32,<3"     # quote ranges so the shell doesn't see > and <
+python -m pip install --upgrade requests       # newest version allowed by constraints
+python -m pip install -e ".[dev]"              # this project, editable, with its dev extras
+python -m pip check                            # are installed packages compatible with each other?
+python -m pip list --outdated                  # what has newer releases?
+python -m pip show -f requests                 # metadata plus every installed file
+python -m pip install requests --dry-run       # what WOULD change, without changing anything
+python -m pip cache purge                      # clear downloaded wheels
+```
+
+- `pip check` reports broken dependency combinations, such as a package needing a newer version
+  of something you downgraded.
+- `-e` (editable) installs a link to your source folder, so code changes take effect without
+  reinstalling: the normal way to develop a package.
+- `--dry-run` is the safe way to see the effect of an upgrade first.
+
+### Creating a virtual environment from Python
+
+```python title="make_venv.py"
+import sys
+import tempfile
+import venv
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as tmp:
+    env_dir = Path(tmp, ".venv")
+    venv.create(env_dir, with_pip=False)       # what `python -m venv .venv` does
+
+    cfg = (env_dir / "pyvenv.cfg").read_text(encoding="utf-8")
+    keys = sorted(line.split("=")[0].strip() for line in cfg.splitlines() if "=" in line)
+    print("pyvenv.cfg keys include home and version:", {"home", "version"} <= set(keys))
+
+    scripts = env_dir / ("Scripts" if sys.platform == "win32" else "bin")
+    python_name = "python.exe" if sys.platform == "win32" else "python"
+    print("has its own interpreter entry:", (scripts / python_name).exists())
+    site = list(env_dir.rglob("site-packages"))
+    print("has its own site-packages:", len(site) == 1, "| packages inside:",
+          [p.name for p in site[0].iterdir() if not p.name.startswith("_")])
+```
+
+```text title="Output"
+pyvenv.cfg keys include home and version: True
+has its own interpreter entry: True
+has its own site-packages: True | packages inside: []
+```
+
+A venv really is just a folder: `pyvenv.cfg` records which base Python it was made from (`home`),
+the `Scripts/` (Windows) or `bin/` folder holds its interpreter and activation scripts, and
+`site-packages` starts empty. Deleting the folder deletes the environment.
+
+### Version numbers are not strings
+
+```python title="versions.py"
+def parse(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+pairs = [("2.10.0", "2.9.1"), ("3.12.10", "3.12.9")]
+for a, b in pairs:
+    print(f"{a:7} > {b:7}  as strings: {a > b!s:5}  as numbers: {parse(a) > parse(b)}")
+print(sorted(["1.10", "1.9", "1.2", "1.11"], key=parse))
+print("1.0 == 1.0.0 as tuples:", parse("1.0") == parse("1.0.0"))
+```
+
+```text title="Output"
+2.10.0  > 2.9.1    as strings: False  as numbers: True
+3.12.10 > 3.12.9   as strings: False  as numbers: True
+['1.2', '1.9', '1.10', '1.11']
+1.0 == 1.0.0 as tuples: False
+```
+
+String comparison goes character by character, so `"2.10.0" < "2.9.1"` because `"1" < "9"`.
+Splitting into integer tuples compares each component numerically. Tuples still get one case wrong: `1.0` and
+`1.0.0` are the same version, but `(1, 0) != (1, 0, 0)`. Real tools use the `packaging` library,
+which handles that and pre-releases like `2.0rc1`.
+
+## Putting it together: checking requirements
+
+```python title="check_requirements.py"
+import re
+
+REQUIREMENTS = """\
+requests==2.32.3
+flask>=3.0,<4
+numpy>=2.0
+pydantic==2.7.4
+rich>=13
+# a comment
+"""
+INSTALLED = {"requests": "2.32.3", "flask": "2.3.3", "numpy": "2.1.2", "pydantic": "2.8.0"}
+
+SPEC = re.compile(r"^([A-Za-z0-9_.-]+)\s*(.*)$")
+OPS = {
+    "==": lambda have, want: have == want,
+    ">=": lambda have, want: have >= want,
+    "<": lambda have, want: have < want,
+}
+
+
+def version(text: str) -> tuple[int, ...]:
+    return tuple(int(p) for p in text.split("."))
+
+
+def satisfies(have: str, constraints: str) -> bool:
+    for part in filter(None, (c.strip() for c in constraints.split(","))):
+        op = next(o for o in ("==", ">=", "<") if part.startswith(o))
+        if not OPS[op](version(have), version(part[len(op):])):
+            return False
+    return True
+
+
+for line in REQUIREMENTS.splitlines():
+    line = line.split("#")[0].strip()
+    if not line:
+        continue
+    name, constraints = SPEC.match(line).groups()
+    have = INSTALLED.get(name.lower())
+    if have is None:
+        status = "MISSING"
+    elif satisfies(have, constraints):
+        status = "ok"
+    else:
+        status = f"CONFLICT (installed {have})"
+    print(f"{name:9} {constraints or '(any)':10} {status}")
+```
+
+```text title="Output"
+requests  ==2.32.3   ok
+flask     >=3.0,<4   CONFLICT (installed 2.3.3)
+numpy     >=2.0      ok
+pydantic  ==2.7.4    CONFLICT (installed 2.8.0)
+rich      >=13       MISSING
+```
+
+The checker parses each requirement into a name and a list of constraints, compares versions as
+integer tuples, and reports what `pip check` and a fresh `pip install -r` would complain about:
+`flask` is too old, `pydantic` is newer than the exact pin, and `rich` isn't installed.
+
 ## Common mistakes
 
 <Callout type="warning" title="pip install with the wrong pip">
@@ -110,11 +280,34 @@ prints the path pip installs into). If they differ, you installed into a differe
   pinned versions in `requirements.txt` make it identical to yours.
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: why run `python -m pip install x` instead of `pip install x`?"
+>
+  `python -m pip` uses the pip that belongs to **that** interpreter, so packages land where your
+  code will run. A bare `pip` may belong to a different Python on your PATH.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: what does `numpy~=2.1.0` allow?">
+  Any `2.1.x` release from `2.1.0` up, but not `2.2.0`: "compatible release" fixes every component
+  except the last one given.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: should `.venv/` be committed to git?">
+  No. It's machine-specific and large. Commit `requirements.txt` or `pyproject.toml` (plus a lock
+  file if you use one), and recreate the environment from it.
+</Reveal>
+
 <KeyTakeaways>
 
 - One virtual environment per project: `python -m venv .venv`, then activate it.
 - Always use `python -m pip …`, so packages go where your `python` looks.
 - Pin with `pip freeze > requirements.txt`, and rebuild with `pip install -r`.
 - "Installed but not found" almost always means two different environments.
+- Requirement lines combine a name, extras, version ranges and environment markers.
+- `pip check`, `pip list --outdated` and `--dry-run` diagnose environments before you change them.
+- Compare versions as numbers (or with `packaging`), never as plain strings.
 
 </KeyTakeaways>
+
+{/* enriched */}

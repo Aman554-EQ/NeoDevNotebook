@@ -1,7 +1,7 @@
 ---
 title: print, logging and assertions
 summary: Know when a quick print is fine, when to switch to logging (levels, loggers, formats), how assert documents assumptions, and how to shrink a bug to a minimal reproduction.
-estimatedMinutes: 15
+estimatedMinutes: 26
 difficulty: simple
 section: Debugging
 objectives:
@@ -111,6 +111,295 @@ When a bug hides in a big program, cut it down until it's tiny:
 3. Stop when removing anything makes it disappear. The remaining lines point at the cause, and
    they're exactly what you'd paste into a bug report or a question.
 
+## Variations
+
+### Handlers: one logger, several destinations
+
+```python title="handlers.py"
+import io
+import logging
+import sys
+
+log = logging.getLogger("app")
+log.setLevel(logging.DEBUG)                      # the logger lets everything through...
+
+console = logging.StreamHandler(sys.stdout)
+console.setLevel(logging.WARNING)                # ...the console shows only problems
+console.setFormatter(logging.Formatter("console | %(levelname)s %(message)s"))
+
+audit_buffer = io.StringIO()                     # stands in for a log FILE here
+audit = logging.StreamHandler(audit_buffer)
+audit.setLevel(logging.DEBUG)                    # the "file" records everything
+audit.setFormatter(logging.Formatter("%(levelname)-7s %(name)s %(funcName)s:%(lineno)d %(message)s"))
+
+log.addHandler(console)
+log.addHandler(audit)
+
+
+def sync():
+    log.debug("starting sync")
+    log.info("synced %d records", 42)
+    log.warning("3 records skipped")
+
+
+sync()
+print("--- audit log ---")
+print(audit_buffer.getvalue().strip())
+```
+
+```text title="Output"
+console | WARNING 3 records skipped
+--- audit log ---
+DEBUG   app sync:22 starting sync
+INFO    app sync:23 synced 42 records
+WARNING app sync:24 3 records skipped
+```
+
+- A **logger** decides which messages exist; each **handler** decides where they go and filters
+  again by its own level. Here the console shows warnings only, while the audit log keeps
+  everything.
+- Formatter fields like `%(funcName)s` and `%(lineno)d` record where each message came from. In a
+  real app the second handler would be `logging.FileHandler("app.log")`.
+
+### Exceptions and context in log records
+
+```python title="log_context.py"
+import logging
+import re
+import sys
+
+
+class ShortPaths(logging.Formatter):
+    def formatException(self, exc_info) -> str:          # shorten file paths in tracebacks
+        return re.sub(r'File ".*?([^\\/]+\.py)"', r'File "\1"', super().formatException(exc_info))
+
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(ShortPaths("%(levelname)s [%(request_id)s] %(message)s"))
+logging.basicConfig(level=logging.INFO, handlers=[handler])
+base = logging.getLogger("api")
+log = logging.LoggerAdapter(base, {"request_id": "req-7f3a"})   # adds the id to every record
+
+
+def handle(payload):
+    log.info("received %d key(s)", len(payload))
+    try:
+        return 100 / payload["items"]
+    except ZeroDivisionError:
+        log.exception("could not compute share")                 # ERROR + traceback
+        return None
+
+
+handle({"items": 0})
+```
+
+```text title="Output"
+INFO [req-7f3a] received 1 key(s)
+ERROR [req-7f3a] could not compute share
+Traceback (most recent call last):
+  File "sample.py", line 21, in handle
+    return 100 / payload["items"]
+           ~~~~^~~~~~~~~~~~~~~~~~
+ZeroDivisionError: division by zero
+```
+
+- `log.exception(...)` (inside `except`) logs at ERROR level **and** appends the full traceback,
+  so the cause is never lost.
+- A `LoggerAdapter` (or `extra={...}`) attaches context such as a request id to each record, which
+  is how you follow one request through thousands of interleaved log lines.
+- Overriding `Formatter.formatException` customises how tracebacks appear; here it trims file paths
+  to the file name.
+
+### Configuring logging from a dict
+
+```python title="dict_config.py"
+import logging
+import logging.config
+
+logging.config.dictConfig({
+    "version": 1,
+    "formatters": {"short": {"format": "%(name)s: %(levelname)s %(message)s"}},
+    "handlers": {"out": {"class": "logging.StreamHandler", "stream": "ext://sys.stdout",
+                         "formatter": "short"}},
+    "loggers": {
+        "shop": {"level": "INFO", "handlers": ["out"]},
+        "shop.db": {"level": "WARNING"},                  # quieter child, same handler
+    },
+})
+
+logging.getLogger("shop.cart").info("item added")         # inherits shop's level and handler
+logging.getLogger("shop.db").info("query took 3ms")       # filtered: below WARNING
+logging.getLogger("shop.db").warning("slow query: 2.1s")
+```
+
+```text title="Output"
+shop.cart: INFO item added
+shop.db: WARNING slow query: 2.1s
+```
+
+Real applications describe logging **once**, often in a config file loaded at start-up, instead of
+calling `basicConfig` in many places. Child loggers propagate records to their parents' handlers,
+so `shop.cart` and `shop.db` both print through the `out` handler set on `shop`.
+
+### The `warnings` module
+
+```python title="warnings_demo.py"
+import warnings
+
+
+def old_api(x):
+    warnings.warn("old_api() is deprecated; use new_api()", DeprecationWarning, stacklevel=2)
+    return x * 2
+
+
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")              # show every warning, even repeats
+    old_api(1)
+    old_api(2)
+print(len(caught), caught[0].category.__name__, str(caught[0].message))
+
+with warnings.catch_warnings():
+    warnings.simplefilter("error")               # turn warnings into exceptions (great in tests)
+    try:
+        old_api(3)
+    except DeprecationWarning as err:
+        print("raised:", err)
+```
+
+```text title="Output"
+2 DeprecationWarning old_api() is deprecated; use new_api()
+raised: old_api() is deprecated; use new_api()
+```
+
+Warnings report problems that aren't errors **yet**: deprecated functions, suspicious usage.
+`stacklevel=2` points the warning at the **caller's** line. Running tests with warnings turned into
+errors (`python -W error` or `simplefilter("error")`) catches deprecated calls before an upgrade
+removes them.
+
+### Printing nested data readably
+
+```python title="pretty_print.py"
+from pprint import pformat, pprint
+
+order = {
+    "id": 1042,
+    "customer": {"name": "Ada", "tags": ["vip", "early-adopter"], "address": {"city": "London"}},
+    "items": [{"sku": "pen", "qty": 3}, {"sku": "notebook", "qty": 1}],
+}
+print(order)                               # one long line
+pprint(order, width=60, sort_dicts=False)  # one key per line once it doesn't fit
+print(repr("tab\there"), str("tab\there"))
+print(pformat(list(range(30)), compact=True, width=50))
+```
+
+```text title="Output"
+{'id': 1042, 'customer': {'name': 'Ada', 'tags': ['vip', 'early-adopter'], 'address': {'city': 'London'}}, 'items': [{'sku': 'pen', 'qty': 3}, {'sku': 'notebook', 'qty': 1}]}
+{'id': 1042,
+ 'customer': {'name': 'Ada',
+              'tags': ['vip', 'early-adopter'],
+              'address': {'city': 'London'}},
+ 'items': [{'sku': 'pen', 'qty': 3},
+           {'sku': 'notebook', 'qty': 1}]}
+'tab\there' tab	here
+[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+ 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+ 27, 28, 29]
+```
+
+`pprint` lays out nested dicts and lists so you can actually read them while debugging; `pformat`
+returns the same text as a string (for logging). `repr()` shows hidden characters like tabs, which
+`str()` doesn't.
+
+## Putting it together
+
+### Structured (JSON) logs
+
+```python title="json_logs.py"
+import json
+import logging
+import sys
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {"level": record.levelname, "logger": record.name, "msg": record.getMessage()}
+        entry.update(getattr(record, "fields", {}))
+        if record.exc_info:
+            entry["error"] = repr(record.exc_info[1])
+        return json.dumps(entry)
+
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(JsonFormatter())
+log = logging.getLogger("orders")
+log.addHandler(handler)
+log.setLevel(logging.INFO)
+
+for order in [{"id": 1, "total": 25.0}, {"id": 2, "total": -5}]:
+    log.info("order received", extra={"fields": {"order_id": order["id"], "total": order["total"]}})
+    try:
+        if order["total"] < 0:
+            raise ValueError("negative total")
+    except ValueError:
+        log.exception("order rejected", extra={"fields": {"order_id": order["id"]}})
+```
+
+```text title="Output"
+{"level": "INFO", "logger": "orders", "msg": "order received", "order_id": 1, "total": 25.0}
+{"level": "INFO", "logger": "orders", "msg": "order received", "order_id": 2, "total": -5}
+{"level": "ERROR", "logger": "orders", "msg": "order rejected", "order_id": 2, "error": "ValueError('negative total')"}
+```
+
+One JSON object per line can be searched and filtered by log tools ("all errors for order_id 2")
+instead of grepping free text. A custom `Formatter` is all it takes; `extra=` carries the
+fields.
+
+### Shrinking a failing input automatically
+
+```python title="shrink.py"
+def buggy_average(values):
+    """Has a bug that only appears for some inputs."""
+    positives = [v for v in values if v > 0]
+    return sum(positives) / len(positives)
+
+
+def fails(values) -> bool:
+    try:
+        buggy_average(values)
+        return False
+    except ZeroDivisionError:
+        return True
+
+
+def shrink(data: list) -> list:
+    """Remove items one at a time while the failure still happens."""
+    assert fails(data), "start from an input that fails"
+    changed = True
+    while changed:
+        changed = False
+        for i in range(len(data)):
+            candidate = data[:i] + data[i + 1:]
+            if candidate and fails(candidate):
+                data, changed = candidate, True
+                break
+    return data
+
+
+big = [0, -3, -1, 0, -8, -2, -5, 0, -4]
+print("fails on the big input:", fails(big))
+print("minimal failing input:", shrink(big))
+```
+
+```text title="Output"
+fails on the big input: True
+minimal failing input: [-4]
+```
+
+This automates the "minimal reproducible example" advice above: keep deleting parts of the input
+while the bug persists. A one-item input of a non-positive number makes the cause obvious (no
+positive values means dividing by zero). Property-testing libraries like Hypothesis shrink
+failing inputs this way automatically.
+
 ## Common mistakes
 
 <Callout type="warning" title="assert for validation">
@@ -135,11 +424,38 @@ When a bug hides in a big program, cut it down until it's tiny:
   you can quieten exactly one subsystem.
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: a logger is set to DEBUG but its only handler to WARNING. Is an INFO message shown?"
+>
+  No. The logger creates the record, but the handler drops anything below WARNING. Both levels must
+  allow a message for it to appear in that destination.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why use `log.exception(...)` instead of `log.error(str(err))` in an except block?"
+>
+  `log.exception` logs at ERROR level **and** includes the traceback, which shows where the error
+  came from. `str(err)` alone keeps only the message.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why pass `stacklevel=2` to `warnings.warn`?">
+  So the warning points at the line that **called** the deprecated function, which is the line the
+  user needs to change, instead of the `warn` call inside the library.
+</Reveal>
+
 <KeyTakeaways>
 
 - Quick prints are fine briefly, and `f"{x=}"` is the best kind.
 - Logging gives you levels, named hierarchical loggers, formats and destinations, all configured in one place.
 - `assert` documents internal assumptions, and it's stripped by `-O`, so it's not for input validation.
 - Shrink bugs to a minimal reproduction before fixing them.
+- Loggers create records, handlers route and filter them; configure everything once (`dictConfig`).
+- `log.exception` keeps tracebacks; adapters and `extra=` add context like request ids; JSON
+  formatters make logs searchable.
+- Use `warnings` for deprecations, and shrink failing inputs before you start debugging.
 
 </KeyTakeaways>
+
+{/* enriched */}

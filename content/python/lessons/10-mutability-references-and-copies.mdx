@@ -381,9 +381,10 @@ DEFAULTS = {"db": {"host": "localhost", "port": 5432}, "debug": False, "tags": [
 def merged(base: dict, override: dict) -> dict:
     """Return a new dict; nested dicts are merged, everything else is replaced."""
     result = {}
-    for key in base.keys() | override.keys():
-        if key in base and key in override and isinstance(base[key], dict) \
-                and isinstance(override[key], dict):
+    keys = [*base, *(k for k in override if k not in base)]   # base order, then new keys
+    for key in keys:
+        both_dicts = isinstance(base.get(key), dict) and isinstance(override.get(key), dict)
+        if both_dicts:
             result[key] = merged(base[key], override[key])
         elif key in override:
             result[key] = override[key]
@@ -394,12 +395,12 @@ def merged(base: dict, override: dict) -> dict:
 
 prod = merged(DEFAULTS, {"db": {"host": "db.prod"}, "debug": False})
 prod["tags"] = prod["tags"] + ["prod"]       # new list: DEFAULTS keeps its own
-print(dict(sorted(prod.items())))
+print(prod)
 print(DEFAULTS)
 ```
 
 ```text title="Output"
-{'db': {'port': 5432, 'host': 'db.prod'}, 'debug': False, 'tags': ['web', 'prod']}
+{'db': {'host': 'db.prod', 'port': 5432}, 'debug': False, 'tags': ['web', 'prod']}
 {'db': {'host': 'localhost', 'port': 5432}, 'debug': False, 'tags': ['web']}
 ```
 
