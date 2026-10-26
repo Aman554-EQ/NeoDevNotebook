@@ -10,6 +10,10 @@ import { MemoryViz } from "./memory/memory-viz"
 import { ScopeLegbViz } from "./scope-legb/scope-legb-viz"
 import { SliceRulerViz } from "./slice-ruler/slice-ruler-viz"
 import { CompPipelineViz } from "./small/comp-pipeline-viz"
+import { ConcurrencyViz } from "./small/concurrency-viz"
+import { DecoratorViz } from "./small/decorator-viz"
+import { ExceptionUnwindViz } from "./small/exception-unwind-viz"
+import { MroViz } from "./small/mro-viz"
 import { CounterViz } from "./small/counter-viz"
 import { UnpackViz } from "./small/unpack-viz"
 import { VennViz } from "./small/venn-viz"
@@ -18,6 +22,10 @@ export const viz = {
   BigOViz,
   BytecodeViz,
   CompPipelineViz,
+  ConcurrencyViz,
+  DecoratorViz,
+  ExceptionUnwindViz,
+  MroViz,
   CounterViz,
   DequeViz,
   DictTableViz,

@@ -209,6 +209,8 @@ body {
   border: 1px solid var(--rule);
   border-radius: 4px;
   padding: 0.1em 0.35em;
+  /* Long identifiers without spaces must not push the page sideways on phones. */
+  overflow-wrap: anywhere;
 }
 .prose-notebook table:not(.not-prose *) {
   display: block;

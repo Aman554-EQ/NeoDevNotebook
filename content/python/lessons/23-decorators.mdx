@@ -1,0 +1,190 @@
+---
+title: Decorators
+summary: Functions are objects, so a function can take a function and return a new one. That's a decorator, the tool behind logging, timing, caching and access checks. Build them step by step, keep their metadata with functools.wraps, and add arguments.
+estimatedMinutes: 18
+difficulty: medium
+section: Core Language
+objectives:
+  - Explain `@decorator` as `func = decorator(func)`
+  - Write a decorator that works for any arguments, and preserve metadata with `functools.wraps`
+  - Write decorator factories that take arguments
+  - Predict the order of stacked decorators
+prerequisites:
+  - Scope and closures
+tags: [python, decorators, closures, functools]
+---
+
+## Intuition: gift wrapping
+
+A decorator wraps a present. The present (your function) is unchanged inside, but whoever receives
+it touches the wrapping first: it can add a card (logging), check the address (permissions), or note
+the time (timing) before and after the present is opened.
+
+## See it
+
+<DecoratorViz />
+
+## The precise rules
+
+```python title="desugar.py" norun
+@shout
+def greet(name): ...
+# is exactly
+def greet(name): ...
+greet = shout(greet)
+```
+
+- A decorator is any callable that takes a function and returns a replacement, usually a
+  **wrapper** closure that calls the original.
+- The wrapper should accept `*args, **kwargs` and return the original's result, so it works for any
+  function.
+- `@functools.wraps(func)` copies `__name__`, `__doc__` and other metadata onto the wrapper.
+  Without it, every decorated function claims to be called `wrapper`.
+- **Decorator with arguments** = a function that _returns_ a decorator: `@repeat(3)` calls
+  `repeat(3)` first.
+- Stacked decorators apply **bottom-up**: `@a @b def f` means `f = a(b(f))`.
+
+## Worked example
+
+```python title="decorators.py"
+import functools
+
+
+def shout(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs).upper()
+
+    return wrapper
+
+
+@shout
+def greet(name: str) -> str:
+    """Say hello."""
+    return f"hello {name}"
+
+
+print(greet("ada"), greet.__name__, greet.__doc__)
+
+
+def repeat(times: int):  # a decorator FACTORY
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            return [func(*args, **kwargs) for _ in range(times)]
+
+        return wrapper
+
+    return decorator
+
+
+@repeat(3)
+def roll() -> str:
+    return "x"
+
+
+print(roll())
+
+
+def count_calls(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        wrapper.calls += 1  # state stored on the wrapper object
+        return func(*args, **kwargs)
+
+    wrapper.calls = 0
+    return wrapper
+
+
+@count_calls
+def ping() -> str:
+    return "pong"
+
+
+ping()
+ping()
+print(ping.calls)
+
+
+def bold(func):
+    return lambda: "<b>" + func() + "</b>"
+
+
+def italic(func):
+    return lambda: "<i>" + func() + "</i>"
+
+
+@bold
+@italic
+def text() -> str:
+    return "hi"
+
+
+print(text())
+
+
+def no_wraps(func):
+    def wrapper():
+        return func()
+
+    return wrapper
+
+
+@no_wraps
+def original() -> None:
+    """Docs that will be lost."""
+
+
+print(original.__name__, original.__doc__)
+```
+
+```text title="Output"
+HELLO ADA greet Say hello.
+['x', 'x', 'x']
+2
+<b><i>hi</i></b>
+wrapper None
+```
+
+What to notice:
+
+- With `functools.wraps`, `greet` keeps its real name and docstring. Debuggers, logs and help tools
+  depend on this.
+- `@repeat(3)` has three layers: `repeat(3)` returns `decorator`, which returns `wrapper`.
+- `bold(italic(text))`: italic wraps first (innermost), and bold ends up outermost. So the output
+  reads `<b><i>…</i></b>`.
+- The standard library is full of decorators: `functools.lru_cache`, `functools.cache`,
+  `@property`, `@classmethod`, `@staticmethod`, `@dataclass` and `@contextmanager`.
+
+## Common mistakes
+
+<Callout type="warning" title="Forgetting to return the result">
+  A wrapper that calls `func(*args, **kwargs)` but doesn't `return` it makes every decorated
+  function return `None`.
+</Callout>
+
+- **`@repeat` instead of `@repeat(3)`.** That passes the function as `times`, and the program fails
+  confusingly later. Factories must be called.
+- **Decorating at the wrong time.** The decorator body runs **once** at definition, and only the
+  wrapper runs on each call.
+- **Skipping `functools.wraps`.** You lose the name, the docstring and introspection.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: write the skeleton of a decorator that prints how long a function took."
+>
+  `def timed(func):` → `@functools.wraps(func) def wrapper(*args, **kwargs): start =
+  time.perf_counter(); result = func(*args, **kwargs); print(func.__name__, time.perf_counter() -
+  start); return result` → `return wrapper`.
+</Reveal>
+
+<KeyTakeaways>
+
+- `@decorator` means `func = decorator(func)`, and it runs once, at definition time.
+- Wrappers take `*args, **kwargs`, call the original, and return its result.
+- Always use `functools.wraps`. Factories (`@repeat(3)`) add an extra outer layer.
+- Stacked decorators apply bottom-up, so calls go outside-in.
+
+</KeyTakeaways>

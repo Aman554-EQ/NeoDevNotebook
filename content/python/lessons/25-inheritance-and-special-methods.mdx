@@ -1,0 +1,187 @@
+---
+title: Inheritance and special methods
+summary: Reuse behaviour with inheritance and super(), understand the method resolution order, make your objects work with operators and built-ins through dunder methods, and cut boilerplate with properties, classmethods and dataclasses.
+estimatedMinutes: 22
+difficulty: medium
+section: Core Language
+objectives:
+  - Use inheritance and `super()`, and read a class's MRO
+  - Implement `__repr__`, `__eq__`, `__add__` and `__len__`, and know the `__eq__`/`__hash__` contract
+  - Use `@property`, `@classmethod` and `@staticmethod` for their intended jobs
+  - Replace boilerplate classes with `@dataclass`
+prerequisites:
+  - Classes and objects
+tags: [python, oop, inheritance, dunder, dataclasses]
+---
+
+## Intuition: family resemblance, with a fixed lookup order
+
+A child class inherits its parents' abilities and can override some of them. When a class has
+several parents that share a grandparent (a "diamond"), Python needs one unambiguous order to search.
+That order, the **MRO**, is computed once, and every lookup and every `super()` call follows it.
+
+## See it
+
+<MroViz />
+
+## The precise rules
+
+- `class B(A):` makes `B` inherit `A`'s attributes. Overriding replaces them for `B`.
+- `super().method()` calls the **next class in the MRO** after the current one. It's not
+  necessarily the parent you're thinking of, and that's what makes cooperative multiple
+  inheritance work.
+- **Special ("dunder") methods** hook into syntax: `__repr__` → `repr()`, `__str__` → `str()`,
+  `__eq__` → `==`, `__lt__` → `<`, `__add__` → `+`, `__len__` → `len()`, `__iter__` → `for`.
+- Defining `__eq__` without `__hash__` makes instances **unhashable**, so they can't go in sets or be
+  dict keys. Equal objects must have equal hashes.
+- `@property` makes a method read like an attribute. `@classmethod` receives the class (`cls`), which
+  makes it good for alternative constructors. `@staticmethod` receives nothing, so it's a plain
+  helper kept in the class's namespace.
+
+## Worked example
+
+```python title="inheritance.py"
+from dataclasses import dataclass, field
+
+
+class A:
+    def hello(self) -> str:
+        return "A"
+
+
+class B(A):
+    def hello(self) -> str:
+        return "B>" + super().hello()
+
+
+class C(A):
+    def hello(self) -> str:
+        return "C>" + super().hello()
+
+
+class D(B, C):
+    def hello(self) -> str:
+        return "D>" + super().hello()
+
+
+print([k.__name__ for k in D.__mro__], D().hello())
+
+
+class Vec:
+    def __init__(self, x: float, y: float) -> None:
+        self.x, self.y = x, y
+
+    def __repr__(self) -> str:
+        return f"Vec({self.x}, {self.y})"
+
+    def __add__(self, other: "Vec") -> "Vec":
+        return Vec(self.x + other.x, self.y + other.y)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Vec) and (self.x, self.y) == (other.x, other.y)
+
+
+print(Vec(1, 2) + Vec(3, 4), Vec(1, 2) == Vec(1, 2))
+try:
+    {Vec(1, 2)}
+except TypeError as err:
+    print("TypeError:", err)
+
+
+class Temperature:
+    def __init__(self, celsius: float) -> None:
+        self._c = celsius
+
+    @property
+    def fahrenheit(self) -> float:
+        return self._c * 9 / 5 + 32
+
+    @fahrenheit.setter
+    def fahrenheit(self, value: float) -> None:
+        self._c = (value - 32) * 5 / 9
+
+
+t = Temperature(100)
+print(t.fahrenheit)
+t.fahrenheit = 32
+print(t._c)
+
+
+class Pizza:
+    def __init__(self, size: int) -> None:
+        self.size = size
+
+    @classmethod
+    def small(cls) -> "Pizza":  # alternative constructor
+        return cls(20)
+
+    @staticmethod
+    def is_valid(size: int) -> bool:
+        return 20 <= size <= 40
+
+
+print(Pizza.small().size, Pizza.is_valid(50))
+
+
+@dataclass(order=True)
+class Card:
+    rank: int
+    suit: str = "spades"
+    tags: list = field(default_factory=list)  # a new list per instance
+
+
+print(Card(10), Card(2) < Card(10), Card(3) == Card(3))
+```
+
+```text title="Output"
+['D', 'B', 'C', 'A', 'object'] D>B>C>A
+Vec(4, 6) True
+TypeError: unhashable type: 'Vec'
+212.0
+0.0
+20 False
+Card(rank=10, suit='spades', tags=[]) True True
+```
+
+What to notice:
+
+- `B`'s `super().hello()` called **C**, not A, because the MRO of a `D` instance is D → B → C → A.
+  Each class contributes once.
+- `Vec` defined `__eq__`, so Python set `__hash__ = None`. To use it in sets, also define
+  `__hash__` (for example `hash((self.x, self.y))`), and keep the object immutable.
+- `@dataclass` generated `__init__`, `__repr__`, `__eq__` and (with `order=True`) comparisons. That's
+  about 20 lines you didn't have to write.
+
+## Common mistakes
+
+<Callout type="warning" title="Inheritance for code reuse only">
+  Inherit only when the child truly **is a** kind of the parent. If one class merely **uses**
+  another, store it as an attribute (composition). Deep inheritance trees are hard to change.
+</Callout>
+
+- **Calling the parent directly** (`A.hello(self)`) in multiple-inheritance code skips classes in
+  the MRO. Use `super()`.
+- **`__repr__` vs `__str__`.** `__repr__` is for developers (unambiguous, ideally valid code), and
+  `__str__` is for users. If you write only one, write `__repr__`.
+- **Inconsistent MRO.** `class Z(X, Y)` where `Y` subclasses `X` raises
+  `TypeError: Cannot create a consistent method resolution order (MRO)`.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: why can a dataclass with frozen=True be used in a set, but a plain one can't?"
+>
+  A plain dataclass generates `__eq__` but sets `__hash__` to `None`, because its fields can change.
+  `@dataclass(frozen=True)` makes the fields read-only and generates a `__hash__` from them.
+</Reveal>
+
+<KeyTakeaways>
+
+- Lookups and `super()` follow the MRO (`Class.__mro__`), where each class comes before its bases.
+- Dunder methods connect your objects to operators and built-ins.
+- `__eq__` without `__hash__` makes objects unhashable.
+- Use `@property` for computed attributes, `@classmethod` for alternative constructors, and
+  `@dataclass` for data classes.
+
+</KeyTakeaways>

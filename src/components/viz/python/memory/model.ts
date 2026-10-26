@@ -19,6 +19,8 @@ export type MemObject = {
   cellLabels?: string[]
   x: number
   y: number
+  /** For instances: the id of their class object (drawn as a dashed "class" link). */
+  classOf?: string
 }
 export type MemName = { name: string; target: string; x: number }
 export type MemFrame = { code: string; names: MemName[]; objects: MemObject[] }
@@ -258,7 +260,15 @@ const instancesScenario: MemScenario = {
           x: 1.6,
           y: -1.0,
         },
-        { id: "r", type: "Dog", cells: [{ text: "'Rex'" }], cellLabels: ["name"], x: -2.4, y: 0.8 },
+        {
+          id: "r",
+          type: "Dog",
+          classOf: "cls",
+          cells: [{ text: "'Rex'" }],
+          cellLabels: ["name"],
+          x: -2.4,
+          y: 0.8,
+        },
       ],
     },
     {
@@ -269,10 +279,19 @@ const instancesScenario: MemScenario = {
         { name: "Dog", target: "cls", x: 2.8 },
       ],
       objects: [
-        { id: "r", type: "Dog", cells: [{ text: "'Rex'" }], cellLabels: ["name"], x: -2.4, y: 0.8 },
+        {
+          id: "r",
+          type: "Dog",
+          classOf: "cls",
+          cells: [{ text: "'Rex'" }],
+          cellLabels: ["name"],
+          x: -2.4,
+          y: 0.8,
+        },
         {
           id: "f",
           type: "Dog",
+          classOf: "cls",
           cells: [{ text: "'Fido'" }],
           cellLabels: ["name"],
           x: 0.2,
@@ -296,10 +315,19 @@ const instancesScenario: MemScenario = {
         { name: "Dog", target: "cls", x: 2.8 },
       ],
       objects: [
-        { id: "r", type: "Dog", cells: [{ text: "'Rex'" }], cellLabels: ["name"], x: -2.4, y: 0.8 },
+        {
+          id: "r",
+          type: "Dog",
+          classOf: "cls",
+          cells: [{ text: "'Rex'" }],
+          cellLabels: ["name"],
+          x: -2.4,
+          y: 0.8,
+        },
         {
           id: "f",
           type: "Dog",
+          classOf: "cls",
           cells: [{ text: "'Fido'" }, { text: "'yap'" }],
           cellLabels: ["name", "sound"],
           x: 0.2,
@@ -348,9 +376,11 @@ export const MEMORY_SCENARIOS = {
 
 export type MemoryScenarioName = keyof typeof MEMORY_SCENARIOS
 
-/** Width of an object box in world units (shared by the 3D scene and the SVG fallback). */
+/** Width of one slot: wide enough for the longest text it holds (shared by 3D and SVG). */
 export const CELL_W = 0.78
+export const cellWidth = (o: MemObject) =>
+  Math.max(CELL_W, ...(o.cells ?? []).map((c) => (c.text ?? "").length * 0.17 + 0.25))
 export const objectWidth = (o: MemObject) =>
   o.cells
-    ? Math.max(1.3, o.cells.length * CELL_W + 0.3)
+    ? Math.max(1.3, o.cells.length * cellWidth(o) + 0.3)
     : Math.max(1.3, o.value!.length * 0.22 + 0.5)

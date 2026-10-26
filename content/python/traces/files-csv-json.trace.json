@@ -1,0 +1,561 @@
+{
+ "version": 1,
+ "python": "3.13",
+ "source": "import csv\nimport io\nimport json\n\ntext = \"name,score\\nada,9\\nbo,7\\n\"\nrows = list(csv.DictReader(io.StringIO(text)))\ntotal = 0\nfor row in rows:\n    total += int(row[\"score\"])\nreport = json.dumps({\"count\": len(rows), \"total\": total})\nprint(report)\ndata = json.loads(report)\nprint(data[\"total\"])\n",
+ "steps": [
+  {
+   "line": 1,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": []
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 2,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 3,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 5,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 6,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ],
+      [
+       "text",
+       "'name,score\\nada,9\\nbo,7\\n'"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 7,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ],
+      [
+       "text",
+       "'name,score\\nada,9\\nbo,7\\n'"
+      ],
+      [
+       "rows",
+       "[{'name': 'ada', 'score': '9'}, {'name': 'bo', 'score': '7'}]"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 8,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ],
+      [
+       "text",
+       "'name,score\\nada,9\\nbo,7\\n'"
+      ],
+      [
+       "rows",
+       "[{'name': 'ada', 'score': '9'}, {'name': 'bo', 'score': '7'}]"
+      ],
+      [
+       "total",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 9,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ],
+      [
+       "text",
+       "'name,score\\nada,9\\nbo,7\\n'"
+      ],
+      [
+       "rows",
+       "[{'name': 'ada', 'score': '9'}, {'name': 'bo', 'score': '7'}]"
+      ],
+      [
+       "total",
+       "0"
+      ],
+      [
+       "row",
+       "{'name': 'ada', 'score': '9'}"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 8,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ],
+      [
+       "text",
+       "'name,score\\nada,9\\nbo,7\\n'"
+      ],
+      [
+       "rows",
+       "[{'name': 'ada', 'score': '9'}, {'name': 'bo', 'score': '7'}]"
+      ],
+      [
+       "total",
+       "9"
+      ],
+      [
+       "row",
+       "{'name': 'ada', 'score': '9'}"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 9,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ],
+      [
+       "text",
+       "'name,score\\nada,9\\nbo,7\\n'"
+      ],
+      [
+       "rows",
+       "[{'name': 'ada', 'score': '9'}, {'name': 'bo', 'score': '7'}]"
+      ],
+      [
+       "total",
+       "9"
+      ],
+      [
+       "row",
+       "{'name': 'bo', 'score': '7'}"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 8,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ],
+      [
+       "text",
+       "'name,score\\nada,9\\nbo,7\\n'"
+      ],
+      [
+       "rows",
+       "[{'name': 'ada', 'score': '9'}, {'name': 'bo', 'score': '7'}]"
+      ],
+      [
+       "total",
+       "16"
+      ],
+      [
+       "row",
+       "{'name': 'bo', 'score': '7'}"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 10,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ],
+      [
+       "text",
+       "'name,score\\nada,9\\nbo,7\\n'"
+      ],
+      [
+       "rows",
+       "[{'name': 'ada', 'score': '9'}, {'name': 'bo', 'score': '7'}]"
+      ],
+      [
+       "total",
+       "16"
+      ],
+      [
+       "row",
+       "{'name': 'bo', 'score': '7'}"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 11,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ],
+      [
+       "text",
+       "'name,score\\nada,9\\nbo,7\\n'"
+      ],
+      [
+       "rows",
+       "[{'name': 'ada', 'score': '9'}, {'name': 'bo', 'score': '7'}]"
+      ],
+      [
+       "total",
+       "16"
+      ],
+      [
+       "row",
+       "{'name': 'bo', 'score': '7'}"
+      ],
+      [
+       "report",
+       "'{\"count\": 2, \"total\": 16}'"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 12,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ],
+      [
+       "text",
+       "'name,score\\nada,9\\nbo,7\\n'"
+      ],
+      [
+       "rows",
+       "[{'name': 'ada', 'score': '9'}, {'name': 'bo', 'score': '7'}]"
+      ],
+      [
+       "total",
+       "16"
+      ],
+      [
+       "row",
+       "{'name': 'bo', 'score': '7'}"
+      ],
+      [
+       "report",
+       "'{\"count\": 2, \"total\": 16}'"
+      ]
+     ]
+    }
+   ],
+   "stdout": "{\"count\": 2, \"total\": 16}\n"
+  },
+  {
+   "line": 13,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ],
+      [
+       "text",
+       "'name,score\\nada,9\\nbo,7\\n'"
+      ],
+      [
+       "rows",
+       "[{'name': 'ada', 'score': '9'}, {'name': 'bo', 'score': '7'}]"
+      ],
+      [
+       "total",
+       "16"
+      ],
+      [
+       "row",
+       "{'name': 'bo', 'score': '7'}"
+      ],
+      [
+       "report",
+       "'{\"count\": 2, \"total\": 16}'"
+      ],
+      [
+       "data",
+       "{'count': 2, 'total': 16}"
+      ]
+     ]
+    }
+   ],
+   "stdout": "{\"count\": 2, \"total\": 16}\n"
+  },
+  {
+   "line": 13,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "csv",
+       "module csv"
+      ],
+      [
+       "io",
+       "module io"
+      ],
+      [
+       "json",
+       "module json"
+      ],
+      [
+       "text",
+       "'name,score\\nada,9\\nbo,7\\n'"
+      ],
+      [
+       "rows",
+       "[{'name': 'ada', 'score': '9'}, {'name': 'bo', 'score': '7'}]"
+      ],
+      [
+       "total",
+       "16"
+      ],
+      [
+       "row",
+       "{'name': 'bo', 'score': '7'}"
+      ],
+      [
+       "report",
+       "'{\"count\": 2, \"total\": 16}'"
+      ],
+      [
+       "data",
+       "{'count': 2, 'total': 16}"
+      ]
+     ]
+    }
+   ],
+   "stdout": "{\"count\": 2, \"total\": 16}\n16\n",
+   "returnValue": "None"
+  }
+ ],
+ "stdout": "{\"count\": 2, \"total\": 16}\n16\n",
+ "truncated": false
+}

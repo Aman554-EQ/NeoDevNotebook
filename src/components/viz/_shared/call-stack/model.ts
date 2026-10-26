@@ -36,12 +36,15 @@ export function stackSnapshots(
   const keep = steps
     .map((s, i) => ({ s, i }))
     .filter(
-      ({ s, i }) => i === 0 || i === steps.length - 1 || s.event === "call" || s.event === "return",
+      ({ s, i }) =>
+        i === 0 ||
+        i === steps.length - 1 ||
+        ["call", "return", "yield", "resume"].includes(s.event),
     )
   const snapshots = keep.map(({ s }) => ({
     frames: s.frames.map((f) => ({ title: frameTitle(f), detail: frameDetail(f) })),
     returning:
-      s.event === "return" && s.frames.length > 1
+      (s.event === "return" || s.event === "yield") && s.frames.length > 1
         ? { index: s.frames.length - 1, value: s.returnValue ?? "None" }
         : undefined,
     line: s.line,

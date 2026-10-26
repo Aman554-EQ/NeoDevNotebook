@@ -5,7 +5,7 @@ import type { Trace } from "./narrate"
 
 const stepSchema = z.object({
   line: z.number().int().positive(),
-  event: z.enum(["line", "call", "return", "exception"]),
+  event: z.enum(["line", "call", "return", "exception", "yield", "resume"]),
   frames: z.array(
     z.object({ name: z.string(), locals: z.array(z.tuple([z.string(), z.string()])) }),
   ),

@@ -1,0 +1,153 @@
+---
+title: Concurrency basics
+summary: Make programs do several things at once. Understand the GIL, when threads and asyncio help (waiting on I/O), when you need processes (heavy computation), and how to share data safely.
+estimatedMinutes: 20
+difficulty: hard
+section: Core Language
+objectives:
+  - Explain the GIL and why it limits CPU-bound threads
+  - Choose threads, asyncio or processes based on I/O-bound vs CPU-bound work
+  - Use ThreadPoolExecutor, ProcessPoolExecutor and asyncio.gather
+  - Protect shared state with a Lock
+prerequisites:
+  - Functions
+  - Context managers
+tags: [python, concurrency, threads, asyncio, gil]
+---
+
+## Intuition: one chef, many pots
+
+A **thread** is like one chef juggling several pots. While one pot simmers (waiting on I/O), the chef
+stirs another, and the whole meal finishes sooner. But if every dish needs non-stop chopping
+(CPU-bound work), one chef can't chop two boards at once. In standard CPython, the **Global
+Interpreter Lock (GIL)** is that "one pair of hands": only one thread executes Python bytecode at a
+time. For more hands, hire more chefs: **processes**.
+
+## See it
+
+<ConcurrencyViz />
+
+## The precise rules
+
+| Work type                   | Example                            | Best tool                                 | Why                                                    |
+| --------------------------- | ---------------------------------- | ----------------------------------------- | ------------------------------------------------------ |
+| I/O-bound, few tasks        | downloading a few pages            | `ThreadPoolExecutor`                      | threads release the GIL while waiting                  |
+| I/O-bound, many connections | thousands of sockets               | `asyncio`                                 | one thread, cheap coroutines, explicit `await`         |
+| CPU-bound                   | image processing, number crunching | `ProcessPoolExecutor` / `multiprocessing` | separate interpreters, separate GILs, real parallelism |
+
+- `async def` defines a coroutine. `await` pauses it until the awaited thing is done, which lets the
+  event loop run other coroutines. `asyncio.run(main())` starts the loop.
+- Threads share memory, so a read-modify-write like `total += 1` from several threads needs a
+  `threading.Lock`.
+- Process pools on Windows and macOS start fresh interpreters, so the entry code must be under
+  `if __name__ == "__main__":`.
+- **Python 3.13** offers an experimental **free-threaded** build (no GIL, `python3.13t`). It isn't the
+  default, and extension modules must support it.
+
+## Worked example
+
+```python title="concurrency.py"
+import asyncio
+import threading
+import time
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+
+
+def fake_download(n: int) -> str:
+    time.sleep(0.2)  # waiting on I/O releases the GIL
+    return f"page {n}"
+
+
+def count_primes(limit: int) -> int:  # pure CPU work
+    return sum(all(k % d for d in range(2, int(k**0.5) + 1)) for k in range(2, limit))
+
+
+async def fetch(n: int) -> str:
+    await asyncio.sleep(0.2)  # yields to the event loop
+    return f"item {n}"
+
+
+async def main_async() -> list[str]:
+    return await asyncio.gather(*(fetch(n) for n in range(3)))
+
+
+if __name__ == "__main__":
+    start = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        pages = list(pool.map(fake_download, range(3)))  # results in input order
+    print(pages, "overlapped:", time.perf_counter() - start < 0.5)
+
+    start = time.perf_counter()
+    items = asyncio.run(main_async())
+    print(items, "overlapped:", time.perf_counter() - start < 0.5)
+
+    with ProcessPoolExecutor(max_workers=2) as pool:
+        print(list(pool.map(count_primes, [10_000, 20_000])))
+
+    lock = threading.Lock()
+    total = 0
+
+    def add_many() -> None:
+        global total
+        for _ in range(100_000):
+            with lock:  # without the lock, updates can be lost
+                total += 1
+
+    workers = [threading.Thread(target=add_many) for _ in range(4)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    print(total)
+```
+
+```text title="Output"
+['page 0', 'page 1', 'page 2'] overlapped: True
+['item 0', 'item 1', 'item 2'] overlapped: True
+[1229, 2262]
+400000
+```
+
+What to notice:
+
+- Three 0.2-second "downloads" finished in well under 0.5 s, both with threads and with asyncio:
+  the waits overlapped.
+- `pool.map` and `asyncio.gather` return results **in input order**, even if tasks finish in a
+  different order.
+- The prime counting runs in separate processes, so it uses separate cores. Threads would have taken
+  turns under the GIL.
+- `total` is exactly 400,000 because of the lock. Remove it and some increments can be lost.
+
+## Common mistakes
+
+<Callout type="warning" title="Blocking the event loop">
+  Calling `time.sleep()` or a slow, synchronous library inside an `async def` freezes **every**
+  coroutine. Use `await asyncio.sleep()` and async libraries, or hand blocking work to a thread with
+  `asyncio.to_thread`.
+</Callout>
+
+- **Threads for CPU-bound work.** On a standard build there's no speed-up (often a slowdown). Use
+  processes.
+- **Unprotected shared state.** Use a `Lock`, or better, avoid sharing: give each worker its own data
+  and combine the results.
+- **Forgetting the `__main__` guard** with process pools. On Windows, child processes re-import the
+  script and can spawn endlessly or crash.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: 500 URLs to download, and 8 large images to resize. Which tool for each?"
+>
+  Downloads are I/O-bound, so use `asyncio` (or a thread pool of a few dozen). Resizing is
+  CPU-bound, so use a `ProcessPoolExecutor` with about one worker per core.
+</Reveal>
+
+<KeyTakeaways>
+
+- The GIL lets only one thread run Python bytecode at a time on a standard CPython build.
+- I/O-bound work goes to threads or asyncio, and CPU-bound work to processes.
+- `pool.map` / `asyncio.gather` keep the input order. Guard process pools with `__main__`.
+- Protect shared mutable state with a lock, or don't share it.
+
+</KeyTakeaways>

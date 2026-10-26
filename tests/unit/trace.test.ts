@@ -76,6 +76,25 @@ describe("trace recorder", () => {
     expect(changedVars(trace.steps[7], trace.steps[8]!)).toEqual(["i = 1 (was 0)"])
   })
 
+  it("records generator yields and resumes (not calls/returns)", () => {
+    const gen = recordOne(path.resolve("tests/fixtures/traces/generator.py"))
+    const events = gen.steps
+      .filter((s) => s.frames.at(-1)!.name === "countdown" && s.event !== "line")
+      .map((s) => [s.event, s.returnValue ?? null])
+    expect(events).toEqual([
+      ["call", null],
+      ["yield", "2"],
+      ["resume", null],
+      ["yield", "1"],
+      ["resume", null],
+      ["return", "None"],
+    ])
+    const lines = gen.source.split("\n")
+    const y = gen.steps.findIndex((s) => s.event === "yield")
+    expect(describeStep(gen.steps, y, lines).narration).toContain("countdown yields 2 and pauses")
+    expect(gen.stdout).toBe("2\n1\n")
+  })
+
   it("truncates long runs and records uncaught errors instead of crashing", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ndn-trace-"))
     try {

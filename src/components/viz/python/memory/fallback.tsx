@@ -2,7 +2,7 @@
 
 import { useId } from "react"
 import { useViz } from "../../_shared/viz-frame"
-import { CELL_W, MEMORY_SCENARIOS, objectWidth, type MemoryScenarioName } from "./model"
+import { MEMORY_SCENARIOS, cellWidth, objectWidth, type MemoryScenarioName } from "./model"
 
 /** Static SVG of the same frame (reduced motion / no WebGL). World units → SVG: 70px per unit. */
 const S = 70
@@ -79,6 +79,7 @@ export function MemoryFallback({ scenario }: { scenario: MemoryScenarioName }) {
                 </text>
               )}
               {o.cells?.map((c, i) => {
+                const CELL_W = cellWidth(o)
                 const cx = x + 0.15 * S + i * CELL_W * S
                 const target = c.ref ? byId.get(c.ref) : undefined
                 return (
@@ -132,6 +133,22 @@ export function MemoryFallback({ scenario }: { scenario: MemoryScenarioName }) {
                 )
               })}
             </g>
+          )
+        })}
+        {frame.objects.map((o) => {
+          const cls = o.classOf ? byId.get(o.classOf) : undefined
+          if (!cls) return null
+          return (
+            <line
+              key={`class-${o.id}`}
+              x1={sx(o.x)}
+              y1={sy(o.y) + 30}
+              x2={sx(cls.x)}
+              y2={sy(cls.y) - 46}
+              stroke="var(--muted)"
+              strokeWidth={1.5}
+              strokeDasharray="5 4"
+            />
           )
         })}
         {frame.names.map((n) => {

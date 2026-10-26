@@ -3,7 +3,7 @@
 export type TraceFrame = { name: string; locals: [string, string][] }
 export type TraceStep = {
   line: number
-  event: "line" | "call" | "return" | "exception"
+  event: "line" | "call" | "return" | "exception" | "yield" | "resume"
   frames: TraceFrame[]
   stdout: string
   returnValue?: string
@@ -66,6 +66,16 @@ export function describeStep(
       return {
         label: `Return from ${fn}`,
         narration: `${fn} returns ${cur.returnValue ?? "None"}; its frame is popped off the stack.${printed}`,
+      }
+    case "yield":
+      return {
+        label: `${fn} yields`,
+        narration: `${fn} yields ${cur.returnValue ?? "None"} and pauses here; its local variables are kept for later.${printed}`,
+      }
+    case "resume":
+      return {
+        label: `Resume ${fn}`,
+        narration: `The loop asks for the next value, so ${fn} resumes right after its last yield, with its variables intact.`,
       }
     case "exception":
       return {

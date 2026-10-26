@@ -14,6 +14,8 @@ Usage:
 
 from __future__ import annotations
 
+import dis
+import inspect
 import io
 import json
 import os
@@ -33,6 +35,20 @@ MAX_REPR = 80
 TIMEOUT_S = 30
 
 _ADDRESS = re.compile(r" at 0x[0-9a-fA-F]+")
+_RESUME = dis.opmap["RESUME"]
+_SUSPENDABLE = inspect.CO_GENERATOR | inspect.CO_COROUTINE | inspect.CO_ASYNC_GENERATOR
+
+
+def is_yield(frame: types.FrameType) -> bool:
+    """In CPython 3.11+, a 'return' event whose current instruction is RESUME is a yield."""
+    code = frame.f_code
+    return bool(code.co_flags & _SUSPENDABLE) and code.co_code[frame.f_lasti] == _RESUME
+
+
+def is_resume(frame: types.FrameType) -> bool:
+    """A generator 'call' event anywhere but its def line is a resume after a yield."""
+    code = frame.f_code
+    return bool(code.co_flags & _SUSPENDABLE) and frame.f_lineno != code.co_firstlineno
 
 
 def short_repr(value: object) -> str:
@@ -98,7 +114,9 @@ def record(path: Path) -> dict:
         if event == "line":
             snapshot(frame, "line")
         elif event == "call" and frame.f_code.co_name != "<module>":
-            snapshot(frame, "call")
+            snapshot(frame, "resume" if is_resume(frame) else "call")
+        elif event == "return" and is_yield(frame):
+            snapshot(frame, "yield", {"returnValue": short_repr(arg)})
         elif event == "return":
             snapshot(frame, "return", {"returnValue": short_repr(arg)})
         elif event == "exception":

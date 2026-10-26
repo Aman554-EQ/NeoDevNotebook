@@ -1,0 +1,133 @@
+---
+title: Classes and objects
+summary: A class bundles data and the functions that work on it. See where instance and class attributes actually live, what self is, and how Python looks attributes up, then write small, clear classes.
+estimatedMinutes: 18
+difficulty: simple
+section: Core Language
+objectives:
+  - Define a class with `__init__`, attributes and methods
+  - Explain `self` and how a method call becomes a function call
+  - Distinguish instance attributes from class attributes, and where each is stored
+  - Avoid the shared mutable class attribute bug
+prerequisites:
+  - Mutability, references and copies
+  - Functions
+tags: [python, oop, classes]
+---
+
+## Intuition: a cookie cutter and cookies
+
+A **class** is a cookie cutter: one shape, defined once. Each **instance** is a cookie with its own
+toppings (instance attributes). Anything defined on the cutter itself (class attributes and methods)
+is shared by every cookie. When you ask a cookie for something it doesn't have, Python checks the
+cutter.
+
+## See it
+
+<MemoryViz scenario="instances" />
+
+## The precise rules
+
+- `class Dog:` creates a **class object**. Calling it, `Dog("Rex")`, creates an instance and runs
+  `__init__(self, "Rex")` to set it up.
+- `self` is just the instance the method was called on: `rex.speak()` is
+  `Dog.speak(rex)`.
+- Assigning `self.name = …` stores the attribute **on the instance** (in `rex.__dict__`).
+  Names assigned in the class body are **class attributes**, shared by all instances.
+- **Lookup** for `obj.attr`: the instance's `__dict__` first, then the class (and its bases, in MRO
+  order). **Assignment** `obj.attr = v` always writes to the instance.
+
+## Worked example
+
+```python title="classes.py"
+class Dog:
+    sound = "woof"  # class attribute: shared
+
+    def __init__(self, name: str) -> None:
+        self.name = name  # instance attribute: per object
+
+    def speak(self) -> str:
+        return f"{self.name} says {self.sound}"
+
+
+rex, fido = Dog("Rex"), Dog("Fido")
+fido.sound = "yap"  # creates an INSTANCE attribute that shadows Dog.sound
+print(rex.speak(), "|", fido.speak())
+print(rex.__dict__, fido.__dict__, Dog.sound)
+print(Dog.speak(rex), type(rex).__name__, isinstance(rex, Dog))
+
+
+class Basket:
+    def __init__(self) -> None:
+        self.items: list[str] = []  # a NEW list per instance
+
+    def add(self, item: str) -> "Basket":
+        self.items.append(item)
+        return self  # returning self allows chaining
+
+
+basket = Basket().add("apple").add("pear")
+print(basket.items)
+
+
+class BadBasket:
+    items: list[str] = []  # BUG: one list shared by every instance
+
+    def add(self, item: str) -> None:
+        self.items.append(item)
+
+
+b1, b2 = BadBasket(), BadBasket()
+b1.add("apple")
+print(b2.items)
+```
+
+```text title="Output"
+Rex says woof | Fido says yap
+{'name': 'Rex'} {'name': 'Fido', 'sound': 'yap'} woof
+Rex says woof Dog True
+['apple', 'pear']
+['apple']
+```
+
+What to notice:
+
+- `fido.sound = "yap"` didn't change the class. It added `sound` to `fido.__dict__`, which now wins
+  the lookup for fido only.
+- `rex.speak()` and `Dog.speak(rex)` are the same call. That's all `self` is.
+- `BadBasket.items` is a **class** attribute, so `self.items.append(...)` mutates the one shared
+  list. That's the class version of the mutable default argument bug. Create mutable state in
+  `__init__`.
+
+## Common mistakes
+
+<Callout type="warning" title="Mutable class attributes">
+  Lists, dicts and sets defined in the class body are shared by every instance. Initialise them in
+  `__init__` (or use `dataclasses.field(default_factory=list)`).
+</Callout>
+
+- **Forgetting `self`.** `def speak():` fails when called with
+  `TypeError: Dog.speak() takes 0 positional arguments but 1 was given`.
+- **Forgetting `self.`** when reading an attribute (`return name` instead of `self.name`) raises
+  `NameError`.
+- **Classes where a function would do.** If a class has only `__init__` and one method, a plain
+  function is often simpler.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: after Dog.sound = 'arf', what do rex.speak() and fido.speak() return?"
+>
+  `'Rex says arf'` and `'Fido says yap'`. Rex has no `sound` of its own, so it sees the class's new
+  value. Fido's instance attribute still shadows it.
+</Reveal>
+
+<KeyTakeaways>
+
+- A class is an object holding shared attributes and methods, and instances hold their own data.
+- `self` is the instance, so `obj.method()` is `Class.method(obj)`.
+- Lookup checks the instance first, then the class. Assignment always writes to the instance.
+- Create mutable state in `__init__`, never as a class attribute.
+
+</KeyTakeaways>

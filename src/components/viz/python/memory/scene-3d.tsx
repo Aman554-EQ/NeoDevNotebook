@@ -13,7 +13,7 @@ import {
 } from "../../_shared/three/toolkit"
 import { useViz } from "../../_shared/viz-frame"
 import {
-  CELL_W,
+  cellWidth,
   MEMORY_SCENARIOS,
   objectWidth,
   type MemObject,
@@ -25,7 +25,8 @@ const NAME_Y = 2.4
 /** World position of slot i of an object (front face centre). */
 function cellPos(o: MemObject, i: number): [number, number, number] {
   const w = objectWidth(o)
-  return [o.x - w / 2 + 0.15 + CELL_W / 2 + i * CELL_W, o.y, 0.45]
+  const cw = cellWidth(o)
+  return [o.x - w / 2 + 0.15 + cw / 2 + i * cw, o.y, 0.45]
 }
 
 function ObjectMesh({ obj, colors }: { obj: MemObject; colors: ThemeColors }) {
@@ -61,11 +62,12 @@ function ObjectMesh({ obj, colors }: { obj: MemObject; colors: ThemeColors }) {
         />
       )}
       {obj.cells?.map((c, i) => {
-        const x = -w / 2 + 0.15 + CELL_W / 2 + i * CELL_W
+        const cw = cellWidth(obj)
+        const x = -w / 2 + 0.15 + cw / 2 + i * cw
         return (
           <group key={i} position={[x, 0, 0.3]}>
             <mesh>
-              <boxGeometry args={[0.66, 0.6, 0.25]} />
+              <boxGeometry args={[cw - 0.12, 0.6, 0.25]} />
               <meshStandardMaterial color={c.ref ? colors.surface : colors.accent} />
             </mesh>
             {c.ref ? (
@@ -77,7 +79,7 @@ function ObjectMesh({ obj, colors }: { obj: MemObject; colors: ThemeColors }) {
               <TextFace
                 text={c.text ?? ""}
                 color={colors.accentInk}
-                width={0.62}
+                width={cw - 0.16}
                 height={0.5}
                 position={[0, 0, 0.13]}
               />
@@ -86,8 +88,8 @@ function ObjectMesh({ obj, colors }: { obj: MemObject; colors: ThemeColors }) {
               <TextFace
                 text={obj.cellLabels[i]!}
                 color={colors.muted}
-                width={0.74}
-                height={0.22}
+                width={cw}
+                height={0.3}
                 position={[0, -0.6, 0.1]}
                 bold={false}
               />
@@ -167,6 +169,24 @@ export default function MemoryScene3D({ scenario }: { scenario: MemoryScenarioNa
           ]
         }),
       )}
+      {frame.objects.flatMap((o) => {
+        const cls = o.classOf ? byId.get(o.classOf) : undefined
+        if (!cls) return []
+        return [
+          <Line
+            key={`class-${o.id}`}
+            points={[
+              [o.x, o.y - 0.5, 0],
+              [cls.x, cls.y + 1.0, 0],
+            ]}
+            color={colors.muted}
+            lineWidth={1.5}
+            dashed
+            dashSize={0.15}
+            gapSize={0.1}
+          />,
+        ]
+      })}
       {frame.names.map((n) => (
         <NameTag key={n.name} name={n.name} x={n.x} target={byId.get(n.target)!} colors={colors} />
       ))}

@@ -61,6 +61,9 @@ function StepperScene({ trace, lines }: { trace: TraceData; lines: string[] }) {
         ref={codeRef}
         className="border-rule bg-code-bg relative max-h-80 overflow-auto rounded-lg border py-2 font-mono text-[0.85rem] leading-relaxed"
         data-testid="stepper-code"
+        tabIndex={0}
+        role="region"
+        aria-label="Program source, current line highlighted"
       >
         {lines.map((html, i) => {
           const n = i + 1
@@ -135,11 +138,14 @@ function StepperScene({ trace, lines }: { trace: TraceData; lines: string[] }) {
               )
             })}
           </ol>
-          {cur.event === "return" && cur.returnValue !== undefined && cur.frames.length > 1 && (
-            <p className="mt-2 font-mono text-xs">
-              returns <span className="bg-highlight rounded px-1">{cur.returnValue}</span>
-            </p>
-          )}
+          {(cur.event === "return" || cur.event === "yield") &&
+            cur.returnValue !== undefined &&
+            cur.frames.length > 1 && (
+              <p className="mt-2 font-mono text-xs">
+                {cur.event === "yield" ? "yields" : "returns"}{" "}
+                <span className="bg-highlight rounded px-1">{cur.returnValue}</span>
+              </p>
+            )}
           {cur.event === "exception" && (
             <p className="text-hard mt-2 font-mono text-xs" data-testid="stepper-exception">
               {cur.exception}
