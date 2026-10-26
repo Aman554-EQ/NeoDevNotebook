@@ -139,6 +139,9 @@ test.describe("python module: accessibility", () => {
       test(`axe ${theme}: ${l.slug}`, async ({ page }, info) => {
         // Every lesson at desktop; the first lesson at every viewport.
         test.skip(width(info) !== 1440 && l !== lessons[0], "covered at 1440px")
+        // Enriched lessons are long (dozens of highlighted code blocks); axe needs more than 30 s
+        // when the suite runs in parallel.
+        test.slow()
         await page.addInitScript((t) => localStorage.setItem("ndn-theme", t), theme)
         await page.goto(l.href)
         for (const viz of await page.getByTestId("viz-frame").all())

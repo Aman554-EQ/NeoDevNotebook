@@ -30,6 +30,22 @@ describe("python module content", () => {
     }
   })
 
+  it("every lesson goes beyond the worked example: variations, a realistic program, more checks", () => {
+    for (const l of python.lessons) {
+      const variations = l.body.match(/^## (Variations|More errors you'll meet)$/m)
+      expect(variations, `${l.slug}: variations section`).not.toBeNull()
+      expect(l.body, `${l.slug}: putting it together`).toMatch(/^## Putting it together/m)
+      // The extra sections sit between the worked example and the common mistakes.
+      expect(l.body.indexOf(variations![0]), l.slug).toBeLessThan(
+        l.body.indexOf("## Common mistakes"),
+      )
+      const verified = l.body.match(/```text title="Output"/g) ?? []
+      expect(verified.length, `${l.slug}: verified outputs`).toBeGreaterThanOrEqual(4)
+      const checks = l.body.match(/<Reveal\b/g) ?? []
+      expect(checks.length, `${l.slug}: self-checks`).toBeGreaterThanOrEqual(4)
+    }
+  })
+
   it("has exactly 15 problems per tier and 8 find-and-fix-the-bug problems (at least one per tier)", () => {
     const tiers = Object.groupBy(python.problems, (p) => p.difficulty)
     for (const d of ["easy", "simple", "medium", "hard"] as const) {
