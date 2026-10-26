@@ -169,10 +169,12 @@ function Panel({
   return (
     <section
       className={cn(
-        "bg-surface rounded-lg border p-3 transition-opacity duration-300",
-        active ? "border-accent" : "border-rule",
-        dim && "opacity-50",
+        "rounded-lg border p-3 transition-colors duration-300",
+        active ? "border-accent border-2" : "border-rule",
+        // Not-yet-reached stages are marked by a dashed outline, never by fading text (contrast).
+        dim ? "bg-bg border-dashed" : "bg-surface",
       )}
+      data-active={active || undefined}
     >
       <h3 className="mb-2 text-xs font-semibold tracking-wide uppercase">{title}</h3>
       {children}

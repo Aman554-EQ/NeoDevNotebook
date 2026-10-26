@@ -5,3 +5,4 @@ playwright-report
 test-results
 src/db/migrations
 initial-prompt.md
+content/**/*.trace.json
