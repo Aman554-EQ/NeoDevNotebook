@@ -1,0 +1,115 @@
+---
+title: Sets
+summary: A set is a dict with keys only, an unordered bag of unique, hashable items. Use it for instant membership tests, removing duplicates, and set algebra (union, intersection, difference).
+estimatedMinutes: 12
+difficulty: easy
+section: Data Structures
+objectives:
+  - Use sets to remove duplicates and test membership in O(1) on average
+  - Apply union, intersection, difference and symmetric difference
+  - Know that sets are unordered and hold only hashable items
+  - Use frozenset when you need a hashable set
+prerequisites:
+  - Dictionaries
+tags: [python, sets, hashing]
+---
+
+## Intuition: a guest list at the door
+
+A bouncer with a guest list doesn't care about order or duplicates. They only ask "is this name on
+the list?", and the answer comes instantly. Sets are built on the same hash table as dicts, without
+the values.
+
+## See it
+
+<VennViz />
+
+## The precise rules
+
+- `{1, 2, 3}` or `set(iterable)` creates a set. `{}` is an **empty dict**, so use `set()` for an
+  empty set.
+- Items must be hashable, just like dict keys. Duplicates collapse into one.
+- **No order.** Don't rely on the order a set prints in. String hashes change between runs.
+- Operators: `|` union, `&` intersection, `-` difference, `^` symmetric difference, plus `<=`
+  (subset) and `>=` (superset).
+- `x in s` is O(1) on average, compared with O(n) for a list.
+
+## Worked example
+
+```python title="sets.py"
+A = {1, 2, 3, 4}
+B = {3, 4, 5}
+print(A | B, A & B, A - B, B - A, A ^ B)
+print({1, 2} <= A, A >= {9})
+
+s = {3, 1, 2, 1}
+print(s, len(s), 2 in s)
+s.add(4)
+s.discard(10)  # no error if missing
+print(s)
+try:
+    s.remove(10)  # raises if missing
+except KeyError as err:
+    print("KeyError:", err)
+
+print(sorted(set("mississippi")))  # sort to print strings in a stable order
+print(type({}).__name__, type(set()).__name__)
+
+print(list(dict.fromkeys([3, 1, 3, 2, 1])))  # dedupe, keep first-seen order
+print({frozenset({1, 2}): "a frozenset can be a key"})
+
+seen = set()
+for word in ["red", "blue", "red", "green"]:
+    if word in seen:
+        print("duplicate:", word)
+    seen.add(word)
+```
+
+```text title="Output"
+{1, 2, 3, 4, 5} {3, 4} {1, 2} {5} {1, 2, 5}
+True False
+{1, 2, 3} 3 True
+{1, 2, 3, 4}
+KeyError: 10
+['i', 'm', 'p', 's']
+dict set
+[3, 1, 2]
+{frozenset({1, 2}): 'a frozenset can be a key'}
+duplicate: red
+```
+
+What to notice:
+
+- `set(...)` removes duplicates but **loses order**. `list(dict.fromkeys(items))` removes duplicates
+  and keeps first-seen order.
+- `discard` is the forgiving remove. `remove` raises `KeyError` for a missing item.
+- The "seen set" pattern (check, then add) finds duplicates in a single O(n) pass. With a list it
+  would be O(n²).
+- A `frozenset` is an immutable, hashable set, so it can be a dict key or a member of another set.
+
+## Common mistakes
+
+<Callout type="warning" title="Expecting sets of strings to print in a fixed order">
+  Small ints happen to print sorted, but string order changes from run to run (hash randomization).
+  Use `sorted(s)` whenever order matters, including in tests.
+</Callout>
+
+- **`{}` is not an empty set.** It's a dict.
+- **Putting lists in a set.** `TypeError: unhashable type: 'list'`. Use tuples.
+- **Indexing a set.** `s[0]` is a `TypeError`. Sets have no positions.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: which users are in team_a but not team_b, given two lists?">
+  `set(team_a) - set(team_b)`. Building each set is O(n), and the difference is then O(len(a)). That
+  beats a nested loop.
+</Reveal>
+
+<KeyTakeaways>
+
+- Sets store unique, hashable items with O(1) average membership tests.
+- Use `|`, `&`, `-` and `^` for set algebra.
+- Sets are unordered, so sort before printing or comparing output.
+- `set()` is empty (`{}` is a dict). `frozenset` is a hashable set.
+
+</KeyTakeaways>

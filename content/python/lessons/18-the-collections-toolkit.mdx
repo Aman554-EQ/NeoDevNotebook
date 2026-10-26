@@ -1,0 +1,116 @@
+---
+title: The collections toolkit
+summary: Counter, defaultdict, OrderedDict and ChainMap remove whole categories of boilerplate. Learn what each one is for and the problem it solves in one line.
+estimatedMinutes: 15
+difficulty: simple
+section: Data Structures
+objectives:
+  - Count anything with Counter and use most_common and Counter arithmetic
+  - Group items with defaultdict(list) and count with defaultdict(int)
+  - Use OrderedDict's move_to_end and popitem for LRU-style ordering
+  - Layer configuration with ChainMap
+prerequisites:
+  - Dictionaries
+tags: [python, collections, counter, defaultdict]
+---
+
+## Intuition: specialised containers
+
+A plain dict is a general-purpose drawer. The `collections` module adds drawers built for one job:
+a **tally counter** (`Counter`), a drawer that **creates a folder** the first time you ask for a
+label (`defaultdict`), a drawer that remembers and **re-orders** its contents on request
+(`OrderedDict`), and a stack of transparent drawers that **searches each in turn** (`ChainMap`).
+
+## See it
+
+<CounterViz />
+
+## The precise rules
+
+| Tool                   | Behaviour                                   | Typical use                                      |
+| ---------------------- | ------------------------------------------- | ------------------------------------------------ |
+| `Counter(iterable)`    | dict of counts; missing keys read as `0`    | frequencies, top-k, multiset maths               |
+| `defaultdict(factory)` | missing key → `factory()` is inserted       | grouping (`list`), counting (`int`), nested maps |
+| `OrderedDict`          | dict + `move_to_end`, `popitem(last=False)` | LRU caches, reordering                           |
+| `ChainMap(a, b, …)`    | looks up keys in `a`, then `b`, …           | defaults vs overrides (config, scopes)           |
+| `namedtuple`           | tuple with field names                      | small records (lesson 12)                        |
+| `deque`                | O(1) at both ends                           | queues (lesson 16)                               |
+
+## Worked example
+
+```python title="collections_demo.py"
+from collections import ChainMap, Counter, OrderedDict, defaultdict
+
+c = Counter("mississippi")
+print(c.most_common(2), c["s"], c["z"])  # missing → 0, no KeyError
+print(Counter(a=3, b=1) + Counter(a=1, c=2))
+print(Counter(a=3, b=1) - Counter(a=1, b=5))  # negative counts are dropped
+
+groups = defaultdict(list)
+for word in ["apple", "avocado", "banana", "blueberry", "cherry"]:
+    groups[word[0]].append(word)  # no "if key not in groups" needed
+print(dict(groups))
+
+totals = defaultdict(int)
+for item, qty in [("pen", 2), ("ink", 1), ("pen", 3)]:
+    totals[item] += qty
+print(dict(totals))
+
+od = OrderedDict(a=1, b=2, c=3)
+od.move_to_end("a")  # mark 'a' as most recently used
+print(list(od), od.popitem(last=False))  # pop the LEAST recently used
+
+defaults = {"theme": "light", "lang": "en"}
+user = {"theme": "dark"}
+settings = ChainMap(user, defaults)
+print(settings["theme"], settings["lang"])
+```
+
+```text title="Output"
+[('i', 4), ('s', 4)] 4 0
+Counter({'a': 4, 'c': 2, 'b': 1})
+Counter({'a': 2})
+{'a': ['apple', 'avocado'], 'b': ['banana', 'blueberry'], 'c': ['cherry']}
+{'pen': 5, 'ink': 1}
+['b', 'c', 'a'] ('b', 2)
+dark en
+```
+
+What to notice:
+
+- `most_common` breaks ties by first-seen order: `'i'` appears before `'s'` in "mississippi".
+- Counter subtraction keeps only positive counts, so `b` disappears.
+- `defaultdict(list)` creates an empty list the first time a key is used, and that's the whole
+  grouping algorithm.
+- `move_to_end` plus `popitem(last=False)` is exactly the bookkeeping an LRU cache needs. You'll
+  build one in the practice problems.
+- `ChainMap` doesn't copy anything. User settings override defaults by lookup order.
+
+## Common mistakes
+
+<Callout type="warning" title="defaultdict creates keys when you read them">
+  `groups["zzz"]` on a `defaultdict` silently **inserts** an empty list. Use `"zzz" in groups` or
+  `groups.get("zzz")` to check without creating.
+</Callout>
+
+- **Passing a value instead of a factory.** `defaultdict([])` is a `TypeError`. Pass the callable
+  `list`.
+- **Printing a defaultdict in output.** Its repr includes the factory. Convert with `dict(...)` for
+  clean output.
+- **Hand-rolled counting.** Ten lines of `if k in d` logic are one `Counter`.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: are two words anagrams?">
+  `Counter(a) == Counter(b)`: equal letter counts means an anagram. That's O(n), compared with O(n
+  log n) for `sorted(a) == sorted(b)`.
+</Reveal>
+
+<KeyTakeaways>
+
+- `Counter` counts and supports `most_common` and `+` / `-` arithmetic.
+- `defaultdict(list | int | set)` removes "is the key there yet?" code.
+- `OrderedDict` adds explicit reordering (LRU caches). `ChainMap` layers lookups.
+- Reading a missing key on a defaultdict inserts it. Use `in` to test.
+
+</KeyTakeaways>
