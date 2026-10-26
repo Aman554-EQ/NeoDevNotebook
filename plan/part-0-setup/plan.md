@@ -1,6 +1,6 @@
 # Part 0: Project Setup: Plan
 
-**Branch:** `setup/part-0` (from `develop`) · **Status:** 🔨 In progress (✅ Approved on 2026-10-26)
+**Branch:** `setup/part-0` (from `develop`) · **Status:** ✅ Done (approved 2026-10-26, built and tested 2026-10-26). Changes from the plan are listed in [documentation](../../documentation/part-0-setup.md#changes-from-the-plan-and-why)
 **Owner decisions already made (2026-10-26):** no login (progress stored in the browser) · copy-only code (no Pyodide) ·
 `main` + `develop` + module branches · target hosting **Vercel + Neon**.
 
@@ -20,23 +20,23 @@ search, DB, tests, docs system and branching.
 
 ## 2. Deliverables Checklist
 
-- [ ] Git repo: `main`, `develop`, `setup/part-0`; `.gitignore`, `.gitattributes` (LF), commitlint + Husky
-- [ ] Next.js (App Router) + TypeScript strict + pnpm, ESLint, Prettier
-- [ ] Local Postgres 17 in Docker Compose (`dev` DB + separate `test` DB), `.env.example`
-- [ ] Drizzle ORM schema v1, migrations, seed script
-- [ ] Content pipeline: MDX lessons + YAML problems/interview Qs, validated with Zod, module **auto-discovery**
-- [ ] Design system: tokens, fonts, light/dark theme, base UI primitives
-- [ ] App shell: top bar, module sidebar, mobile drawer, "On this page" outline, breadcrumbs, prev/next, 404
-- [ ] Lesson components: `CodeBlock` (copy), `Callout`, `Math`, `Reveal` (hint/solution), `DifficultyBadge`, `KeyTakeaways`
-- [ ] Problem browser and interview browser with filters (difficulty / tag / search), shareable via URL params
-- [ ] Progress and bookmarks (browser storage), "mark as done" on lessons and problems
-- [ ] Search: Postgres full-text search API + `Ctrl/⌘ K` search dialog
-- [ ] **Viz framework:** `VizFrame` (lazy load, skeleton, controls, caption, reduced-motion fallback, SR text) +
+- [x] Git repo: `main`, `develop`, `setup/part-0`; `.gitignore`, `.gitattributes` (LF), commitlint + Husky
+- [x] Next.js (App Router) + TypeScript strict + pnpm, ESLint, Prettier
+- [x] Local Postgres 17 in Docker Compose (`dev` DB + separate `test` DB), `.env.example`
+- [x] Drizzle ORM schema v1, migrations, seed script
+- [x] Content pipeline: MDX lessons + YAML problems/interview Qs, validated with Zod, module **auto-discovery**
+- [x] Design system: tokens, fonts, light/dark theme, base UI primitives
+- [x] App shell: top bar, module sidebar, mobile drawer, "On this page" outline, breadcrumbs, prev/next, 404
+- [x] Lesson components: `CodeBlock` (copy), `Callout`, `Math`, `Reveal` (hint/solution), `DifficultyBadge`, `KeyTakeaways`
+- [x] Problem browser and interview browser with filters (difficulty / tag / search), shareable via URL params
+- [x] Progress and bookmarks (browser storage), "mark as done" on lessons and problems
+- [x] Search: Postgres full-text search API + `Ctrl/⌘ K` search dialog
+- [x] **Viz framework:** `VizFrame` (lazy load, skeleton, controls, caption, reduced-motion fallback, SR text) +
       one 2D demo + one 3D demo inside "Start Here"
-- [ ] Code-sample verification script (runs every Python snippet in content)
-- [ ] Tests: Vitest + RTL unit tests; Playwright E2E (4 viewports, axe, keyboard, clipboard); Lighthouse check
-- [ ] CI workflow (GitHub Actions; runs once a remote exists)
-- [ ] Docs: `documentation/part-0-setup.md`, `documentation/guides/adding-a-module.md`, navigation, changelog
+- [x] Code-sample verification script (runs every Python snippet in content)
+- [x] Tests: Vitest + RTL unit tests; Playwright E2E (4 viewports, axe, keyboard, clipboard); Lighthouse check (⚠️ lab LCP above budget, see documentation)
+- [x] CI workflow (GitHub Actions; runs once a remote exists)
+- [x] Docs: `documentation/part-0-setup.md`, `documentation/guides/adding-a-module.md`, navigation, changelog
 
 ---
 
