@@ -1,0 +1,35 @@
+id: py-i-022
+question: Is Python's sort stable? How do you sort by multiple keys?
+difficulty: medium
+tags:
+  - sorting
+  - stability
+shortAnswer: |
+  Yes. Timsort is stable: equal keys keep their original order. Sort by several keys with a
+  tuple key (`key=lambda p: (p.dept, -p.salary)`), or rely on stability and sort several
+  times, starting with the **least** significant key.
+detailedAnswer: |
+  Stability makes multi-pass sorting correct. Sort by name, then by department, and within
+  each department the names stay sorted.
+
+  Negating a number reverses just that field in a tuple key. For non-numeric fields you
+  can't negate, use separate passes with `reverse=True` on the pass that needs it.
+
+  `key` is called once per element, which is much faster than the old `cmp` functions.
+  `functools.cmp_to_key` converts a comparator if you really need one. Sorting is O(n log n),
+  but close to O(n) for data that's already mostly sorted.
+code:
+  language: python
+  code: |
+    staff = [("eng", "cy", 90), ("ops", "ada", 70), ("eng", "bo", 90), ("eng", "al", 80)]
+    print(sorted(staff, key=lambda s: (s[0], -s[2], s[1])))
+
+    by_name = sorted(staff, key=lambda s: s[1])
+    by_dept = sorted(by_name, key=lambda s: s[0])  # stable: names stay sorted per dept
+    print([s[1] for s in by_dept])
+pitfalls:
+  - Sorting the most significant key first in a multi-pass sort.
+followUps:
+  - What makes Timsort fast on real-world data?
+verify: |
+  assert [s[1] for s in by_dept] == ['al', 'bo', 'cy', 'ada']

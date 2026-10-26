@@ -1,0 +1,128 @@
+---
+title: The standard library tour
+summary: Python ships "batteries included". Get to know the modules you'll reach for every week (os, sys, pathlib, datetime, itertools, functools, re, math, random, statistics, collections) so you stop reinventing them.
+estimatedMinutes: 20
+difficulty: simple
+section: Packages, Imports & Tooling
+objectives:
+  - Recognise which standard module solves a common task
+  - Do date and time arithmetic with datetime and timedelta
+  - Combine iterators with itertools and adapt functions with functools
+  - Get reproducible randomness with random.seed, and simple stats with statistics
+prerequisites:
+  - Packages and project layout
+tags: [python, stdlib]
+practice: [py-p-012, py-p-058]
+---
+
+## Intuition: a well-stocked kitchen
+
+Before buying a gadget, check the drawers. Most everyday jobs (dates, paths, counting, combining
+lists, matching text, random numbers, averages) already have a well-tested tool in the standard
+library. It's installed with Python, documented, and fast.
+
+## See it
+
+<CodeStepper
+  trace="stdlib-tour"
+  title="Four modules, four jobs"
+  caption="Each import solves a job in one line: date arithmetic (datetime), running totals (itertools.accumulate), exact integer square roots (math), and pattern matching (re)."
+/>
+
+## The precise rules
+
+| Need                      | Module                           | Go-to tools                                                |
+| ------------------------- | -------------------------------- | ---------------------------------------------------------- |
+| Files and paths           | `pathlib`, `os`, `shutil`        | `Path`, `os.environ`, `shutil.copy`                        |
+| Interpreter and arguments | `sys`, `argparse`                | `sys.argv`, `sys.exit`, `ArgumentParser`                   |
+| Dates and times           | `datetime`, `zoneinfo`           | `date`, `datetime`, `timedelta`, `ZoneInfo`                |
+| Combining iterables       | `itertools`                      | `chain`, `groupby`, `combinations`, `accumulate`, `islice` |
+| Function tools            | `functools`                      | `partial`, `reduce`, `lru_cache`, `wraps`                  |
+| Text patterns             | `re`                             | `findall`, `search`, `sub`, `fullmatch`                    |
+| Maths                     | `math`, `statistics`, `random`   | `isqrt`, `isclose`, `mean`, `median`, `seed`, `choice`     |
+| Data structures           | `collections`, `heapq`, `bisect` | lessons 16–18                                              |
+| Data formats              | `json`, `csv`, `tomllib`         | lesson 26                                                  |
+
+## Worked example
+
+```python title="stdlib.py"
+import os
+import random
+import statistics
+from collections import Counter
+from datetime import date, datetime, timedelta
+from functools import partial, reduce
+from itertools import chain, combinations, groupby
+
+print(os.environ.get("NDN_UNSET_VARIABLE", "default"), os.sep in ("/", "\\"))
+
+start = date(2026, 1, 31)
+print(start + timedelta(days=1), (date(2026, 12, 25) - start).days)
+stamp = datetime(2026, 10, 26, 14, 5)
+print(stamp.strftime("%Y-%m-%d %H:%M"), datetime.fromisoformat("2026-10-26T09:30").hour)
+
+print(list(chain([1, 2], [3])), list(combinations("abc", 2)))
+data = sorted(["apple", "avocado", "banana", "blueberry", "cherry"])
+print({k: list(g) for k, g in groupby(data, key=lambda w: w[0])})
+
+to_int = partial(int, base=2)
+print(to_int("1010"), reduce(lambda a, b: a * b, [1, 2, 3, 4]))
+
+random.seed(42)  # fixed seed = repeatable "random" numbers
+print(random.randint(1, 6), random.choice("xyz"))
+print(statistics.mean([2, 4, 9]), statistics.median([3, 1, 2]))
+print(Counter("hello").most_common(1))
+```
+
+```text title="Output"
+default True
+2026-02-01 328
+2026-10-26 14:05 9
+[1, 2, 3] [('a', 'b'), ('a', 'c'), ('b', 'c')]
+{'a': ['apple', 'avocado'], 'b': ['banana', 'blueberry'], 'c': ['cherry']}
+10 24
+6 x
+5 2
+[('l', 2)]
+```
+
+What to notice:
+
+- `os.environ.get(name, default)` reads configuration without crashing when a variable is unset.
+- `timedelta` handles month and year boundaries: 31 January + 1 day is 1 February.
+- `groupby` groups **consecutive** equal keys, so sort by the same key first.
+- `partial(int, base=2)` pre-fills an argument, making a new one-argument function.
+- `random.seed(42)` makes "random" results repeatable, which is essential for tests and ML
+  experiments.
+
+## Common mistakes
+
+<Callout type="warning" title="groupby without sorting">
+  `groupby(["a", "b", "a"])` produces three groups, not two: it only merges neighbours. Sort by the
+  same key first, or use `defaultdict(list)` for unordered grouping.
+</Callout>
+
+- **Naive datetimes across time zones.** `datetime.now()` has no time zone. Use
+  `datetime.now(ZoneInfo("Europe/London"))` (or UTC) when times cross regions.
+- **`random` for security.** Use the `secrets` module for tokens and passwords. `random` is
+  predictable.
+- **Regex for everything.** `str.startswith`, `in` and `split` are clearer for simple checks.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: which tool gives every pair of players for a round-robin tournament?"
+>
+  `itertools.combinations(players, 2)` yields each unordered pair once. Use `permutations` if order
+  matters (home and away games).
+</Reveal>
+
+<KeyTakeaways>
+
+- Check the standard library before writing helpers or installing packages.
+- Use `datetime` and `timedelta` for date maths, and `zoneinfo` for time zones.
+- `itertools` and `functools` compose iterables and functions; sort before `groupby`.
+- Seed `random` for reproducibility, and use `secrets` for anything security-related.
+
+</KeyTakeaways>

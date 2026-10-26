@@ -1,0 +1,37 @@
+id: py-i-007
+question: Explain shallow copy vs deep copy.
+difficulty: simple
+tags:
+  - copying
+  - references
+shortAnswer: |
+  A shallow copy creates a new outer container but fills it with references to the **same**
+  inner objects. A deep copy recursively copies the inner objects too. Mutating a nested
+  object is visible through a shallow copy, but not through a deep copy.
+detailedAnswer: |
+  - Shallow: `lst.copy()`, `list(lst)`, `lst[:]`, `dict(d)`, `copy.copy(x)`.
+  - Deep: `copy.deepcopy(x)`. It keeps a memo of copied objects, so shared references and
+    cycles are preserved correctly.
+
+  A shallow copy is enough when the contents are immutable (ints, strings, tuples of
+  immutables). For nested mutable data (a list of lists, or a dict of dicts) you either
+  deep-copy, or, often cleaner, build new data instead of mutating it.
+
+  Classes can customise this with `__copy__` and `__deepcopy__`.
+code:
+  language: python
+  code: |
+    import copy
+
+    grid = [[1, 2], [3, 4]]
+    shallow = grid.copy()
+    deep = copy.deepcopy(grid)
+    grid[0][0] = 99
+    print(shallow[0][0], deep[0][0])
+    print(shallow[0] is grid[0], deep[0] is grid[0])
+pitfalls:
+  - Thinking `list(x)` or slicing copies nested lists.
+followUps:
+  - How does deepcopy handle an object that references itself?
+verify: |
+  assert shallow[0][0] == 99 and deep[0][0] == 1

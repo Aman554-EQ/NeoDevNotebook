@@ -7,7 +7,7 @@ import path from "node:path"
 import { compile } from "@mdx-js/mdx"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
-import { loadAllContent } from "../src/lib/content/load"
+import { findTargetGaps, loadAllContent } from "../src/lib/content/load"
 import { extractSamples } from "../src/lib/content/samples"
 
 async function main() {
@@ -21,6 +21,11 @@ async function main() {
         throw new Error(`MDX error in ${l.file}:\n${String(err)}`)
       }
     }
+  }
+
+  const gaps = findTargetGaps(bundles)
+  if (gaps.length) {
+    throw new Error(`Content targets not met:\n${gaps.map((g) => `  - ${g}`).join("\n")}`)
   }
 
   const samples = extractSamples(bundles)

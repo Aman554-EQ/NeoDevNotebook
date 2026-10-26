@@ -1,0 +1,135 @@
+---
+title: Loops
+summary: Iterate over anything with for, repeat until a condition changes with while, and use range, enumerate and zip to write loops that are short and correct.
+estimatedMinutes: 15
+difficulty: easy
+section: Basics
+objectives:
+  - Loop over sequences, ranges, and pairs of sequences
+  - Use `enumerate` and `zip` instead of manual index counters
+  - Control a loop with `break` and `continue`, and know when the loop `else` runs
+  - Choose between `for` and `while`
+prerequisites:
+  - Conditions and match
+tags: [python, loops, iteration]
+practice: [py-p-014, py-p-018, py-p-019]
+---
+
+## Intuition: a conveyor belt
+
+A `for` loop is a worker at a conveyor belt. The belt (any **iterable**: a list, string, range,
+file…) delivers one item at a time. The worker names the item, runs the loop body, and waits for the
+next one. When the belt is empty, the loop ends. You never manage the position yourself.
+
+A `while` loop is a worker who keeps going **as long as a condition holds**. You must make sure
+something inside the loop eventually makes the condition false.
+
+## See it
+
+<CodeStepper
+  trace="loops-enumerate"
+  title="for with enumerate, then while … else"
+  caption="enumerate hands out (number, item) pairs, so i and name change together on each pass. The while loop's else runs because the loop ended normally (no break) once n reached 0."
+/>
+
+## The precise rules
+
+- `for target in iterable:` takes each item in turn and assigns it to `target`. The target can
+  unpack, as in `for i, name in ...`.
+- `range(stop)`, `range(start, stop)` and `range(start, stop, step)` produce numbers lazily,
+  **excluding** `stop`.
+- `enumerate(it, start=0)` yields `(index, item)` pairs. `zip(a, b)` yields `(a_item, b_item)` pairs
+  and stops at the **shortest** input. `zip(..., strict=True)` raises if the lengths differ.
+- `break` leaves the loop. `continue` skips to the next item.
+- `for … else` / `while … else`: the `else` block runs **only if the loop wasn't ended by `break`**.
+  Read it as "no break".
+
+## Worked example
+
+```python title="loops.py"
+for i, ch in enumerate("ab", start=1):
+    print(i, ch)
+
+for num, letter in zip([1, 2, 3], "xy"):  # stops at the shorter input
+    print(num, letter)
+
+print(list(range(5)), list(range(2, 10, 3)), list(range(5, 0, -2)))
+
+for n in [3, 5, 7]:
+    if n % 2 == 0:
+        print("first even:", n)
+        break
+else:
+    print("no even number")  # runs: the loop never hit break
+
+total = 0
+for n in range(1, 6):
+    if n == 3:
+        continue  # skip 3
+    total += n
+print(total)
+
+try:
+    list(zip([1, 2], [1], strict=True))
+except ValueError as err:
+    print("ValueError:", err)
+
+attempts = 0
+while attempts < 3:
+    attempts += 1
+print("attempts:", attempts)
+```
+
+```text title="Output"
+1 a
+2 b
+1 x
+2 y
+[0, 1, 2, 3, 4] [2, 5, 8] [5, 3, 1]
+no even number
+12
+ValueError: zip() argument 2 is shorter than argument 1
+attempts: 3
+```
+
+What to notice:
+
+- `enumerate` replaces the error-prone pattern `i = 0 … i += 1`.
+- `range(5, 0, -2)` counts down and still excludes the stop value.
+- The `else` after the `for` is the clean way to say "searched everything, found nothing", with no
+  flag variable needed.
+- `1 + 2 + 4 + 5 = 12`, because `continue` skipped the 3.
+
+## Common mistakes
+
+<Callout type="warning" title="Changing a list while looping over it">
+  Removing items from a list inside `for x in items:` skips elements, because the positions shift
+  under the loop. Loop over a copy (`for x in items[:]`) or, better, build a new list: `items = [x
+  for x in items if keep(x)]`.
+</Callout>
+
+- **Using `range(len(items))` just to read items.** Write `for item in items:`, or `enumerate` if
+  you also need the index.
+- **Infinite `while`.** If nothing in the body changes the condition, the loop never ends. Stop it
+  with Ctrl+C and check what the body updates.
+- **Expecting `zip` to complain about different lengths.** It silently truncates. Pass
+  `strict=True` when the lengths must match.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: does the else run in `for x in []: break` / `else: print('E')`?"
+>
+  Yes, it prints `E`. The loop body never runs, so `break` never happens. The loop ends normally,
+  and that's exactly when `else` runs.
+</Reveal>
+
+<KeyTakeaways>
+
+- `for` loops over **any iterable**. Prefer `enumerate` and `zip` to manual indexes.
+- `range` excludes its stop value, like slices do.
+- `break` exits, `continue` skips ahead, and a loop's `else` means "finished without `break`".
+- Never add or remove items from a list while looping over that same list.
+
+</KeyTakeaways>

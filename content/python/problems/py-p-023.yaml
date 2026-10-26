@@ -1,0 +1,45 @@
+id: py-p-023
+title: Multiset intersection of two lists
+difficulty: simple
+tags:
+  - counter
+  - multisets
+statement: |
+  Write `common(a, b)` that returns the items the two lists share, **counting repeats**: an
+  item appearing 3 times in `a` and twice in `b` appears twice in the result. Return them
+  sorted.
+constraints:
+  - Items are hashable and sortable.
+examples:
+  - input: common([1, 2, 2, 3, 3, 3], [3, 3, 2, 9])
+    output: "[2, 3, 3]"
+hints:
+  - "`Counter(a) & Counter(b)` keeps the minimum count of each key."
+  - "`.elements()` expands counts back into items."
+solution:
+  language: python
+  code: |
+    from collections import Counter
+
+
+    def common(a: list, b: list) -> list:
+        return sorted((Counter(a) & Counter(b)).elements())
+
+
+    print(common([1, 2, 2, 3, 3, 3], [3, 3, 2, 9]))
+  explanation: |
+    A `Counter` is a multiset. The `&` operator intersects multisets by taking the
+    **minimum** count of every key, which is exactly "how many times both lists have it".
+    Here that's `{2: 1, 3: 2}`.
+
+    `.elements()` repeats each key by its count, and `sorted` gives a stable,
+    order-independent result. A plain `set(a) & set(b)` would lose the repeats.
+complexity:
+  time: O(n + m + r log r)
+  space: O(n + m)
+variations:
+  - "Return the multiset DIFFERENCE: items of a not matched in b (`Counter(a) - Counter(b)`)."
+verify: |
+  assert common([1, 2, 2, 3, 3, 3], [3, 3, 2, 9]) == [2, 3, 3]
+  assert common([], [1]) == []
+  assert common(["a", "a"], ["a", "a", "a"]) == ["a", "a"]

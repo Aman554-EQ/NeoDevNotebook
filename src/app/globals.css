@@ -34,6 +34,13 @@
   --warning: #b45309;
   --intuition: #7c3aed;
   --math: #0369a1;
+
+  /* Chart series (dataviz reference palette, validated on --surface with validate_palette.js) */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
 }
 
 [data-theme="dark"] {
@@ -64,6 +71,12 @@
   --warning: #fbbf24;
   --intuition: #c4b5fd;
   --math: #7dd3fc;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
 }
 
 @theme inline {
@@ -196,6 +209,8 @@ body {
   border: 1px solid var(--rule);
   border-radius: 4px;
   padding: 0.1em 0.35em;
+  /* Long identifiers without spaces must not push the page sideways on phones. */
+  overflow-wrap: anywhere;
 }
 .prose-notebook table:not(.not-prose *) {
   display: block;

@@ -1,0 +1,101 @@
+id: py-p-055
+title: TTL cache with an injectable clock
+difficulty: hard
+tags:
+  - classes
+  - caching
+  - testability
+statement: |
+  Build `TTLCache(ttl_seconds, clock=time.monotonic)` with `set(key, value)`, `get(key)`
+  (returns `None` if the key is missing or expired) and `__len__` (counts only live
+  entries). Expired entries must be cleaned up so memory doesn't grow forever. Accepting a
+  `clock` function makes the cache testable without sleeping.
+constraints:
+  - Setting an existing key refreshes its expiry.
+examples:
+  - input: cache.set('a', 1); advance clock 61 s with ttl=60; cache.get('a')
+    output: None
+hints:
+  - Store `(value, expires_at)` per key.
+  - A heap of `(expires_at, key)` lets you purge expired entries in order; skip stale heap entries.
+solution:
+  language: python
+  code: |
+    import heapq
+    import time
+
+
+    class TTLCache:
+        def __init__(self, ttl_seconds: float, clock=time.monotonic) -> None:
+            self.ttl = ttl_seconds
+            self.clock = clock
+            self._data: dict = {}  # key -> (value, expires_at)
+            self._expiry: list = []  # heap of (expires_at, key)
+
+        def _purge(self) -> None:
+            now = self.clock()
+            while self._expiry and self._expiry[0][0] <= now:
+                expires_at, key = heapq.heappop(self._expiry)
+                entry = self._data.get(key)
+                if entry and entry[1] == expires_at:  # skip stale heap entries
+                    del self._data[key]
+
+        def set(self, key, value) -> None:
+            expires_at = self.clock() + self.ttl
+            self._data[key] = (value, expires_at)
+            heapq.heappush(self._expiry, (expires_at, key))
+            self._purge()
+
+        def get(self, key):
+            self._purge()
+            entry = self._data.get(key)
+            return entry[0] if entry else None
+
+        def __len__(self) -> int:
+            self._purge()
+            return len(self._data)
+
+
+    class FakeClock:
+        def __init__(self) -> None:
+            self.now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+
+    clock = FakeClock()
+    cache = TTLCache(60, clock=clock)
+    cache.set("a", 1)
+    clock.now = 30
+    cache.set("b", 2)
+    clock.now = 61
+    print(cache.get("a"), cache.get("b"), len(cache))
+  explanation: |
+    Each key stores its value and its expiry time. A heap orders all expiry times, so
+    `_purge` can delete everything that's due by popping from the front, without scanning
+    every key. When a key is re-set, its old heap entry becomes stale. We detect that by
+    comparing expiry times and skip it.
+
+    The design choice that matters is the injectable `clock`. The real cache uses
+    `time.monotonic` (which never jumps backwards, unlike wall-clock time), while tests pass
+    a fake clock and "travel" 61 seconds instantly. That's dependency injection: make time
+    (or I/O) a parameter.
+complexity:
+  time: O(log n) amortized per operation
+  space: O(n)
+variations:
+  - Add a `max_size` with LRU eviction on top of the TTL.
+verify: |
+  clock = FakeClock()
+  c = TTLCache(60, clock=clock)
+  c.set("a", 1)
+  clock.now = 30
+  c.set("b", 2)
+  clock.now = 61
+  assert c.get("a") is None and c.get("b") == 2 and len(c) == 1
+  c.set("b", 3)  # refresh at t=61 → expires at 121
+  clock.now = 100
+  assert c.get("b") == 3
+  clock.now = 121
+  assert c.get("b") is None and len(c) == 0 and not c._expiry

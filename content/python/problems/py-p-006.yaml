@@ -1,0 +1,48 @@
+id: py-p-006
+title: Second-largest unique number
+difficulty: easy
+tags:
+  - sets
+  - sorting
+statement: |
+  Write `second_largest(numbers)` that returns the second-largest **distinct** value, or
+  `None` if there isn't one.
+constraints:
+  - "`0 <= len(numbers) <= 10**5`"
+examples:
+  - input: second_largest([4, 1, 7, 7, 3])
+    output: "4"
+  - input: second_largest([5, 5])
+    output: None
+hints:
+  - Remove duplicates first with `set`.
+  - You only need the top two, so a full sort works but isn't required.
+solution:
+  language: python
+  code: |
+    def second_largest(numbers: list[int]) -> int | None:
+        distinct = set(numbers)
+        if len(distinct) < 2:
+            return None
+        distinct.remove(max(distinct))
+        return max(distinct)
+
+
+    print(second_largest([4, 1, 7, 7, 3]), second_largest([5, 5]))
+  explanation: |
+    `set(numbers)` removes duplicates, so `[7, 7]` counts as one 7. If fewer than two
+    distinct values remain, there's no answer, and we return `None` explicitly.
+
+    Removing the maximum and taking `max` again finds the runner-up in two O(n) passes,
+    which avoids an O(n log n) sort. `sorted(distinct)[-2]` would also be correct.
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Find the k-th largest distinct value (`heapq.nlargest`).
+  - Do it in one pass with two variables and O(1) extra space.
+verify: |
+  assert second_largest([4, 1, 7, 7, 3]) == 4
+  assert second_largest([5, 5]) is None
+  assert second_largest([]) is None
+  assert second_largest([-1, -2]) == -2

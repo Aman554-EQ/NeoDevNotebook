@@ -1,0 +1,37 @@
+id: py-i-054
+question: Which pdb commands do you use most?
+difficulty: simple
+tags:
+  - debugging
+  - pdb
+shortAnswer: |
+  `breakpoint()` (or `python -m pdb script.py`) to start. Then `n` (next line), `s` (step
+  into), `c` (continue), `r` (return from the function), `l`/`ll` (list code), `p expr` /
+  `pp expr` (print), `w` (call stack), `u`/`d` (move up or down frames), `b line` or
+  `b line, cond` (breakpoints), and `q` (quit). `pdb.pm()` debugs the last crash post-mortem.
+detailedAnswer: |
+  Workflow tips:
+
+  - Use a conditional breakpoint (`b 42, user is None`) to stop only on the interesting
+    iteration.
+  - `display expr` re-prints an expression every time execution stops.
+  - `interact` opens a full REPL with the current frame's variables.
+  - In tests, `pytest --pdb` drops into the debugger on failure.
+  - `PYTHONBREAKPOINT=0` disables all `breakpoint()` calls, and it can also select another
+    debugger (for example ipdb).
+
+  IDE debuggers (VS Code, PyCharm) offer the same concepts visually: breakpoints, step over,
+  into and out, watches and the call stack.
+code:
+  language: python
+  code: |
+    import pdb
+    import sys
+
+    print(hasattr(pdb, "pm"), callable(sys.breakpointhook))
+pitfalls:
+  - Leaving `breakpoint()` in committed code.
+followUps:
+  - What's post-mortem debugging?
+verify: |
+  assert callable(pdb.post_mortem)

@@ -1,0 +1,52 @@
+id: py-p-014
+title: 🐞 The loop that skips the last item
+difficulty: easy
+tags:
+  - debugging
+  - loops
+  - range
+statement: |
+  `total_price` should add up every price, but the result is always too small. Find and fix
+  the bug, then make the code more Pythonic.
+
+  ```python
+  def total_price(prices):
+      total = 0
+      for i in range(len(prices) - 1):
+          total += prices[i]
+      return total
+  ```
+constraints: []
+examples:
+  - input: total_price([5, 10, 20])
+    output: "35"
+hints:
+  - "`range(stop)` already excludes `stop`."
+  - Do you need the index at all?
+solution:
+  language: python
+  code: |
+    def total_price(prices: list[float]) -> float:
+        total = 0
+        for price in prices:  # no index needed, so no off-by-one possible
+            total += price
+        return total
+
+
+    print(total_price([5, 10, 20]), sum([5, 10, 20]))
+  explanation: |
+    `range(len(prices) - 1)` stops **two** before `len(prices)`. `range` already excludes
+    its stop value, so the extra `- 1` skipped the last price. For `[5, 10, 20]` the buggy
+    version returned `15`.
+
+    The real fix is to stop indexing: `for price in prices` visits every item, with no
+    bounds to get wrong. In practice, the built-in `sum(prices)` does exactly this.
+complexity:
+  time: O(n)
+  space: O(1)
+variations:
+  - Sum only every other price, starting with the first (`prices[::2]`).
+verify: |
+  assert total_price([5, 10, 20]) == 35
+  assert total_price([]) == 0
+  assert total_price([7]) == 7

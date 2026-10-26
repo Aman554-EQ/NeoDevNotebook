@@ -1,0 +1,44 @@
+id: py-p-017
+title: Transpose a matrix
+difficulty: simple
+tags:
+  - lists
+  - zip
+  - unpacking
+statement: |
+  Write `transpose(matrix)` that turns rows into columns. `matrix` is a list of equal-length
+  lists. Return a list of lists (not tuples).
+constraints:
+  - All rows have the same length.
+  - An empty matrix returns `[]`.
+examples:
+  - input: transpose([[1, 2, 3], [4, 5, 6]])
+    output: "[[1, 4], [2, 5], [3, 6]]"
+hints:
+  - "`zip(*matrix)` unpacks the rows as separate arguments to `zip`."
+solution:
+  language: python
+  code: |
+    def transpose(matrix: list[list[int]]) -> list[list[int]]:
+        return [list(column) for column in zip(*matrix)]
+
+
+    print(transpose([[1, 2, 3], [4, 5, 6]]))
+  explanation: |
+    `*matrix` spreads the rows into separate arguments: `zip([1, 2, 3], [4, 5, 6])`. `zip`
+    then pairs up items by position, giving `(1, 4)`, `(2, 5)`, `(3, 6)`, which are exactly
+    the columns.
+
+    `zip` produces tuples, so we convert each to a list. With an empty matrix, `zip()` has
+    no arguments and yields nothing, so the result is `[]`.
+complexity:
+  time: O(rows × cols)
+  space: O(rows × cols)
+variations:
+  - Rotate the matrix 90° clockwise (transpose, then reverse each row).
+verify: |
+  assert transpose([[1, 2, 3], [4, 5, 6]]) == [[1, 4], [2, 5], [3, 6]]
+  assert transpose([]) == []
+  assert transpose([[7]]) == [[7]]
+  m = [[1, 2], [3, 4], [5, 6]]
+  assert transpose(transpose(m)) == m

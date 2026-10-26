@@ -15,6 +15,9 @@ const PAGES = [
   "/learn/start-here/why-append-is-fast",
   "/practice/start-here",
   "/practice/start-here/sh-p-002",
+  "/learn/python/dictionaries", // heaviest 3D lesson
+  "/practice/python", // 60-item problem browser
+  "/practice/python/py-p-050", // long problem page
 ]
 const BUDGET = {
   performance: 90,

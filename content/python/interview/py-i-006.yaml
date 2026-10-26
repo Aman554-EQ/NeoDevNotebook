@@ -1,0 +1,40 @@
+id: py-i-006
+question: When would you use a tuple instead of a list?
+difficulty: easy
+tags:
+  - tuples
+  - lists
+shortAnswer: |
+  Use a tuple for a fixed-size record where each **position** has a meaning, like
+  `(lat, lon)` or `(name, age)`, or when you need something hashable (a dict key or set
+  member). Use a list for a variable-length collection of similar items that you'll add to,
+  remove from or sort.
+detailedAnswer: |
+  Differences that matter:
+
+  - **Mutability:** lists can change, tuples can't. That makes tuples safe to share and lets
+    them be hashed when their contents are hashable.
+  - **Intent:** a tuple signals "this structure won't change". It's a record, not a
+    collection.
+  - **Performance:** tuples are slightly smaller and faster to create. Constant tuples are
+    even built at compile time. The difference rarely matters, though.
+  - **Unpacking and multiple returns:** `return lo, hi` returns a tuple.
+
+  For readable records, `typing.NamedTuple` or `collections.namedtuple` give the fields
+  names while keeping tuple behaviour.
+code:
+  language: python
+  code: |
+    import sys
+
+    point = (51.5, -0.12)
+    visits = {point: "London"}  # a tuple can be a dict key
+    print(visits[(51.5, -0.12)])
+    print(sys.getsizeof((1, 2, 3)) < sys.getsizeof([1, 2, 3]))
+pitfalls:
+  - Claiming tuples are always faster in a meaningful way. Choose by meaning first.
+followUps:
+  - When is a tuple not hashable?
+  - namedtuple vs dataclass?
+verify: |
+  assert visits[point] == 'London'

@@ -1,0 +1,51 @@
+id: py-p-011
+title: 🐞 The sorted list that turned into None
+difficulty: easy
+tags:
+  - debugging
+  - lists
+  - sorting
+statement: |
+  This function should return the scores sorted from highest to lowest, but it returns
+  `None`. Find the bug and fix it **without modifying the caller's list**.
+
+  ```python
+  def top_scores(scores):
+      result = scores.sort(reverse=True)
+      return result
+  ```
+constraints:
+  - The input list must stay unchanged.
+examples:
+  - input: top_scores([3, 9, 5])
+    output: "[9, 5, 3]"
+hints:
+  - What does `list.sort()` return?
+  - Which built-in returns a NEW sorted list?
+solution:
+  language: python
+  code: |
+    def top_scores(scores: list[int]) -> list[int]:
+        return sorted(scores, reverse=True)  # new list; the input is untouched
+
+
+    original = [3, 9, 5]
+    print(top_scores(original), original)
+  explanation: |
+    `list.sort()` sorts **in place** and returns `None`, a Python convention for methods
+    that mutate (like `append` and `reverse`). So `result` was always `None`, and the
+    caller's list was silently reordered as a side effect.
+
+    `sorted(iterable)` returns a new list and leaves the original alone, which fixes both
+    problems. When you see `AttributeError: 'NoneType' object has no attribute ...` right
+    after a list operation, suspect this bug first.
+complexity:
+  time: O(n log n)
+  space: O(n)
+variations:
+  - Return only the top 3 without sorting everything (`heapq.nlargest`).
+verify: |
+  data = [3, 9, 5]
+  assert top_scores(data) == [9, 5, 3]
+  assert data == [3, 9, 5], "input must not change"
+  assert top_scores([]) == []

@@ -1,0 +1,58 @@
+id: py-i-035
+question: Explain the MRO and how `super()` works with multiple inheritance.
+difficulty: hard
+tags:
+  - oop
+  - inheritance
+  - mro
+shortAnswer: |
+  The method resolution order (`Class.__mro__`) is a linearisation of the class hierarchy,
+  computed with the C3 algorithm. Each class appears before its bases, and bases keep the
+  order they were listed in. Attribute lookup walks this list, and `super()` means "the
+  **next** class in the MRO of the actual instance", not "my parent".
+detailedAnswer: |
+  In the diamond `class D(B, C)` with `B(A)` and `C(A)`, the MRO is D, B, C, A, object. A
+  `super().method()` call in B goes to **C**, not A, because the instance is a D. This lets
+  every class in the diamond run its part exactly once ("cooperative" multiple
+  inheritance), provided every method calls `super()` and accepts `**kwargs` to pass along.
+
+  C3 refuses inconsistent hierarchies (`class Z(X, Y)` where Y subclasses X) with
+  `TypeError: Cannot create a consistent method resolution order`.
+
+  Mixins (small classes adding one behaviour) rely on this. In practice, prefer composition
+  over deep multiple inheritance.
+code:
+  language: python
+  code: |
+    class Base:
+        def setup(self, log):
+            log.append("Base")
+
+
+    class Logging(Base):
+        def setup(self, log):
+            log.append("Logging")
+            super().setup(log)
+
+
+    class Caching(Base):
+        def setup(self, log):
+            log.append("Caching")
+            super().setup(log)
+
+
+    class Service(Logging, Caching):
+        pass
+
+
+    log = []
+    Service().setup(log)
+    print([k.__name__ for k in Service.__mro__], log)
+pitfalls:
+  - Calling `Parent.method(self)` directly, which skips classes in the MRO.
+  - Saying super() means 'the parent class'.
+followUps:
+  - What is a mixin?
+  - Why must cooperative methods accept **kwargs?
+verify: |
+  assert log == ['Logging', 'Caching', 'Base']

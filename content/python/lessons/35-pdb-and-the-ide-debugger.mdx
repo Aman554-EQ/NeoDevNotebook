@@ -1,0 +1,152 @@
+---
+title: pdb and the IDE debugger
+summary: Stop guessing and look. Pause a program at any line with breakpoint(), step through it, inspect variables, move up and down the call stack, and do post-mortem debugging, in the terminal with pdb or in VS Code.
+estimatedMinutes: 18
+difficulty: medium
+section: Debugging
+objectives:
+  - Pause execution with `breakpoint()` or `python -m pdb`
+  - Use the core pdb commands (n, s, c, l, p, pp, w, u, d, b, q)
+  - Run a post-mortem session on a crash
+  - Set breakpoints, watches and conditional breakpoints in VS Code
+prerequisites:
+  - Reading tracebacks
+  - print, logging and assertions
+tags: [python, debugging, pdb, vscode]
+practice: [py-p-014, py-p-040]
+interview: [py-i-054]
+---
+
+## Intuition: pausing a film
+
+A debugger lets you pause the film of your program at any frame, look at every actor (variable),
+step forward one frame at a time, step **into** a scene (a function call), or fast-forward to the
+next bookmark (breakpoint). The visual below is a recording of exactly that, for a buggy function.
+
+## See it
+
+This `average` should return 20 but returns 16.67. Step through it like a debugger and watch `i`:
+the bug appears in the first loop step.
+
+<CodeStepper
+  trace="debug-average"
+  title="Find the bug by stepping"
+  caption="The first time the loop body runs, i is already 1, so values[0] = 10 is never added. Stepping and watching variables finds in seconds what staring at code might not."
+/>
+
+## The precise rules: pdb commands
+
+| Command                           | Does                                                   |
+| --------------------------------- | ------------------------------------------------------ |
+| `breakpoint()`                    | in code: pause here (Python 3.7+)                      |
+| `python -m pdb script.py`         | start the script paused at line 1                      |
+| `n` (next)                        | run the current line, without going inside calls       |
+| `s` (step)                        | go **into** the function called on this line           |
+| `c` (continue)                    | run until the next breakpoint                          |
+| `b 12` / `b func` / `b 12, x > 5` | breakpoint at a line, a function, or a conditional one |
+| `l` / `ll`                        | list code around the current line / the whole function |
+| `p expr` / `pp expr`              | print / pretty-print a value                           |
+| `w`                               | where: the call stack                                  |
+| `u` / `d`                         | move up / down the stack to inspect callers            |
+| `r`                               | run until the current function returns                 |
+| `q`                               | quit                                                   |
+
+Post-mortem: `python -m pdb script.py` drops into the debugger **at the crash** when an exception is
+uncaught. In the REPL, `import pdb; pdb.pm()` inspects the last crash.
+
+## A real pdb session on the buggy file
+
+The program from the visual, saved as `debug_average.py`. Lines starting with `(Pdb)` are what you
+type. This transcript was recorded on CPython 3.13 (the folder path is shortened):
+
+```text title="Terminal"
+$ python -m pdb debug_average.py
+> debug_average.py(1)<module>()
+-> def average(values):
+(Pdb) b 4
+Breakpoint 1 at debug_average.py:4
+(Pdb) c
+> debug_average.py(4)average()
+-> total += values[i]
+(Pdb) p i, values[i]
+(1, 20)
+(Pdb) p total
+0
+(Pdb) n
+> debug_average.py(3)average()
+-> for i in range(1, len(values)):  # bug: should start at 0
+(Pdb) n
+> debug_average.py(4)average()
+-> total += values[i]
+(Pdb) p i, total
+(2, 20)
+(Pdb) w
+  … (2 frames of the debugger itself, omitted)
+  debug_average.py(8)<module>()
+-> print(average([10, 20, 30]))
+> debug_average.py(4)average()
+-> total += values[i]
+(Pdb) q
+```
+
+The first stop already shows `i == 1`, so the loop skipped index 0. The fix, plus a test that would
+have caught it:
+
+```python title="debug_average_fixed.py"
+def average(values: list[float]) -> float:
+    total = 0.0
+    for value in values:  # iterate the values themselves: no index to get wrong
+        total += value
+    return total / len(values)
+
+
+def test_average() -> None:
+    assert average([10, 20, 30]) == 20
+    assert average([5]) == 5
+
+
+test_average()
+print("tests pass:", average([10, 20, 30]))
+```
+
+```text title="Output"
+tests pass: 20.0
+```
+
+### VS Code
+
+1. Click in the gutter left of a line number to add a breakpoint (a red dot). Right-click it for a
+   **conditional** breakpoint (`i == 0`) or a **logpoint** (prints without stopping).
+2. Run → Start Debugging (F5) → "Python File".
+3. Use the toolbar: Continue (F5), Step Over (F10), Step Into (F11), Step Out (Shift+F11).
+4. The **Variables**, **Watch** and **Call Stack** panels show what `p`, `display` and `w` show in pdb.
+
+## Common mistakes
+
+<Callout type="warning" title="Committing breakpoint()">
+  A leftover `breakpoint()` freezes the program in production while it waits for input. Search for
+  it before committing, or let a linter (`ruff` rule T100) catch it.
+</Callout>
+
+- **Stepping into library code by accident.** Use `n` to stay in your code, and `r` to get out of a
+  function you entered.
+- **Debugging the wrong process.** In web servers and test runners, make sure the debugger is
+  attached to the process that actually runs your code.
+- **Not trying a hypothesis first.** Decide what you expect a variable to be _before_ printing it.
+  The surprise is the clue.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: a loop of 10,000 iterations fails only when x is negative. How do you stop exactly there?">
+  Use a conditional breakpoint: `b 12, x < 0` in pdb (or a right-click condition in VS Code). It
+  pauses only on the iteration that matters.
+</Reveal>
+
+<KeyTakeaways>
+
+- `breakpoint()` or `python -m pdb` pauses the program so you can look instead of guessing.
+- `n` steps over, `s` steps into, `c` continues, `p` prints, `w` shows the stack, and `u` / `d` move along it.
+- Post-mortem debugging opens the debugger at the crash with every variable intact.
+- After finding the bug, write a test that would have caught it.
+
+</KeyTakeaways>

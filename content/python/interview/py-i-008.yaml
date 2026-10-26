@@ -1,0 +1,36 @@
+id: py-i-008
+question: What is truthiness in Python, and how should you check for `None`?
+difficulty: easy
+tags:
+  - truthiness
+  - none
+  - conditions
+shortAnswer: |
+  Every object is either truthy or falsy in a boolean context. `None`, `False`, zero numbers
+  and empty containers are falsy, and everything else is truthy by default. Check for `None`
+  explicitly with `is None`, because `if not x:` also catches `0`, `""` and `[]`.
+detailedAnswer: |
+  `bool(obj)` uses `obj.__bool__()`, or `len(obj) != 0` if there's no `__bool__`, and
+  defaults to `True`.
+
+  This makes `if items:` a concise and idiomatic emptiness test. But when `0` or `""` are
+  valid values, falsiness causes bugs. `count = count or 10` replaces a legitimate `0` with
+  `10`.
+
+  `and` and `or` return one of their **operands**, not a bool, and they short-circuit.
+  `name or "anonymous"` returns `name` if it's truthy.
+code:
+  language: python
+  code: |
+    def page_size(value=None):
+        return 10 if value is None else value  # 0 is a valid choice
+
+
+    print([bool(x) for x in (None, 0, "", [], "0", [0])])
+    print(page_size(), page_size(0), 0 or 10)
+pitfalls:
+  - Using `if not value` when 0 or an empty string is meaningful.
+followUps:
+  - What does `[] or None` evaluate to?
+verify: |
+  assert page_size(0) == 0 and page_size() == 10

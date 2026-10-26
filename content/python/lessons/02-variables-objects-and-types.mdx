@@ -1,0 +1,126 @@
+---
+title: Variables, objects and types
+summary: In Python a variable is a name that points at an object, and every object carries its own type. This one idea explains assignment, None, dynamic typing and most "surprising" behaviour.
+estimatedMinutes: 15
+difficulty: easy
+section: Basics
+objectives:
+  - Describe a variable as a name bound to an object
+  - Inspect any object's identity, type and value with `id`, `type` and `isinstance`
+  - Explain "dynamically typed" and "strongly typed" with an example of each
+  - Use `None` correctly and test for it with `is`
+prerequisites:
+  - How Python runs your code
+tags: [python, variables, types]
+practice: [py-p-013]
+interview: [py-i-001, py-i-002, py-i-008, py-i-009]
+---
+
+## Intuition: luggage tags, not boxes
+
+In many languages a variable is a **box** with a fixed size and type, and assignment copies a value
+into it. In Python a variable is a **luggage tag**. The value is a suitcase (an object) somewhere in
+memory, and the tag is tied to it. Several tags can hang on one suitcase. Retying a tag never
+changes the suitcase.
+
+Every object has three things:
+
+| Property     | Meaning                                 | How to see it       |
+| ------------ | --------------------------------------- | ------------------- |
+| **identity** | which object it is (fixed for its life) | `id(obj)`, `a is b` |
+| **type**     | what it is and what it can do           | `type(obj)`         |
+| **value**    | the data it holds                       | `print(obj)`, `==`  |
+
+## See it
+
+Drag to rotate the 3D view. Watch which object each name points at, especially in step 4.
+
+<MemoryViz scenario="objects" />
+
+## The precise rule
+
+`name = expression` does two things, in this order:
+
+1. Evaluate the right-hand side, which produces (or finds) an object.
+2. Bind `name` to that object in the current namespace. If `name` already pointed somewhere, it is
+   simply re-pointed. The old object is untouched.
+
+**Dynamic typing:** a _name_ has no type. The same name can point at an int now and a str later.
+**Strong typing:** an _object's_ type never silently changes, so Python refuses to mix types in
+ways that don't make sense, such as `"1" + 1`.
+
+## Worked example
+
+```python title="objects.py"
+x = 42
+print(type(x).__name__, isinstance(x, int))
+
+x = "now a string"  # the name x is re-pointed; no type declaration needed
+print(type(x).__name__)
+
+try:
+    "1" + 1  # strong typing: str and int are never mixed silently
+except TypeError as err:
+    print("TypeError:", err)
+
+a = 1000
+b = a  # no copy: b is a second name for the same object
+print(a is b, id(a) == id(b))
+
+result = None  # "no value yet"
+print(result is None, type(result).__name__)
+```
+
+```text title="Output"
+int True
+str
+TypeError: can only concatenate str (not "int") to str
+True True
+True NoneType
+```
+
+Line by line:
+
+- `type(x).__name__` gives the type's name as a string. `isinstance(x, int)` is the preferred way
+  to _test_ a type, because it also accepts subclasses (`isinstance(True, int)` is `True`, since
+  `bool` is a subclass of `int`).
+- Re-assigning `x` needs no declaration: the _name_ changes target, so the int `42` is unaffected.
+- `"1" + 1` raises instead of guessing. Convert on purpose with `int("1") + 1` or `"1" + str(1)`.
+- `a is b` compares **identity** (same object?). `==` compares **value** (equal content?).
+- `None` is a single object of type `NoneType`. Test it with `is None`, never `== None`.
+
+<Callout type="tip" title="Truthiness preview">
+  Every object is either "truthy" or "falsy" in an `if`. Falsy: `None`, `False`, `0`, `0.0`, `""`,
+  `[]`, `{}`, `set()`. Almost everything else is truthy, including `"0"` and `[0]`. Lesson 05 uses
+  this a lot.
+</Callout>
+
+## Common mistakes
+
+<Callout type="warning" title="Using is to compare values">
+  `x is 1000` might happen to work in one place and fail in another, because whether two equal
+  numbers are the *same object* is a CPython detail. Use `==` for values. Use `is` only for
+  singletons such as `None`, `True` and `False`.
+</Callout>
+
+- **Shadowing built-ins.** `list = [1, 2]` or `type = "admin"` makes the built-in unusable in that
+  scope (`list("abc")` then fails with `TypeError: 'list' object is not callable`). Pick another name.
+- **Thinking `b = a` copies.** For lists and dicts this leads to "spooky" shared changes. Lesson 10
+  covers copying.
+- **Comparing with `type(x) == int`.** It rejects subclasses. Prefer `isinstance(x, int)`.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: after a = [1]; b = a; a = [2], what is b?">
+  `[1]`. `a = [2]` re-points the name `a` to a **new** list. `b` still points at the original `[1]`
+  object. No object was changed, only a tag was moved.
+</Reveal>
+
+<KeyTakeaways>
+
+- A variable is a **name bound to an object**. Assignment never copies.
+- Every object has an **identity**, a **type** and a **value**.
+- **Dynamic typing:** names have no type. **Strong typing:** objects never change type silently.
+- Use `==` for value, `is` for identity (mostly `is None`), and `isinstance` for type checks.
+
+</KeyTakeaways>

@@ -1,0 +1,41 @@
+id: py-i-020
+question: How do you use `heapq`, and how do you get a max-heap or a priority queue?
+difficulty: medium
+tags:
+  - heapq
+  - priority-queue
+shortAnswer: |
+  `heapq` keeps a plain list in min-heap order: `heappush` and `heappop` are O(log n),
+  `heapify` is O(n), and `h[0]` is the minimum. For a max-heap, push negated numbers. For a
+  priority queue, push `(priority, counter, item)` tuples, so ties never compare the items.
+  `nsmallest` and `nlargest` give top-k results.
+detailedAnswer: |
+  The heap invariant is `h[i] <= h[2i+1]` and `h[i] <= h[2i+2]`. Only `h[0]` is meaningful.
+  The list isn't sorted.
+
+  The counter tie-breaker matters. Without it, equal priorities fall back to comparing the
+  items, which raises `TypeError` for dicts, or silently orders by the item's own value.
+  `itertools.count()` provides increasing numbers, which also makes equal priorities FIFO.
+
+  For thread-safe scheduling there's `queue.PriorityQueue`. It wraps heapq with locks.
+code:
+  language: python
+  code: |
+    import heapq
+    from itertools import count
+
+    tasks, order = [], count()
+    for prio, task in [(2, {"name": "write"}), (1, {"name": "plan"}), (2, {"name": "test"})]:
+        heapq.heappush(tasks, (prio, next(order), task))
+    print([heapq.heappop(tasks)[2]["name"] for _ in range(3)])
+
+    max_heap = [-x for x in [3, 9, 4]]
+    heapq.heapify(max_heap)
+    print(-max_heap[0], heapq.nlargest(2, [3, 9, 4]))
+pitfalls:
+  - Assuming the heap list is sorted.
+  - Mixing `list.sort`/`append` with heapq functions.
+followUps:
+  - Find the median of a stream with two heaps.
+verify: |
+  assert -max_heap[0] == 9

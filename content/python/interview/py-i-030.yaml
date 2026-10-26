@@ -1,0 +1,47 @@
+id: py-i-030
+question: What's the difference between an iterable, an iterator and a generator?
+difficulty: medium
+tags:
+  - iterators
+  - generators
+  - protocols
+shortAnswer: |
+  An **iterable** can produce an iterator (`__iter__`): lists, dicts, files, ranges. An
+  **iterator** produces values one at a time with `__next__` and raises `StopIteration` at
+  the end. It's single-use and its `__iter__` returns itself. A **generator** is an iterator
+  created by a function with `yield` (or a generator expression), with its state saved
+  automatically between values.
+detailedAnswer: |
+  `for x in obj` calls `iter(obj)` once, then `next()` repeatedly. A list is iterable but not
+  an iterator, so you can loop over it many times. `iter(list)` gives a fresh
+  `list_iterator` each time.
+
+  Writing an iterator class by hand means managing the state in `__next__`. A generator
+  function does the same in a few lines, and its local variables persist across `yield`s.
+  Generators also support `send()`, `throw()` and `close()`, which are the basis of
+  coroutines.
+
+  To make your own class reusable, make `__iter__` a generator. Don't return `self`.
+code:
+  language: python
+  code: |
+    nums = [1, 2]
+    it = iter(nums)
+    print(iter(it) is it, iter(nums) is iter(nums))
+
+
+    def countdown(n):
+        while n:
+            yield n
+            n -= 1
+
+
+    g = countdown(3)
+    print(next(g), list(g), list(g))
+pitfalls:
+  - Calling a list an iterator.
+  - Returning `self` from `__iter__` in a container class.
+followUps:
+  - How does a `for` loop know when to stop?
+verify: |
+  assert list(countdown(2)) == [2, 1]

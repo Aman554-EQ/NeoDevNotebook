@@ -1,0 +1,66 @@
+id: py-p-045
+title: 🐞 The iterator that only works once
+difficulty: medium
+tags:
+  - debugging
+  - iterators
+  - iterables
+statement: |
+  `Playlist` works the first time you loop over it, but the second loop yields nothing. Fix
+  the class so it can be iterated any number of times, including in nested loops.
+
+  ```python
+  class Playlist:
+      def __init__(self, songs):
+          self.songs = songs
+          self.index = 0
+
+      def __iter__(self):
+          return self
+
+      def __next__(self):
+          if self.index >= len(self.songs):
+              raise StopIteration
+          song = self.songs[self.index]
+          self.index += 1
+          return song
+  ```
+constraints: []
+examples:
+  - input: p = Playlist(["a", "b"]); list(p), list(p)
+    output: (['a', 'b'], ['a', 'b'])
+hints:
+  - An ITERATOR remembers a position and is used up. An ITERABLE hands out fresh iterators.
+  - Make `__iter__` a generator function.
+solution:
+  language: python
+  code: |
+    class Playlist:
+        def __init__(self, songs: list[str]) -> None:
+            self.songs = songs
+
+        def __iter__(self):
+            for song in self.songs:  # a NEW generator every time
+                yield song
+
+
+    p = Playlist(["a", "b"])
+    print(list(p), list(p))
+    print([(x, y) for x in p for y in p])
+  explanation: |
+    The original class was its own iterator: `__iter__` returned `self`, so every loop
+    shared one `index`. After the first full loop, `index` sat at the end forever.
+
+    Making `__iter__` a generator function means each `for` (or `list()`) call gets a
+    brand-new generator with its own position. That's the iterable/iterator split from
+    lesson 20. Nested loops over the same playlist now work independently.
+complexity:
+  time: O(n) per loop
+  space: O(1) per active loop
+variations:
+  - Add `__len__` and `__getitem__` and see which built-ins start working.
+verify: |
+  p = Playlist(["a", "b"])
+  assert list(p) == ["a", "b"] and list(p) == ["a", "b"]
+  assert [(x, y) for x in p for y in p] == [("a", "a"), ("a", "b"), ("b", "a"), ("b", "b")]
+  assert list(Playlist([])) == []

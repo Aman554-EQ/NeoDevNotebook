@@ -1,0 +1,369 @@
+{
+ "version": 1,
+ "python": "3.13",
+ "source": "def tax(amount, rate=0.2):\n    return amount * rate\n\n\ndef total(price, qty):\n    subtotal = price * qty\n    return subtotal + tax(subtotal)\n\n\nprint(total(10, 3))\n",
+ "steps": [
+  {
+   "line": 1,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": []
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 5,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "tax",
+       "function tax"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 10,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "tax",
+       "function tax"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 5,
+   "event": "call",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "tax",
+       "function tax"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "price",
+       "10"
+      ],
+      [
+       "qty",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 6,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "tax",
+       "function tax"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "price",
+       "10"
+      ],
+      [
+       "qty",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 7,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "tax",
+       "function tax"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "price",
+       "10"
+      ],
+      [
+       "qty",
+       "3"
+      ],
+      [
+       "subtotal",
+       "30"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 1,
+   "event": "call",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "tax",
+       "function tax"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "price",
+       "10"
+      ],
+      [
+       "qty",
+       "3"
+      ],
+      [
+       "subtotal",
+       "30"
+      ]
+     ]
+    },
+    {
+     "name": "tax",
+     "locals": [
+      [
+       "amount",
+       "30"
+      ],
+      [
+       "rate",
+       "0.2"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 2,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "tax",
+       "function tax"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "price",
+       "10"
+      ],
+      [
+       "qty",
+       "3"
+      ],
+      [
+       "subtotal",
+       "30"
+      ]
+     ]
+    },
+    {
+     "name": "tax",
+     "locals": [
+      [
+       "amount",
+       "30"
+      ],
+      [
+       "rate",
+       "0.2"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 2,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "tax",
+       "function tax"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "price",
+       "10"
+      ],
+      [
+       "qty",
+       "3"
+      ],
+      [
+       "subtotal",
+       "30"
+      ]
+     ]
+    },
+    {
+     "name": "tax",
+     "locals": [
+      [
+       "amount",
+       "30"
+      ],
+      [
+       "rate",
+       "0.2"
+      ]
+     ]
+    }
+   ],
+   "stdout": "",
+   "returnValue": "6.0"
+  },
+  {
+   "line": 7,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "tax",
+       "function tax"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "price",
+       "10"
+      ],
+      [
+       "qty",
+       "3"
+      ],
+      [
+       "subtotal",
+       "30"
+      ]
+     ]
+    }
+   ],
+   "stdout": "",
+   "returnValue": "36.0"
+  },
+  {
+   "line": 10,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "tax",
+       "function tax"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    }
+   ],
+   "stdout": "36.0\n",
+   "returnValue": "None"
+  }
+ ],
+ "stdout": "36.0\n",
+ "truncated": false
+}

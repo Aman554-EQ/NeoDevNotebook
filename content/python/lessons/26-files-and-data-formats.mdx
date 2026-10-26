@@ -1,0 +1,141 @@
+---
+title: Files and data formats
+summary: Read and write text and binary files safely, build paths with pathlib, and convert data to and from CSV and JSON, the two formats you'll meet everywhere.
+estimatedMinutes: 15
+difficulty: simple
+section: Core Language
+objectives:
+  - Open files with the right mode and encoding, always inside `with`
+  - Build, inspect and walk paths with `pathlib.Path`
+  - Read and write CSV with `csv.DictReader` and `csv.DictWriter`
+  - Convert between Python objects and JSON with `json.dumps` / `json.loads`
+prerequisites:
+  - Context managers
+  - Dictionaries
+tags: [python, files, pathlib, csv, json]
+practice: [py-p-026, py-p-058]
+---
+
+## Intuition: a library book
+
+Opening a file is borrowing a book: you must say **how** you'll use it (read, write, append) and
+which **language** it's written in (encoding). And you must give it back (close it). `with` returns
+it automatically. CSV and JSON are agreed formats for writing structured data as text, so any program
+can read it back.
+
+## See it
+
+A recorded run that parses CSV text, totals a column, and round-trips the result through JSON. It
+uses an in-memory text stream (`io.StringIO`), which behaves exactly like an open text file.
+
+<CodeStepper
+  trace="files-csv-json"
+  title="CSV in, JSON out"
+  caption="DictReader turns each CSV row into a dict of strings; notice the scores are '9' and '7' (text), so the loop converts with int(). json.dumps writes a string; json.loads reads it back into a dict."
+/>
+
+## The precise rules
+
+| Mode      | Meaning                                               |
+| --------- | ----------------------------------------------------- |
+| `"r"`     | read text (the default); error if the file is missing |
+| `"w"`     | write text; **creates or truncates** the file         |
+| `"a"`     | append text at the end                                |
+| `"x"`     | create; error if it already exists                    |
+| add `"b"` | binary: read/write `bytes`, no encoding               |
+
+- Always pass `encoding="utf-8"` for text. Otherwise Python uses a platform default (on Windows
+  that's often not UTF-8).
+- Open CSV files with `newline=""`, so the csv module controls line endings.
+- `json` maps `dict` ↔ object, `list` ↔ array, `str`, `int` / `float`, `True` / `False` ↔
+  `true` / `false`, and `None` ↔ `null`. Tuples become lists, and other types need conversion.
+
+## Worked example
+
+```python title="files.py"
+import csv
+import json
+import tempfile
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as tmp:
+    folder = Path(tmp)
+    notes = folder / "notes.txt"  # / joins path parts on every OS
+
+    notes.write_text("first line\nsecond line\n", encoding="utf-8")
+    with notes.open("a", encoding="utf-8") as f:
+        f.write("third line\n")
+
+    with notes.open(encoding="utf-8") as f:
+        for number, line in enumerate(f, start=1):
+            print(number, line.rstrip("\n"))
+
+    print(notes.name, notes.suffix, notes.stem, notes.exists())
+
+    scores = folder / "scores.csv"
+    with scores.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["name", "score"])
+        writer.writeheader()
+        writer.writerows([{"name": "ada", "score": 9}, {"name": "bo", "score": 7}])
+
+    with scores.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    print(rows[0], sum(int(r["score"]) for r in rows))
+
+    config = {"debug": False, "ports": (80, 443), "owner": None}
+    (folder / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+    loaded = json.loads((folder / "config.json").read_text(encoding="utf-8"))
+    print(loaded, loaded == config)
+    print(sorted(p.name for p in folder.iterdir()))
+```
+
+```text title="Output"
+1 first line
+2 second line
+3 third line
+notes.txt .txt notes True
+{'name': 'ada', 'score': '9'} 16
+{'debug': False, 'ports': [80, 443], 'owner': None} False
+['config.json', 'notes.txt', 'scores.csv']
+```
+
+What to notice:
+
+- Iterating a file yields lines **with** their `\n`, which `rstrip("\n")` removes. Iterating is
+  memory-friendly even for huge files.
+- CSV values always come back as **strings** (`'9'`), so convert them yourself.
+- `loaded == config` is `False`: JSON has no tuples, so `(80, 443)` came back as `[80, 443]`.
+- `tempfile.TemporaryDirectory()` gives a scratch folder that's deleted afterwards. That's handy in
+  tests and examples.
+
+## Common mistakes
+
+<Callout type="warning" title="Opening an existing file with 'w'">
+  Mode `"w"` empties the file the moment it's opened, before you write anything. Use `"a"` to add,
+  or `"x"` to refuse to overwrite.
+</Callout>
+
+- **No encoding.** A file written on one OS shows `UnicodeDecodeError` or garbled text on another.
+  Always say `encoding="utf-8"`.
+- **Building paths with string `+`.** `"data/" + name` breaks across OSes. Use `Path("data") / name`.
+- **`json.dumps` on unsupported types** (sets, dates, custom objects) raises
+  `TypeError: Object of type set is not JSON serializable`. Convert them first.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: how do you count lines in a 10 GB log without loading it into memory?"
+>
+  `with open(path, encoding="utf-8") as f: count = sum(1 for _ in f)`. The file object is a lazy
+  iterator, so only one line is in memory at a time.
+</Reveal>
+
+<KeyTakeaways>
+
+- Use `with` and `encoding="utf-8"` every time. `"w"` truncates, and `"a"` appends.
+- `pathlib.Path` builds and inspects paths with `/`, `.name`, `.suffix` and `.exists()`.
+- CSV rows come back as strings. JSON round-trips dicts, lists and primitives, and tuples become lists.
+- Iterate files line by line for large data.
+
+</KeyTakeaways>

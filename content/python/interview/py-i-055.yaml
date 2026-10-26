@@ -1,0 +1,43 @@
+id: py-i-055
+question: Why use `logging` instead of `print`?
+difficulty: simple
+tags:
+  - logging
+  - observability
+shortAnswer: |
+  `logging` adds levels (DEBUG to CRITICAL), named hierarchical loggers, timestamps and
+  context through formatters, and configurable destinations (console, files, services). All of
+  it can be changed in one place without editing code. `print` is fine for quick experiments
+  and CLI output, but not for diagnosing a running application.
+detailedAnswer: |
+  Best practices:
+
+  - In each module: `log = logging.getLogger(__name__)`. Only the application calls
+    `basicConfig` or `dictConfig`, never libraries.
+  - Lazy formatting: `log.info("user %s paid %.2f", user, amount)`.
+  - In `except` blocks: `log.exception("payment failed")` records the traceback.
+  - Choose levels deliberately: DEBUG for detail, INFO for milestones, WARNING for
+    recoverable surprises, ERROR for failed operations.
+  - Structured (JSON) logs make searching in production tools easy.
+code:
+  language: python
+  code: |
+    import io
+    import logging
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    log = logging.getLogger("shop.payments")
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    log.debug("hidden at INFO level")
+    log.info("paid %.2f", 9.5)
+    print(stream.getvalue().strip())
+pitfalls:
+  - Calling `basicConfig` inside a library.
+  - Using f-strings in log calls on hot paths.
+followUps:
+  - How do logger hierarchies and propagation work?
+verify: |
+  assert stream.getvalue().strip() == 'INFO shop.payments: paid 9.50'

@@ -1,0 +1,59 @@
+id: py-p-041
+title: Product of array except self
+difficulty: medium
+tags:
+  - prefix-products
+  - arrays
+statement: |
+  Write `products_except_self(nums)` that returns a list where position `i` holds the
+  product of all numbers except `nums[i]`. **Don't use division** (the list may contain
+  zeros).
+constraints:
+  - "`1 <= len(nums) <= 10**5`"
+  - O(n) time.
+examples:
+  - input: products_except_self([1, 2, 3, 4])
+    output: "[24, 12, 8, 6]"
+  - input: products_except_self([0, 4, 5])
+    output: "[20, 0, 0]"
+hints:
+  - The answer at i = (product of everything left of i) × (product of everything right of i).
+  - Compute left products in one pass and right products in a second pass.
+solution:
+  language: python
+  code: |
+    def products_except_self(nums: list[int]) -> list[int]:
+        n = len(nums)
+        result = [1] * n
+        left = 1
+        for i in range(n):  # result[i] = product of nums[:i]
+            result[i] = left
+            left *= nums[i]
+        right = 1
+        for i in range(n - 1, -1, -1):  # multiply in product of nums[i+1:]
+            result[i] *= right
+            right *= nums[i]
+        return result
+
+
+    print(products_except_self([1, 2, 3, 4]), products_except_self([0, 4, 5]))
+  explanation: |
+    Dividing the total product by `nums[i]` fails with zeros. Instead, split the answer into
+    two parts: everything to the left of `i` and everything to the right.
+
+    The first pass stores the running product of the left side **before** including
+    `nums[i]`. The second pass walks backwards with a running product of the right side and
+    multiplies it in. Two linear passes and no division make it O(n), with only the output
+    list as extra memory.
+complexity:
+  time: O(n)
+  space: O(1) besides the output
+variations:
+  - Return the products modulo 10**9 + 7 for huge inputs.
+verify: |
+  import math, random
+  random.seed(5)
+  for _ in range(200):
+      nums = [random.randint(-3, 3) for _ in range(random.randint(1, 8))]
+      expected = [math.prod(nums[:i] + nums[i + 1:]) for i in range(len(nums))]
+      assert products_except_self(nums) == expected, nums

@@ -1,0 +1,125 @@
+---
+title: Stacks and queues
+summary: Two of the most useful access patterns. A list makes a perfect stack (last in, first out), but a poor queue. collections.deque gives O(1) at both ends, plus a bounded maxlen for "keep the last N".
+estimatedMinutes: 15
+difficulty: simple
+section: Data Structures
+objectives:
+  - Implement a stack (LIFO) with a list
+  - Implement a queue (FIFO) with collections.deque, and explain why not a list
+  - Keep only the most recent N items with `deque(maxlen=N)`
+  - Recognise problems that need a stack or a queue
+prerequisites:
+  - Lists in depth
+tags: [python, stack, queue, deque]
+practice: [py-p-031, py-p-037, py-p-049]
+interview: [py-i-019]
+---
+
+## Intuition: plates and a ticket line
+
+A **stack** is a pile of plates: you add and take from the top. The last plate in is the first out
+(LIFO). Undo history, the call stack and bracket matching all work like this.
+
+A **queue** is a ticket line: people join at the back and are served from the front. First in is
+first out (FIFO). Print jobs, breadth-first search and task schedulers work like this.
+
+## See it
+
+<DequeViz />
+
+## The precise rules
+
+| Need                      | Use                 | Add                          | Remove      | Cost     |
+| ------------------------- | ------------------- | ---------------------------- | ----------- | -------- |
+| Stack (LIFO)              | `list`              | `append(x)`                  | `pop()`     | O(1)     |
+| Queue (FIFO)              | `collections.deque` | `append(x)`                  | `popleft()` | O(1)     |
+| Queue with a list (avoid) | `list`              | `append(x)`                  | `pop(0)`    | **O(n)** |
+| Last N items              | `deque(maxlen=N)`   | `append(x)` drops the oldest |             | O(1)     |
+
+Removing from an empty list or deque raises `IndexError`, so check emptiness first (`if stack:`).
+
+## Worked example
+
+```python title="stack_queue.py"
+from collections import deque
+
+stack = []
+stack.append("a")
+stack.append("b")
+print(stack.pop(), stack)  # last in, first out
+
+queue = deque()
+queue.append("first")
+queue.append("second")
+print(queue.popleft(), queue)  # first in, first out
+
+recent = deque(maxlen=3)
+for page in ["home", "about", "blog", "contact"]:
+    recent.append(page)  # the oldest falls off automatically
+print(list(recent))
+
+try:
+    deque().popleft()
+except IndexError as err:
+    print("IndexError:", err)
+
+
+def balanced(text: str) -> bool:
+    """Brackets match if every closer pairs with the most recent opener: a stack."""
+    pairs = {")": "(", "]": "[", "}": "{"}
+    stack = []
+    for ch in text:
+        if ch in "([{":
+            stack.append(ch)
+        elif ch in pairs:
+            if not stack or stack.pop() != pairs[ch]:
+                return False
+    return not stack
+
+
+print(balanced("f(a[1], {b: 2})"), balanced("(]"), balanced("(("))
+```
+
+```text title="Output"
+b ['a']
+first deque(['second'])
+['about', 'blog', 'contact']
+IndexError: pop from an empty deque
+True False False
+```
+
+What to notice:
+
+- `balanced` is the classic stack problem: the most recent unmatched opener must match the next
+  closer. If anything is left on the stack at the end, some opener was never closed.
+- `deque(maxlen=3)` is a ready-made "recent items" buffer. No manual trimming needed.
+
+## Common mistakes
+
+<Callout type="warning" title="queue.pop(0) on a list">
+  It works, and it's fine for 10 items, but with 100,000 items every call moves the whole list.
+  `deque.popleft()` is O(1) regardless of size.
+</Callout>
+
+- **Popping an empty stack.** Guard with `if stack:` or catch `IndexError`.
+- **Indexing the middle of a deque in a loop.** `d[i]` is O(n) towards the middle. Deques are for
+  their ends.
+- **Confusing `queue.Queue` with deque.** `queue.Queue` is a thread-safe queue for passing work
+  between threads (lesson 27). For single-threaded code, use `deque`.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: which structure for 'undo the last 50 edits'?">
+  `deque(maxlen=50)` used as a stack: `append` each edit and `pop` to undo. The `maxlen` silently
+  discards edits older than 50.
+</Reveal>
+
+<KeyTakeaways>
+
+- Stack = LIFO: use a list with `append` and `pop`.
+- Queue = FIFO: use `deque` with `append` and `popleft`, never `list.pop(0)` for large data.
+- `deque(maxlen=N)` keeps the most recent N items automatically.
+- Matching, undo and depth-first search use stacks. Scheduling and breadth-first search use queues.
+
+</KeyTakeaways>

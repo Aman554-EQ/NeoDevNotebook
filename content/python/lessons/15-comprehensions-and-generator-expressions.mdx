@@ -1,0 +1,113 @@
+---
+title: Comprehensions and generator expressions
+summary: Build lists, dicts and sets in one readable line, filter while you build, and switch to a lazy generator expression when the data is large or you only need to consume it once.
+estimatedMinutes: 15
+difficulty: simple
+section: Data Structures
+objectives:
+  - Write list, dict and set comprehensions with filters
+  - Read nested comprehensions in the right order
+  - Use a conditional expression inside a comprehension
+  - Choose a generator expression to save memory, and know it can only be consumed once
+prerequisites:
+  - Loops
+  - Sets
+tags: [python, comprehensions, generators]
+practice: [py-p-018]
+interview: [py-i-023]
+---
+
+## Intuition: an assembly line
+
+A comprehension is a tiny assembly line. Items come off a belt (`for x in …`), an inspector rejects
+some (`if …`), and a machine shapes the rest (`x * x`). The result goes into a box: a list `[]`, a
+set `{}` or a dict `{k: v}`. Swap the box for parentheses `()` and you get an assembly line that
+makes each item **only when someone asks for it**. That's a generator.
+
+## See it
+
+<CompPipelineViz />
+
+## The precise rules
+
+```python title="shape.py" norun
+[expression for item in iterable if condition]        # list
+{key: value for item in iterable if condition}        # dict
+{expression for item in iterable if condition}        # set
+(expression for item in iterable if condition)        # generator expression (lazy)
+```
+
+- Several `for` clauses read **left to right like nested loops**:
+  `[(r, c) for r in rows for c in cols]` means `for r in rows:` → `for c in cols:`.
+- `if` at the end **filters**. `a if cond else b` at the front **chooses a value** and filters
+  nothing.
+- A generator expression computes items one at a time, so its memory use is tiny and constant. It
+  can be iterated **only once**.
+
+## Worked example
+
+```python title="comprehensions.py"
+import sys
+
+nums = [1, 2, 3, 4, 5, 6]
+print([x * x for x in nums if x % 2 == 0])
+print({w: len(w) for w in ["hi", "hello"]}, {x % 3 for x in nums})
+print([(r, c) for r in range(2) for c in range(2)])
+print([[r * c for c in range(3)] for r in range(3)])  # a 3x3 table
+print(["even" if x % 2 == 0 else "odd" for x in range(4)])
+
+big_list = [x for x in range(100_000)]
+big_gen = (x for x in range(100_000))
+print(sys.getsizeof(big_list) > 100_000, sys.getsizeof(big_gen) < 500)
+print(sum(x * x for x in range(5)))  # no extra brackets needed as the only argument
+
+squares = (x * 10 for x in range(3))
+print(list(squares), list(squares))  # the second pass finds it exhausted
+```
+
+```text title="Output"
+[4, 16, 36]
+{'hi': 2, 'hello': 5} {0, 1, 2}
+[(0, 0), (0, 1), (1, 0), (1, 1)]
+[[0, 0, 0], [0, 1, 2], [0, 2, 4]]
+['even', 'odd', 'even', 'odd']
+True True
+30
+[0, 10, 20] []
+```
+
+What to notice:
+
+- The list of 100,000 ints takes hundreds of kilobytes for its slots alone. The generator object is
+  a couple of hundred bytes, because it stores _how_ to make the values, not the values.
+- `sum(x * x for x in range(5))` streams values straight into `sum`. Use it for totals, `any`, `all`,
+  `max` and `min`.
+- An exhausted generator silently yields nothing. If you need the data twice, use a list.
+
+## Common mistakes
+
+<Callout type="warning" title="Comprehensions for side effects">
+  `[print(x) for x in items]` builds a useless list of `None`s. If you don't need the result, write
+  a normal `for` loop.
+</Callout>
+
+- **Unreadable nesting.** More than two `for`s or a long condition: switch to a loop with clear names.
+- **Filter vs choose.** `[x for x in xs if x > 0 else 0]` is a `SyntaxError`. A value choice goes
+  first: `[x if x > 0 else 0 for x in xs]`.
+- **Reusing a generator.** The second loop over it does nothing.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: flatten [[1, 2], [3], [4, 5]] with a comprehension.">
+  `[x for row in matrix for x in row]` gives `[1, 2, 3, 4, 5]`. The outer loop (`row`) comes first,
+  exactly as in nested `for` statements.
+</Reveal>
+
+<KeyTakeaways>
+
+- Comprehensions = loop + optional filter + expression, in brackets for list, set or dict.
+- Multiple `for`s nest left to right. A trailing `if` filters, and a leading `if/else` picks a value.
+- Generator expressions are lazy, memory-light and single-use.
+- Prefer a plain loop when a comprehension stops being readable.
+
+</KeyTakeaways>

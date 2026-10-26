@@ -1,0 +1,42 @@
+id: py-p-005
+title: Print a temperature table
+difficulty: easy
+tags:
+  - f-strings
+  - formatting
+statement: |
+  Write `temperature_table(celsius_values)` that returns a list of lines formatted as
+  `"  20.0°C =   68.0°F"`. Both numbers have **one decimal** and are right-aligned in a
+  width of 6 characters. Use `F = C × 9/5 + 32`.
+constraints:
+  - "`-100 <= C <= 1000`"
+examples:
+  - input: temperature_table([20, -40])
+    output: "['  20.0°C =   68.0°F', ' -40.0°C =  -40.0°F']"
+hints:
+  - The format spec `:6.1f` means width 6, one decimal, fixed-point.
+solution:
+  language: python
+  code: |
+    def temperature_table(celsius_values: list[float]) -> list[str]:
+        return [f"{c:6.1f}°C = {c * 9 / 5 + 32:6.1f}°F" for c in celsius_values]
+
+
+    for line in temperature_table([0, 20, 37.5, -40]):
+        print(line)
+  explanation: |
+    Inside an f-string, everything after `:` is a format spec. `6.1f` pads the number to
+    6 characters (right-aligned by default) and shows exactly one digit after the decimal
+    point, so the columns line up.
+
+    The expression `c * 9 / 5 + 32` is evaluated inside the braces. f-strings accept any
+    expression.
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Add a header row and left-align a label column with `:<10`.
+verify: |
+  assert temperature_table([20, -40]) == ["  20.0°C =   68.0°F", " -40.0°C =  -40.0°F"]
+  assert temperature_table([]) == []
+  assert temperature_table([37.5])[0] == "  37.5°C =   99.5°F"

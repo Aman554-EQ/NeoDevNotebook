@@ -1,0 +1,53 @@
+id: py-i-001
+question: What is the difference between mutable and immutable objects in Python? Give examples.
+difficulty: easy
+tags:
+  - mutability
+  - data-model
+shortAnswer: |
+  A mutable object can change in place after creation (list, dict, set, most class instances).
+  An immutable object can't (int, float, str, tuple, frozenset, bytes, None). Operations on an
+  immutable object return a new object instead. Only immutable-by-value objects can safely be
+  dict keys.
+detailedAnswer: |
+  Every object has an identity (`id`), a type and a value. Mutability is about whether the
+  **value** can change while the identity stays the same.
+
+  - `nums.append(4)` changes the list in place, and its `id` doesn't change.
+  - `s = s + "!"` builds a **new** string and rebinds `s`, and the old string is untouched.
+
+  Why it matters:
+
+  1. **Aliasing:** two names pointing at one mutable object see each other's changes.
+  2. **Hashing:** dict keys and set members must not change, so they must be hashable
+     (in practice, immutable all the way down).
+  3. **Defaults and sharing:** mutable default arguments and class attributes are shared,
+     which is a classic bug source.
+  4. **Thread safety and reasoning:** immutable data can be shared freely.
+
+  A tuple is immutable, but it can **contain** mutable objects: the tuple's slots can't
+  change, but a list inside one can.
+code:
+  language: python
+  code: |
+    nums = [1, 2, 3]
+    before = id(nums)
+    nums.append(4)
+    print(nums, id(nums) == before)  # same object, changed in place
+
+    s = "hi"
+    before = id(s)
+    s += "!"
+    print(s, id(s) == before)  # a new object
+
+    t = (1, [2])
+    t[1].append(3)
+    print(t)  # the tuple didn't change; the list inside it did
+pitfalls:
+  - Saying 'tuples are completely unchangeable'. Their contents can be mutable objects.
+  - Confusing rebinding (`x = x + 1`) with mutation (`lst.append(1)`).
+followUps:
+  - Why must dict keys be hashable?
+  - How does `+=` behave differently on a list and on a tuple?
+verify: |
+  assert nums == [1, 2, 3, 4] and s == "hi!" and t == (1, [2, 3])

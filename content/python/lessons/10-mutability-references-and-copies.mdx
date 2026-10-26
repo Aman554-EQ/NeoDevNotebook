@@ -1,0 +1,149 @@
+---
+title: Mutability, references and copies
+summary: Which objects can change in place, why changes can appear through another name, the difference between identity and equality, and exactly what shallow and deep copies do.
+estimatedMinutes: 20
+difficulty: medium
+section: Basics
+objectives:
+  - Classify types as mutable or immutable
+  - Explain aliasing and predict when a change is visible through another name
+  - Choose between assignment, a shallow copy and a deep copy
+  - Avoid the mutable-default-argument and `[[0] * n] * m` traps
+prerequisites:
+  - Variables, objects and types
+  - Functions
+tags: [python, mutability, copy, references]
+practice: [py-p-011, py-p-029, py-p-042]
+interview: [py-i-001, py-i-005, py-i-007]
+---
+
+## Intuition: shared documents
+
+A **mutable** object is like a shared online document: everyone who has the link sees your edits.
+An **immutable** object is like a printed page. To "change" it, you print a new page, and anyone
+holding the old page still sees the old text.
+
+| Immutable (can't change in place)                                    | Mutable (can change in place)                            |
+| -------------------------------------------------------------------- | -------------------------------------------------------- |
+| `int`, `float`, `bool`, `str`, `bytes`, `tuple`, `frozenset`, `None` | `list`, `dict`, `set`, `bytearray`, most class instances |
+
+## See it
+
+<MemoryViz scenario="copies" />
+
+## The precise rules
+
+- `b = a` **aliases**: both names point at one object. Mutating it through either name is
+  visible through both.
+- A **shallow copy** (`a.copy()`, `list(a)`, `a[:]`, `copy.copy(a)`) creates a new **outer**
+  container but copies the **references** inside it, so nested objects are shared.
+- A **deep copy** (`copy.deepcopy(a)`) recursively copies the nested objects too.
+- `a == b` asks "equal values?" and `a is b` asks "the same object?".
+- `+=` on a list **mutates** it (like `extend`). `x = x + [...]` builds a **new** list. On
+  immutable types, `+=` always builds a new object.
+- CPython frees an object when nothing references it any more (**reference counting**), and a
+  cycle collector cleans up groups of objects that only reference each other.
+
+## Worked example
+
+```python title="copies.py"
+import copy
+
+a = [1, [2, 3]]
+b = a  # alias
+c = a.copy()  # shallow
+c[1].append(4)  # mutates the SHARED inner list
+d = copy.deepcopy(a)  # fully independent
+print(a, b is a, c is a, c[1] is a[1], d[1] is a[1])
+d[1].append(5)
+print(a, d)
+
+x, y = [1, 2], [1, 2]
+print(x == y, x is y)
+
+nums = [1, 2]
+alias = nums
+nums += [3]  # in place: alias sees it
+nums = nums + [4]  # new list: alias does not
+print(alias, nums)
+
+t = (1, [2])
+t[1].append(3)  # the tuple can't change, but the list inside it can
+print(t)
+
+
+def add_item(item, bucket=[]):  # BUG: one list shared by every call
+    bucket.append(item)
+    return bucket
+
+
+def add_item_fixed(item, bucket=None):
+    if bucket is None:
+        bucket = []
+    bucket.append(item)
+    return bucket
+
+
+print(add_item(1), add_item(2))
+print(add_item_fixed(1), add_item_fixed(2))
+
+bad_grid = [[0] * 3] * 2  # two references to ONE row
+bad_grid[0][0] = 9
+good_grid = [[0] * 3 for _ in range(2)]  # two separate rows
+good_grid[0][0] = 9
+print(bad_grid, good_grid)
+```
+
+```text title="Output"
+[1, [2, 3, 4]] True False True False
+[1, [2, 3, 4]] [1, [2, 3, 4, 5]]
+True False
+[1, 2, 3] [1, 2, 3, 4]
+(1, [2, 3])
+[1, 2] [1, 2]
+[1] [2]
+[[9, 0, 0], [9, 0, 0]] [[9, 0, 0], [0, 0, 0]]
+```
+
+What to notice:
+
+- `c is a` is `False` (a new outer list), but `c[1] is a[1]` is `True` (a shared inner list).
+  That's the whole story of shallow copies.
+- `nums += [3]` mutated the shared list, so `alias` changed. `nums = nums + [4]` created a new
+  list and moved only the `nums` name.
+- A tuple's slots are fixed, but a mutable object _inside_ a tuple can still change. Such a tuple
+  isn't hashable, so it can't be a dict key.
+- The default `bucket=[]` was created **once**, when `def` ran, so every call appends to the same
+  list. Use `None` as the default and create the list inside the function.
+- `[[0] * 3] * 2` repeats a **reference** to one row. Use a comprehension to build separate rows.
+
+## Common mistakes
+
+<Callout type="warning" title="Accidental sharing">
+  If changing one variable mysteriously changes another, print `a is b` and `a[i] is b[i]`. Shared
+  references are the usual cause. Copy deliberately, and only as deep as you need.
+</Callout>
+
+- **Over-using `deepcopy`.** It's slow and copies everything. Often a shallow copy, or building new
+  data, is clearer.
+- **`is` for small numbers.** `256 is 256` is `True` in CPython (small ints are cached), but larger
+  values may differ. It's an implementation detail, so never rely on it.
+- **Returning internal lists from a class.** Callers can then mutate your object's state. Return a
+  copy or a tuple.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: after m = {'k': [1]}; n = dict(m); n['k'].append(2); n['j'] = 0, what is m?">
+  `{'k': [1, 2]}`. `dict(m)` is a shallow copy: a new outer dict (so `'j'` only goes into `n`) that
+  shares the same inner list (so the `append` shows up in both).
+</Reveal>
+
+<KeyTakeaways>
+
+- Assignment aliases. It never copies.
+- A shallow copy makes a new container that shares the inner objects. A deep copy copies everything.
+- `==` compares values and `is` compares identity.
+- Never use a mutable default argument. Use `None` and create the object inside.
+- `+=` mutates lists in place, while `x = x + y` rebinds to a new object.
+
+</KeyTakeaways>

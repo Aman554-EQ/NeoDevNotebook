@@ -1,0 +1,155 @@
+---
+title: How Python runs your code
+summary: What actually happens between pressing Enter and seeing output. Python compiles your file to bytecode, then a small virtual machine runs it one instruction at a time.
+estimatedMinutes: 12
+difficulty: easy
+section: Basics
+objectives:
+  - Run Python code three ways (the REPL, a script, and `python -m`)
+  - Explain the two stages, compile to bytecode and then interpret
+  - Use `dis` to look at the bytecode of a function
+  - Know what `__pycache__` and `.pyc` files are for
+prerequisites:
+  - Python 3.13 installed (`python --version` prints it)
+tags: [python, interpreter, bytecode]
+interview: [py-i-043, py-i-044]
+---
+
+## Intuition: a recipe, translated first
+
+Think of your `.py` file as a recipe written in English for a kitchen whose cooks only read a short,
+strict shorthand. Before cooking starts, someone translates the whole recipe into that shorthand.
+Then a cook follows it one card at a time.
+
+In Python, the translator is the **compiler**, the shorthand is **bytecode**, and the cook is the
+**interpreter** (the CPython virtual machine). Both live inside the `python` program you installed.
+
+<Callout type="intuition" title='"Interpreted" is half the story'>
+  Python is usually called interpreted, but CPython always **compiles first**, to bytecode rather
+  than to machine code. That's why a syntax error on line 50 stops the program before line 1 runs:
+  the whole file must compile before anything executes.
+</Callout>
+
+## See it
+
+Press **Play**, or use **Next step**. Watch line 3 turn into four bytecode instructions, and watch the
+interpreter's value stack grow and shrink as they run.
+
+<BytecodeViz />
+
+## Three ways to run Python
+
+```bash title="Terminal"
+# 1. The REPL: type a line, see the result immediately (exit with exit() or Ctrl+D / Ctrl+Z)
+python
+
+# 2. A script: run a whole file from top to bottom
+python hello.py
+
+# 3. A module by name: Python finds it on its import path and runs it as a script
+python -m http.server 8000
+python -m venv .venv
+```
+
+- The **REPL** (Read–Eval–Print Loop) is for experiments. It prints the value of every expression
+  you type, and a script doesn't.
+- A **script** runs in order, top to bottom. Inside it, `__name__` equals `"__main__"`.
+- **`python -m name`** runs a module or package that ships with Python or is installed in your
+  environment, so you don't need to know where its file lives.
+
+## The precise model
+
+1. **Compile.** CPython parses your source and turns each code block (the module and every
+   function) into a **code object**, which holds bytecode, constants and variable names.
+2. **Cache.** For _imported_ modules, CPython saves the compiled bytecode in `__pycache__/*.pyc`,
+   so the next import skips compiling if the source hasn't changed. The script you run directly
+   isn't cached.
+3. **Interpret.** The virtual machine executes the bytecode instructions in a loop. Most
+   instructions push values onto, or pop them off, a **value stack**.
+
+## Worked example: look at real bytecode
+
+The standard-library module `dis` (disassembler) prints a function's bytecode.
+
+```python title="peek_bytecode.py"
+import dis
+
+
+def area(width: float, height: float) -> float:
+    return width * height
+
+
+dis.dis(area)
+code = area.__code__
+print(type(code).__name__, code.co_name, code.co_varnames)
+```
+
+```text title="Output"
+  4           RESUME                   0
+
+  5           LOAD_FAST_LOAD_FAST      1 (width, height)
+              BINARY_OP                5 (*)
+              RETURN_VALUE
+code area ('width', 'height')
+```
+
+What each part means:
+
+- The left column is the **source line number**: line 4 is `def`, line 5 is the `return`.
+- `LOAD_FAST_LOAD_FAST` pushes both local variables in one instruction. It's a 3.13 optimisation;
+  older versions show two `LOAD_FAST` instructions. Bytecode is an **implementation detail** and
+  changes between versions, so never rely on its exact shape.
+- `BINARY_OP 5 (*)` pops two values, multiplies them and pushes the result. `RETURN_VALUE` returns
+  the top of the stack.
+- `area.__code__` is the **code object** the compiler built. Every function carries one.
+
+The program below shows that a syntax error stops the program before anything runs. The code is
+compiled from a string, so the error can be caught and printed:
+
+```python title="compile_first.py"
+source = 'print("line 1 runs?")\nprint("unclosed'
+try:
+    compile(source, "demo.py", "exec")
+except SyntaxError as err:
+    print("SyntaxError on line", err.lineno, "- nothing ran")
+```
+
+```text title="Output"
+SyntaxError on line 2 - nothing ran
+```
+
+`compile()` is the same first stage that `python demo.py` performs. Because it failed, the
+`print` on line 1 never executed.
+
+## Common mistakes
+
+<Callout type="warning" title="Running the wrong Python">
+  `python` may point at a different installation than you expect (a system Python, Anaconda, or a
+  virtual environment). Run `python --version` and `python -c "import sys; print(sys.executable)"`
+  to see exactly which interpreter runs your code.
+</Callout>
+
+- **Typing shell commands into the REPL.** `>>> pip install requests` gives a `SyntaxError`. Exit
+  the REPL first, or use `python -m pip install requests` in the terminal.
+- **Expecting the REPL to print in a script.** In the REPL, `2 + 2` shows `4`. In a script, the
+  value is computed and thrown away. Use `print(2 + 2)`.
+- **Deleting `__pycache__` to "fix" a bug.** It's only a cache. CPython rebuilds it when the
+  source changes, so deleting it almost never fixes anything.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: if line 40 of a script has a SyntaxError, does line 1 run?">
+  No. The whole file is compiled before any of it runs, so the program stops with the SyntaxError
+  and line 1 never executes. A *runtime* error, such as `ZeroDivisionError` on line 40, is
+  different: lines 1–39 run first.
+</Reveal>
+
+<KeyTakeaways>
+
+- CPython **compiles** your file to **bytecode**, then a **virtual machine** interprets it.
+- A syntax error anywhere stops the program before any line runs.
+- `dis.dis(func)` shows bytecode. It's version-specific, so use it to learn, not to depend on.
+- Imported modules are cached as `.pyc` files in `__pycache__`, and the cache is rebuilt automatically.
+- Run code with the REPL (experiments), `python file.py` (scripts) or `python -m module` (tools).
+
+</KeyTakeaways>

@@ -1,0 +1,49 @@
+id: py-i-053
+question: A script fails in production with a traceback. How do you debug it step by step?
+difficulty: medium
+tags:
+  - debugging
+  - process
+shortAnswer: |
+  Read the traceback bottom-up (what failed, where, and the call path), then **reproduce** the
+  failure locally with the same input and environment. Shrink it to a minimal case, form a
+  hypothesis, and inspect real values with logging or a debugger (`breakpoint()`, post-mortem
+  pdb). Fix the root cause, add a regression test, and improve the logging if the trace
+  wasn't enough.
+detailedAnswer: |
+  A structured approach:
+
+  1. **Read:** the exception type and message, the last frame in your own code, and which
+     caller passed the bad value.
+  2. **Reproduce:** same Python version, same dependencies (`pip freeze`), same data. Without
+     a reproduction you're guessing.
+  3. **Minimise:** cut code and data until the bug still happens with the fewest lines.
+  4. **Observe:** `logging` with context, `python -m pdb` / `pdb.pm()` for post-mortem, and
+     `faulthandler` for hard crashes.
+  5. **Fix the cause**, not the symptom: don't wrap it in `try/except` and move on.
+  6. **Prevent:** a test that fails before the fix and passes after, and monitoring or alerts.
+
+  Mention `git bisect` for regressions: it binary-searches the commit history for the change
+  that broke it.
+code:
+  language: python
+  code: |
+    import traceback
+
+
+    def parse_ages(rows):
+        return [int(r["age"]) for r in rows]
+
+
+    try:
+        parse_ages([{"age": "31"}, {"age": "n/a"}])
+    except ValueError as err:
+        last = traceback.extract_tb(err.__traceback__)[-1]
+        print(type(err).__name__, "in", last.name, "->", err)
+pitfalls:
+  - Changing code randomly before reproducing.
+  - Catching the exception to silence it.
+followUps:
+  - How does git bisect work?
+verify: |
+  assert parse_ages([{'age': '1'}]) == [1]

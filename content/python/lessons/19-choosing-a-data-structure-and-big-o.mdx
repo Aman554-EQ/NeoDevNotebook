@@ -1,0 +1,138 @@
+---
+title: Choosing a data structure and Big-O
+summary: Big-O describes how work grows with input size. Learn to read it, to measure it with counters and timeit, and to pick the right structure, the single decision that most often turns slow code fast.
+estimatedMinutes: 15
+difficulty: medium
+section: Data Structures
+objectives:
+  - Read and compare O(1), O(log n), O(n), O(n log n) and O(n²)
+  - Estimate an algorithm's complexity by counting nested loops and expensive calls
+  - Measure with `timeit` instead of guessing
+  - Choose between list, tuple, dict, set, deque and heap for a task
+prerequisites:
+  - Lists in depth
+  - Dictionaries
+  - Heaps and priority queues
+tags: [python, complexity, big-o, performance]
+practice: [py-p-035, py-p-041, py-p-053]
+interview: [py-i-017, py-i-018, py-i-046]
+---
+
+## Intuition: how does the work grow?
+
+Big-O ignores the exact time (which depends on your laptop) and answers one question: **if the input
+doubles, what happens to the work?** Constant work stays the same, linear work doubles, and
+quadratic work quadruples. For large inputs, the growth rate dominates everything else.
+
+## See it
+
+Step through the curves, hover the chart to read values at any n, or switch to the table.
+
+<BigOViz />
+
+## The precise rules
+
+$$
+f(n) = O(g(n)) \iff \exists\, c, n_0 > 0 : f(n) \le c \cdot g(n) \text{ for all } n \ge n_0
+$$
+
+In words: beyond some size, $f$ grows no faster than $g$, up to a constant factor. So we drop
+constants and smaller terms. $3n^2 + 10n + 7$ is $O(n^2)$.
+
+**Rules of thumb:** sequential steps add (keep the biggest), and nested loops multiply. A call like
+`x in some_list` inside a loop hides an extra factor of n.
+
+| Task                                 | Good choice              | Cost                         |
+| ------------------------------------ | ------------------------ | ---------------------------- |
+| Look up by key / test membership     | `dict` / `set`           | O(1) average                 |
+| Ordered sequence, access by position | `list`                   | O(1) index, O(1) append      |
+| Fixed record / dict key              | `tuple`                  | immutable, hashable          |
+| Queue, or work at both ends          | `deque`                  | O(1) ends                    |
+| Repeatedly take the smallest         | `heapq`                  | O(log n) push/pop            |
+| Keep sorted, binary search           | sorted `list` + `bisect` | O(log n) search, O(n) insert |
+| Counting                             | `Counter`                | O(1) per item                |
+
+## Worked example: count steps, then time it
+
+```python title="measure.py"
+import timeit
+
+
+def has_dup_quadratic(items: list) -> tuple[bool, int]:
+    steps = 0
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):  # nested loop: O(n²)
+            steps += 1
+            if items[i] == items[j]:
+                return True, steps
+    return False, steps
+
+
+def has_dup_linear(items: list) -> tuple[bool, int]:
+    steps, seen = 0, set()
+    for x in items:  # one pass, O(1) set lookups: O(n)
+        steps += 1
+        if x in seen:
+            return True, steps
+        seen.add(x)
+    return False, steps
+
+
+for n in (10, 100, 1000):
+    data = list(range(n))  # no duplicates: the worst case
+    print(n, has_dup_quadratic(data)[1], has_dup_linear(data)[1])
+
+data = list(range(100_000))
+as_set = set(data)
+t_list = timeit.timeit(lambda: 99_999 in data, number=200)
+t_set = timeit.timeit(lambda: 99_999 in as_set, number=200)
+print("set lookup over 100x faster:", t_list / t_set > 100)
+```
+
+```text title="Output"
+10 45 10
+100 4950 100
+1000 499500 1000
+set lookup over 100x faster: True
+```
+
+What to notice:
+
+- 10× more data gives about 100× more steps for the quadratic version ($n(n-1)/2$), and exactly 10×
+  for the linear one. That's O(n²) vs O(n) in plain numbers.
+- `timeit` runs a snippet many times and returns the total seconds. Compare **ratios**, not raw
+  times. On this machine the set lookup was over 10,000× faster for 100,000 items.
+- The fix wasn't clever code. It was choosing a set.
+
+## Common mistakes
+
+<Callout type="warning" title="Optimising the wrong thing">
+  Swapping `+=` for a fancy trick saves a few percent. Changing a list scan to a set lookup can save
+  1000×. Fix the complexity first, then micro-optimise only what a profiler shows matters.
+</Callout>
+
+- **Hidden O(n) inside loops:** `in list`, `list.index`, `list.remove`, `str +=` in long loops, and
+  `sorted()` called on every iteration.
+- **Timing once.** A single `time.time()` difference is noisy. Use `timeit` (or
+  `python -m timeit "…"`).
+- **Assuming "average" means "always".** Dict and set are O(1) on average, and lists' `append` is
+  amortized O(1). Rare operations can still be expensive.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: what's the complexity of: for x in a: if x in b: ... (b is a list)?"
+>
+  O(len(a) × len(b)): the membership test scans `b` on every iteration. Converting `b` to a set
+  first makes it O(len(a) + len(b)).
+</Reveal>
+
+<KeyTakeaways>
+
+- Big-O describes growth: O(1) < O(log n) < O(n) < O(n log n) < O(n²).
+- Nested loops multiply, and hidden scans (`in list`) count as loops.
+- Measure with step counters and `timeit`, and compare ratios.
+- The biggest speed-ups come from choosing the right data structure.
+
+</KeyTakeaways>

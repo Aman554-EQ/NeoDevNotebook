@@ -1,0 +1,59 @@
+id: py-p-042
+title: Deep-merge nested dicts
+difficulty: medium
+tags:
+  - recursion
+  - dicts
+statement: |
+  Write `deep_merge(base, override)` that returns a **new** dict combining both. When both
+  values for a key are dicts, merge them recursively. Otherwise the override's value wins.
+  Neither input may be modified.
+constraints:
+  - Values are dicts or plain values.
+examples:
+  - input:
+      'deep_merge({"db": {"host": "x", "port": 5432}, "debug": False}, {"db": {"host": "y"}, "debug":
+      True})'
+    output: "{'db': {'host': 'y', 'port': 5432}, 'debug': True}"
+hints:
+  - Start from a copy of `base`, then walk `override.items()`.
+  - Recurse only when BOTH sides are dicts.
+solution:
+  language: python
+  code: |
+    import copy
+
+
+    def deep_merge(base: dict, override: dict) -> dict:
+        result = copy.deepcopy(base)
+        for key, value in override.items():
+            if isinstance(value, dict) and isinstance(result.get(key), dict):
+                result[key] = deep_merge(result[key], value)
+            else:
+                result[key] = copy.deepcopy(value)
+        return result
+
+
+    defaults = {"db": {"host": "x", "port": 5432}, "debug": False}
+    print(deep_merge(defaults, {"db": {"host": "y"}, "debug": True}), defaults)
+  explanation: |
+    A plain `{**base, **override}` merge replaces the whole `"db"` dict, losing `port`.
+    Recursing whenever **both** sides hold dicts merges level by level, and any other
+    combination (a dict overriding a number, or vice versa) just takes the override.
+
+    `deepcopy` is what keeps the inputs safe. Without it, the result would share nested
+    dicts with `base` or `override`, and a later change to the result would leak back into
+    the defaults (lesson 10).
+complexity:
+  time: O(size of both dicts)
+  space: O(size of both dicts)
+variations:
+  - Merge lists by concatenation instead of replacement.
+verify: |
+  base = {"db": {"host": "x", "port": 5432, "opts": {"ssl": True}}, "debug": False}
+  over = {"db": {"host": "y", "opts": {"timeout": 3}}, "debug": True}
+  merged = deep_merge(base, over)
+  assert merged == {"db": {"host": "y", "port": 5432, "opts": {"ssl": True, "timeout": 3}}, "debug": True}
+  merged["db"]["opts"]["ssl"] = False
+  assert base["db"]["opts"]["ssl"] is True
+  assert over == {"db": {"host": "y", "opts": {"timeout": 3}}, "debug": True}

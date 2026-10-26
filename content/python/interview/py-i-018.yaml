@@ -1,0 +1,39 @@
+id: py-i-018
+question: What are the time complexities of common list operations?
+difficulty: medium
+tags:
+  - lists
+  - complexity
+shortAnswer: |
+  A list is a dynamic array: indexing, `len`, `append` and `pop()` are O(1) (append is
+  amortized). `insert(0, x)`, `pop(0)`, `remove` and `del` in the middle are O(n), because
+  items shift. `x in lst` and `index` are O(n), sorting is O(n log n), and slicing is O(k)
+  for k items.
+detailedAnswer: |
+  | Operation | Cost |
+  | --- | --- |
+  | `lst[i]`, `lst[i] = v`, `len(lst)` | O(1) |
+  | `append`, `pop()` | O(1) amortized |
+  | `insert(i, v)`, `pop(i)`, `del lst[i]` | O(n − i) |
+  | `x in lst`, `index`, `count`, `remove` | O(n) |
+  | `lst[a:b]` | O(b − a) |
+  | `extend(k items)` | O(k) |
+  | `sort()`, `sorted()` | O(n log n), Timsort, O(n) on already-sorted data |
+  | `lst * k`, `copy` | O(n·k), O(n) |
+
+  `append` is amortized O(1) because CPython over-allocates about 12.5% extra capacity when
+  it grows, so resizes (O(n) copies) are rare.
+code:
+  language: python
+  code: |
+    import timeit
+
+    front = timeit.timeit("lst.insert(0, 0); lst.pop(0)", setup="lst = list(range(100_000))", number=1000)
+    end = timeit.timeit("lst.append(0); lst.pop()", setup="lst = list(range(100_000))", number=1000)
+    print("front ops much slower:", front > 10 * end)
+pitfalls:
+  - Using `pop(0)` for queues.
+followUps:
+  - Why is Timsort fast on partially sorted data?
+verify: |
+  assert front > end

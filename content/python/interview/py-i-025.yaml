@@ -1,0 +1,34 @@
+id: py-i-025
+question: Can a tuple that contains a list be used as a dict key?
+difficulty: medium
+tags:
+  - tuples
+  - hashing
+shortAnswer: |
+  No. A tuple is hashable only if **all** its elements are hashable, because its hash
+  combines theirs. `(1, [2])` raises `TypeError: unhashable type: 'list'` when hashed. Convert
+  inner lists to tuples (or frozensets) first.
+detailedAnswer: |
+  Immutability of the container isn't enough. If the inner list could change, the tuple's
+  hash (computed from its items) would change too, and dict lookups would break.
+
+  Common fixes: `key = (user_id, tuple(tags))`, or `frozenset(tags)` when order doesn't
+  matter. For memoising a function that takes lists, convert its arguments to tuples before
+  calling a cached helper.
+code:
+  language: python
+  code: |
+    try:
+        {(1, [2]): "x"}
+    except TypeError as err:
+        print("TypeError:", err)
+
+    tags = ["python", "db"]
+    index = {(42, tuple(tags)): "post", frozenset(tags): "set key"}
+    print(index[(42, ("python", "db"))], index[frozenset(["db", "python"])])
+pitfalls:
+  - Saying 'tuples are always hashable'.
+followUps:
+  - How would you cache a function that takes a list argument?
+verify: |
+  assert index[frozenset(['db', 'python'])] == 'set key'

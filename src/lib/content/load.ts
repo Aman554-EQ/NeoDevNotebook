@@ -3,7 +3,9 @@ import path from "node:path"
 import matter from "gray-matter"
 import YAML from "yaml"
 import type { z } from "zod"
+import { splitSections } from "./sections"
 import {
+  DIFFICULTIES,
   interviewSchema,
   lessonFrontmatterSchema,
   moduleSchema,
@@ -165,6 +167,15 @@ export function findIntegrityIssues(bundles: ContentBundle[]): string[] {
     if (owner) issues.push(`idPrefix "${module.idPrefix}" used by both ${owner} and ${module.slug}`)
     prefixes.set(module.idPrefix, module.slug)
 
+    for (const s of splitSections(lessons)) {
+      issues.push(`${module.slug}: section "${s}" is split; its lessons must be consecutive`)
+    }
+    const ids = new Set([...problems, ...interview].map((x) => x.id))
+    for (const l of lessons) {
+      for (const ref of [...l.practice, ...l.interview]) {
+        if (!ids.has(ref)) issues.push(`${module.slug}/${l.slug}: links to missing item "${ref}"`)
+      }
+    }
     const lessonSlugs = new Set<string>()
     for (const l of lessons) {
       if (lessonSlugs.has(l.slug)) issues.push(`${module.slug}: duplicate lesson slug "${l.slug}"`)
@@ -183,4 +194,33 @@ export function findIntegrityIssues(bundles: ContentBundle[]): string[] {
     }
   }
   return issues
+}
+
+/** Modules below the counts they promise in module.yaml `targets` (empty when all are met). */
+export function findTargetGaps(bundles: ContentBundle[]): string[] {
+  const gaps: string[] = []
+  for (const { module, lessons, problems, interview } of bundles) {
+    const t = module.targets
+    if (!t) continue
+    const need = (what: string, have: number, min: number | undefined) => {
+      if (min !== undefined && have < min)
+        gaps.push(`${module.slug}: ${what} ${have} < target ${min}`)
+    }
+    need("lessons", lessons.length, t.lessons)
+    need("problems", problems.length, t.problems)
+    need("interview questions", interview.length, t.interview)
+    for (const d of DIFFICULTIES) {
+      need(
+        `${d} problems`,
+        problems.filter((p) => p.difficulty === d).length,
+        t.problemsPerDifficulty,
+      )
+      need(
+        `${d} interview questions`,
+        interview.filter((q) => q.difficulty === d).length,
+        t.interviewPerDifficulty,
+      )
+    }
+  }
+  return gaps
 }

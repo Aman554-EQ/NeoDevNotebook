@@ -1,0 +1,48 @@
+id: py-i-003
+question: "How are arguments passed to functions in Python: by value or by reference?"
+difficulty: medium
+tags:
+  - functions
+  - references
+shortAnswer: |
+  Neither, in the C++ sense. Python passes **object references by value**, sometimes called
+  "call by sharing" or "call by object reference". The function gets a new name bound to the
+  same object. Mutating that object is visible to the caller, but rebinding the parameter
+  name isn't.
+detailedAnswer: |
+  When you call `f(items)`, the parameter inside `f` becomes another name for the caller's
+  object. Then:
+
+  - **Mutation** (`items.append(4)`) changes the shared object, so the caller sees it.
+  - **Rebinding** (`items = [99]`) just points the local name somewhere else, so the caller's
+    variable is untouched.
+
+  So it isn't pass-by-value (no copy is made) and it isn't pass-by-reference (you can't
+  rebind the caller's variable). With immutable arguments (ints, strings) the effect looks
+  like pass-by-value, simply because they can't be mutated.
+
+  Practical rule: don't mutate arguments unless that's the documented purpose of the
+  function. Return a new value instead.
+code:
+  language: python
+  code: |
+    def mutate(items):
+        items.append(4)
+
+
+    def rebind(items):
+        items = [99]  # only the local name changes
+
+
+    data = [1, 2, 3]
+    mutate(data)
+    rebind(data)
+    print(data)
+pitfalls:
+  - Answering 'by reference' and then failing to explain why rebinding doesn't affect the caller.
+  - Forgetting that the default-argument object is shared across calls too.
+followUps:
+  - How would you write a function that 'returns' two updated values?
+  - What's the mutable default argument problem?
+verify: |
+  assert data == [1, 2, 3, 4]

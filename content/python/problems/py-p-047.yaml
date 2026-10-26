@@ -1,0 +1,85 @@
+id: py-p-047
+title: Install order for package dependencies
+difficulty: hard
+tags:
+  - graphs
+  - topological-sort
+  - cycle-detection
+statement: |
+  `deps` maps each package to the packages it needs, for example `{"app": ["web", "db"]}`.
+  Write `install_order(deps)` that returns an order where every package comes **after** its
+  dependencies, breaking ties alphabetically. Packages that appear only as dependencies are
+  included too. If there's a cycle, raise `ValueError` listing the packages involved.
+constraints:
+  - Up to 10**5 packages.
+examples:
+  - input: 'install_order({"app": ["web", "db"], "web": ["http"], "db": []})'
+    output: "['db', 'http', 'web', 'app']"
+hints:
+  - "Kahn's algorithm: repeatedly install a package that has no remaining dependencies."
+  - Use a heap of ready packages to get the alphabetical tie-break.
+solution:
+  language: python
+  code: |
+    import heapq
+    from collections import defaultdict
+
+
+    def install_order(deps: dict[str, list[str]]) -> list[str]:
+        packages = set(deps) | {d for ds in deps.values() for d in ds}
+        remaining = {p: len(set(deps.get(p, []))) for p in packages}
+        needed_by: defaultdict[str, list[str]] = defaultdict(list)
+        for pkg, ds in deps.items():
+            for d in set(ds):
+                needed_by[d].append(pkg)
+
+        ready = [p for p, n in remaining.items() if n == 0]
+        heapq.heapify(ready)
+        order = []
+        while ready:
+            pkg = heapq.heappop(ready)
+            order.append(pkg)
+            for dependant in needed_by[pkg]:
+                remaining[dependant] -= 1
+                if remaining[dependant] == 0:
+                    heapq.heappush(ready, dependant)
+
+        if len(order) < len(packages):
+            stuck = sorted(p for p, n in remaining.items() if n > 0)
+            raise ValueError(f"dependency cycle among: {', '.join(stuck)}")
+        return order
+
+
+    print(install_order({"app": ["web", "db"], "web": ["http"], "db": []}))
+    try:
+        install_order({"a": ["b"], "b": ["a"], "c": []})
+    except ValueError as err:
+        print("ValueError:", err)
+  explanation: |
+    Count, for each package, how many dependencies it still waits for. Packages with zero
+    are installable. Installing one "unlocks" its dependants by decrementing their counts,
+    and any that reach zero become installable too. That's Kahn's topological sort.
+
+    A min-heap of ready packages makes ties alphabetical. If the queue empties while
+    packages remain, they all still wait on each other: a cycle. Reporting the stuck
+    packages (instead of looping forever) is what real package managers do. This is the
+    same problem as ordering imports or build steps.
+complexity:
+  time: O((V + E) log V)
+  space: O(V + E)
+variations:
+  - Return groups that can be installed in parallel (one 'layer' at a time).
+verify: |
+  order = install_order({"app": ["web", "db"], "web": ["http"], "db": []})
+  assert order == ["db", "http", "web", "app"]
+  deps = {"a": ["b", "c"], "b": ["c"], "c": [], "d": ["a", "c"]}
+  o = install_order(deps)
+  pos = {p: i for i, p in enumerate(o)}
+  assert all(pos[d] < pos[p] for p, ds in deps.items() for d in ds)
+  try:
+      install_order({"a": ["b"], "b": ["a"], "c": []})
+  except ValueError as err:
+      assert "a, b" in str(err) and "c" not in str(err).split(":")[1]
+  else:
+      raise AssertionError
+  assert install_order({}) == []

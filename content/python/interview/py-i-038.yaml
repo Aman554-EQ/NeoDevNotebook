@@ -1,0 +1,52 @@
+id: py-i-038
+question: What is the contract between `__eq__` and `__hash__`?
+difficulty: hard
+tags:
+  - oop
+  - hashing
+  - data-model
+shortAnswer: |
+  Objects that compare equal must have equal hashes, and an object's hash must not change
+  while it's in a set or used as a dict key. If you define `__eq__`, Python sets `__hash__ =
+  None`, making the class unhashable, unless you also define `__hash__`, usually from the
+  same immutable fields used in `__eq__`.
+detailedAnswer: |
+  Why the automatic `None`: the default `__hash__` is identity-based, so two "equal" objects
+  would hash differently, and a set would keep both. Breaking the contract causes lost
+  dict entries and duplicate set members.
+
+  The safe recipe:
+
+  - Base `__eq__` and `__hash__` on the same fields: `hash((self.x, self.y))`.
+  - Keep those fields immutable (read-only properties, or `@dataclass(frozen=True)`).
+  - Return `NotImplemented` from `__eq__` for unknown types, so Python can try the other
+    side.
+code:
+  language: python
+  code: |
+    class Point:
+        def __init__(self, x: int, y: int) -> None:
+            self._x, self._y = x, y
+
+        def __eq__(self, other: object) -> bool:
+            if not isinstance(other, Point):
+                return NotImplemented
+            return (self._x, self._y) == (other._x, other._y)
+
+        def __hash__(self) -> int:
+            return hash((self._x, self._y))
+
+
+    class OnlyEq:
+        def __eq__(self, other: object) -> bool:
+            return True
+
+
+    print(len({Point(1, 2), Point(1, 2)}), OnlyEq.__hash__ is None)
+pitfalls:
+  - Hashing mutable fields.
+  - Returning False instead of NotImplemented for foreign types.
+followUps:
+  - What does `@dataclass(eq=True, frozen=True)` generate?
+verify: |
+  assert len({Point(1, 2), Point(1, 2)}) == 1 and OnlyEq.__hash__ is None

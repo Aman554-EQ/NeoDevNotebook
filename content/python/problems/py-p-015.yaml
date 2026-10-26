@@ -1,0 +1,58 @@
+id: py-p-015
+title: Invert a dictionary
+difficulty: easy
+tags:
+  - dicts
+  - comprehensions
+statement: |
+  Write `invert(d)` that swaps keys and values. If two keys share a value, raise
+  `ValueError` naming the duplicated value, because the inverse wouldn't be well-defined.
+constraints:
+  - Values are hashable.
+examples:
+  - input: 'invert({"a": 1, "b": 2})'
+    output: "{1: 'a', 2: 'b'}"
+  - input: 'invert({"a": 1, "b": 1})'
+    output: "ValueError: duplicate value 1"
+hints:
+  - "A dict comprehension `{v: k for k, v in d.items()}` silently keeps the last key."
+  - "Compare the sizes: `len(result)` vs `len(d)`."
+solution:
+  language: python
+  code: |
+    def invert(d: dict) -> dict:
+        result = {}
+        for key, value in d.items():
+            if value in result:
+                raise ValueError(f"duplicate value {value!r}")
+            result[value] = key
+        return result
+
+
+    print(invert({"a": 1, "b": 2}))
+    try:
+        invert({"a": 1, "b": 1})
+    except ValueError as err:
+        print("ValueError:", err)
+  explanation: |
+    Each value becomes a key in `result`. Before inserting, `value in result` (an O(1) dict
+    lookup) detects a value we've already seen, and we raise instead of silently
+    overwriting it.
+
+    The one-line comprehension `{v: k for k, v in d.items()}` is fine when values are known
+    to be unique, but with duplicates it quietly loses data. The explicit check makes the
+    failure loud.
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Instead of raising, map each value to a LIST of keys.
+verify: |
+  assert invert({"a": 1, "b": 2}) == {1: "a", 2: "b"}
+  assert invert({}) == {}
+  try:
+      invert({"a": 1, "b": 1})
+  except ValueError as err:
+      assert "1" in str(err)
+  else:
+      raise AssertionError("expected ValueError")

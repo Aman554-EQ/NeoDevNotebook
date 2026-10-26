@@ -1,0 +1,34 @@
+id: py-i-044
+question: What is `__pycache__`, and should it be in version control?
+difficulty: simple
+tags:
+  - bytecode
+  - imports
+  - tooling
+shortAnswer: |
+  It's where CPython caches the compiled bytecode of **imported** modules
+  (`module.cpython-313.pyc`), so later imports skip recompiling when the source hasn't
+  changed. It's safe to delete and is rebuilt automatically. Never commit it: add
+  `__pycache__/` and `*.pyc` to `.gitignore`.
+detailedAnswer: |
+  Validation is by source modification time and size by default (hash-based `.pyc` files
+  are an option). The file name includes the interpreter tag, so several Python versions can
+  share a folder.
+
+  The script you run directly isn't cached. `PYTHONDONTWRITEBYTECODE=1` or `python -B`
+  disables writing. Deleting the cache rarely fixes bugs, but it does help after renaming a
+  module, when a stale `.pyc` from a since-deleted `.py` lingers in odd setups.
+code:
+  language: python
+  code: |
+    import importlib.util
+    import sys
+
+    print(sys.implementation.cache_tag)  # e.g. cpython-313
+    print(importlib.util.cache_from_source("shop.py").replace("\\", "/"))
+pitfalls:
+  - Committing .pyc files to git.
+followUps:
+  - How does Python know a .pyc is stale?
+verify: |
+  assert sys.implementation.cache_tag.startswith('cpython-3')

@@ -1,0 +1,127 @@
+---
+title: Dictionaries
+summary: The most important data structure in Python. See how hashing turns a key into a slot, why lookups are O(1) on average, why keys must be hashable, and why dicts remember insertion order. Then use the methods that make dict code short and safe.
+estimatedMinutes: 22
+difficulty: simple
+section: Data Structures
+objectives:
+  - Explain hashing, collisions and why average lookup is O(1)
+  - Say which objects can be keys, and why
+  - Read safely with `get`, `setdefault` and `in`; merge with `|` and `**`
+  - Build dicts with comprehensions and iterate with `items()`
+prerequisites:
+  - Tuples and unpacking
+tags: [python, dict, hashing, complexity]
+practice: [py-p-008, py-p-015, py-p-021, py-p-032]
+interview: [py-i-015, py-i-016, py-i-024]
+---
+
+## Intuition: a coat check
+
+At a coat check you hand over your coat and get a **ticket number**. Later, you show the ticket and
+the attendant walks straight to that hook. Nobody searches every hook. A dict does the same:
+`hash(key)` is the ticket number, and it points to a slot.
+
+## See it
+
+The scene uses small integer keys, because `hash(n) == n` for ints, so the slot arithmetic is easy
+to follow. String keys work the same way with bigger hash numbers.
+
+<DictTableViz />
+
+## The precise rules
+
+- **Lookup:** compute `hash(key)`, go to slot `hash & (size - 1)`, and compare keys there. On a
+  collision, probe further slots in a fixed sequence. With a good hash and a table kept less than
+  2/3 full, this takes O(1) steps **on average**. The worst case (everything colliding) is O(n).
+- **Resize:** when the table gets too full, CPython allocates a bigger one and re-inserts
+  everything. Like list growth, this is rare, so it's O(1) amortized.
+- **Keys must be hashable:** `hash(key)` must exist and must never change while the key is in the
+  dict. Immutable built-ins (`int`, `str`, `tuple` of hashables, `frozenset`) qualify. `list`,
+  `dict` and `set` don't.
+- Equal keys must have equal hashes: `1 == 1.0 == True` all hash alike, so they are the **same**
+  key.
+- Since Python 3.7, dicts **preserve insertion order** (the dense entries array in the visual).
+
+## Worked example
+
+```python title="dicts.py"
+stock = {"pen": 3, "ink": 0}
+
+print(stock.get("cap"), stock.get("cap", 0), "pen" in stock)
+try:
+    stock["cap"]
+except KeyError as err:
+    print("KeyError:", err)
+
+stock.setdefault("pad", 5)  # insert only if missing
+stock["ink"] += 10
+stock |= {"cap": 2}  # merge (3.9+)
+print(stock)
+
+for name, qty in stock.items():
+    if qty > 4:
+        print(name, qty)
+
+in_stock = {name: qty for name, qty in stock.items() if qty > 0}
+print(in_stock, list(in_stock))
+
+print(stock.pop("pen"), "pen" in stock)
+print(dict(zip("xy", [1, 2])), {**{"a": 1}, **{"a": 2}})
+print({1: "int", 1.0: "float", True: "bool"})
+```
+
+```text title="Output"
+None 0 True
+KeyError: 'cap'
+{'pen': 3, 'ink': 10, 'pad': 5, 'cap': 2}
+ink 10
+pad 5
+{'pen': 3, 'ink': 10, 'pad': 5, 'cap': 2} ['pen', 'ink', 'pad', 'cap']
+3 False
+{'x': 1, 'y': 2} {'a': 2}
+{1: 'bool'}
+```
+
+What to notice:
+
+- `d[key]` raises `KeyError` for a missing key. `d.get(key, default)` returns a default instead.
+  Choose based on whether "missing" is an error.
+- `setdefault` inserts only when the key is absent and returns the value either way.
+- When two merged dicts share a key, the **right-hand** value wins.
+- `{1: ..., 1.0: ..., True: ...}` is a **single** key: the three are equal and hash alike. The first
+  key object is kept and the last value wins.
+- Iterating a dict yields its keys in insertion order. Use `.items()` for key–value pairs.
+
+## Common mistakes
+
+<Callout type="warning" title="Changing a dict while iterating it">
+  Adding or removing keys inside `for k in d:` raises `RuntimeError: dictionary changed size during
+  iteration`. Iterate over `list(d)` or build a new dict.
+</Callout>
+
+- **Lists as keys.** `TypeError: unhashable type: 'list'`. Convert to a tuple.
+- **Counting by hand.** `if k not in d: d[k] = 0` then `d[k] += 1` works, but
+  `collections.Counter` or `defaultdict(int)` is clearer (lesson 18).
+- **Mutating an object used as a key** (a custom class whose hash depends on mutable fields). The
+  entry becomes unreachable.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: why is dict lookup O(1) on average but O(n) in the worst case?"
+>
+  Normally the hash sends you to the right slot after one or a few probes. If many keys collide (a
+  terrible hash function, or a deliberate attack), every lookup has to probe past all of them.
+  Python randomizes string hashes per process (hash seed) to make such attacks impractical.
+</Reveal>
+
+<KeyTakeaways>
+
+- A dict maps keys to values through `hash(key)`. Lookups, inserts and deletes are O(1) on average.
+- Keys must be hashable and must not change. Equal keys share one entry.
+- Use `get`, `setdefault`, `in`, `|` and comprehensions to keep dict code short and safe.
+- Dicts keep insertion order. Iterate with `.items()`.
+
+</KeyTakeaways>

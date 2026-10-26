@@ -1,0 +1,129 @@
+---
+title: Tuples and unpacking
+summary: Tuples are fixed-size, immutable records. Learn when to choose a tuple over a list, how packing and unpacking work (including the star), and how namedtuple gives fields names.
+estimatedMinutes: 12
+difficulty: easy
+section: Data Structures
+objectives:
+  - Choose between a tuple and a list for a given piece of data
+  - Pack and unpack values, including `*rest` and swaps
+  - Use tuples as dict keys and know when that fails
+  - Create readable records with `namedtuple`
+prerequisites:
+  - Lists in depth
+tags: [python, tuples, unpacking, namedtuple]
+practice: [py-p-015, py-p-017]
+interview: [py-i-006, py-i-025]
+---
+
+## Intuition: a filled-in form vs a shopping list
+
+A **list** is a shopping list. It grows and shrinks, and every item is the same kind of thing. A
+**tuple** is a filled-in form with fixed fields, like `(latitude, longitude)` or `(name, age)`. Each
+**position** means something, and the form isn't edited after it's filled in.
+
+## See it
+
+<UnpackViz />
+
+## The precise rules
+
+- The **comma** makes a tuple, not the parentheses: `t = 1, 2`. A one-item tuple needs a trailing
+  comma: `(1,)`. `(1)` is just the int `1`.
+- Tuples are immutable: you can't assign to `t[0]`. But a mutable object _inside_ a tuple can
+  still change (lesson 10).
+- **Unpacking** assigns position by position: `a, b = pair`. The counts must match, unless one
+  target is starred (`first, *rest = ...`), and the starred name always gets a **list**.
+- A tuple is **hashable** only if everything inside it is hashable, so it can be a dict key or a
+  set member.
+
+## Worked example
+
+```python title="tuples.py"
+from collections import namedtuple
+
+t = (1,)
+print(type(t).__name__, type((1)).__name__, ())
+
+first, *rest = [1, 2, 3, 4]
+*init, last = "abc"
+print(first, rest, init, last)
+
+a, b = 1, 2
+a, b = b, a  # swap: the right side is built first
+print(a, b)
+
+for name, score in [("ada", 9), ("bo", 7)]:  # unpack in a for loop
+    print(f"{name}: {score}")
+
+try:
+    x, y = "abc"
+except ValueError as err:
+    print("ValueError:", err)
+
+grid = {(0, 0): "origin"}  # tuples as dict keys
+print(grid[(0, 0)])
+try:
+    {[1, 2]: "no"}
+except TypeError as err:
+    print("TypeError:", err)
+
+Point = namedtuple("Point", ["x", "y"])
+p = Point(3, 4)
+print(p, p.x, p[1], p._replace(x=0))
+try:
+    p.x = 5
+except AttributeError as err:
+    print("AttributeError:", err)
+```
+
+```text title="Output"
+tuple int ()
+1 [2, 3, 4] ['a', 'b'] c
+2 1
+ada: 9
+bo: 7
+ValueError: too many values to unpack (expected 2)
+origin
+TypeError: unhashable type: 'list'
+Point(x=3, y=4) 3 4 Point(x=0, y=4)
+AttributeError: can't set attribute
+```
+
+What to notice:
+
+- `*init, last = "abc"` gives a **list** `['a', 'b']`, even though the source was a string.
+- `namedtuple` creates a tuple subclass whose fields have names. `p.x` reads like an object, and
+  `p[1]` still works like a tuple. `_replace` returns a modified **copy**.
+- Lists can't be dict keys because they're mutable, so their hash could change. Tuples of hashable
+  items can.
+
+<Callout type="tip" title="namedtuple or dataclass?">
+  Use `namedtuple` (or `typing.NamedTuple`) for small immutable records that should also behave like
+  tuples. Use `@dataclass` (lesson 25) when you want defaults, methods or mutability.
+</Callout>
+
+## Common mistakes
+
+- **`(1)` vs `(1,)`.** Only the comma makes a tuple.
+- **Unpacking the wrong count.** `x, y = (1, 2, 3)` raises `ValueError`. Use `x, y, *_ = ...` to
+  ignore extras.
+- **Tuples for growing collections.** Building a tuple in a loop with `+=` copies it each time.
+  Use a list, then convert with `tuple(...)` if you need to.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: what does head, *_, tail = range(5) bind?">
+  `head = 0`, `tail = 4`, and `_ = [1, 2, 3]`. The underscore is just a conventional name for
+  "values I don't care about".
+</Reveal>
+
+<KeyTakeaways>
+
+- Tuples are fixed-size, immutable records where position has meaning. Lists are growable
+  collections.
+- The comma makes a tuple, so `(x,)` is a one-item tuple.
+- Unpacking matches positions, and a starred target collects the rest as a list.
+- Hashable tuples can be dict keys. `namedtuple` adds readable field names.
+
+</KeyTakeaways>

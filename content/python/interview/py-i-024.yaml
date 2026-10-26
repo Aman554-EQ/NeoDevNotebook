@@ -1,0 +1,36 @@
+id: py-i-024
+question: Are dictionaries ordered in Python?
+difficulty: simple
+tags:
+  - dict
+  - ordering
+shortAnswer: |
+  Yes. Since Python 3.7 the language guarantees that dicts preserve **insertion order** (it
+  was a CPython 3.6 implementation detail). Updating an existing key keeps its position, and
+  deleting then re-adding moves it to the end. Sets are still unordered.
+detailedAnswer: |
+  Iteration, `keys()`, `values()`, `items()` and `popitem()` (LIFO) all follow insertion
+  order.
+
+  `OrderedDict` still has uses: `move_to_end`, `popitem(last=False)` (handy for LRU caches),
+  and order-sensitive equality. Two `OrderedDict`s with the same items in a different order
+  are unequal, while plain dicts compare equal regardless of order.
+
+  Don't rely on set ordering. For small ints it can look sorted, but for strings it changes
+  between runs due to hash randomization.
+code:
+  language: python
+  code: |
+    from collections import OrderedDict
+
+    d = {"b": 1, "a": 2}
+    d["b"] = 10  # update keeps position
+    d["c"] = 3
+    print(list(d))
+    print({"x": 1, "y": 2} == {"y": 2, "x": 1}, OrderedDict(x=1, y=2) == OrderedDict(y=2, x=1))
+pitfalls:
+  - Assuming sets keep insertion order.
+followUps:
+  - When would you still use OrderedDict?
+verify: |
+  assert list(d) == ['b', 'a', 'c']

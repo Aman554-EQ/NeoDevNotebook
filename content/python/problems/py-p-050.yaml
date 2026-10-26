@@ -1,0 +1,123 @@
+id: py-p-050
+title: Calculator for + - * / and parentheses
+difficulty: hard
+tags:
+  - parsing
+  - recursion
+  - tokenizer
+statement: |
+  Write `calculate(expression)` that evaluates expressions with integers and decimals,
+  `+ - * /`, unary minus and parentheses, using normal precedence. Raise `ValueError` for
+  invalid input. Don't use `eval`.
+constraints:
+  - Spaces may appear anywhere.
+  - Division by zero raises `ZeroDivisionError`.
+examples:
+  - input: calculate("2 + 3 * (4 - 1) / 2")
+    output: "6.5"
+  - input: calculate("-(2 + 3) * -2")
+    output: "10.0"
+hints:
+  - Tokenize first (numbers, operators, parentheses), then parse.
+  - "Grammar: expr = term (('+'|'-') term)*; term = factor (('*'|'/') factor)*; factor = number
+    | '(' expr ')' | '-' factor."
+solution:
+  language: python
+  code: |
+    import re
+
+    TOKEN = re.compile(r"\s*(?:(\d+\.?\d*|\.\d+)|(.))")
+
+
+    def tokenize(text: str) -> list[str]:
+        tokens = []
+        for number, other in TOKEN.findall(text):
+            if number:
+                tokens.append(number)
+            elif other in "+-*/()":
+                tokens.append(other)
+            elif other.strip():
+                raise ValueError(f"unexpected character {other!r}")
+        return tokens
+
+
+    def calculate(expression: str) -> float:
+        tokens = tokenize(expression)
+        pos = 0
+
+        def peek() -> str | None:
+            return tokens[pos] if pos < len(tokens) else None
+
+        def take() -> str:
+            nonlocal pos
+            if pos >= len(tokens):
+                raise ValueError("unexpected end of expression")
+            pos += 1
+            return tokens[pos - 1]
+
+        def expr() -> float:  # lowest precedence: + and -
+            value = term()
+            while peek() in ("+", "-"):
+                value = value + term() if take() == "+" else value - term()
+            return value
+
+        def term() -> float:  # * and / bind tighter
+            value = factor()
+            while peek() in ("*", "/"):
+                value = value * factor() if take() == "*" else value / factor()
+            return value
+
+        def factor() -> float:  # numbers, unary minus, parentheses
+            tok = take()
+            if tok == "-":
+                return -factor()
+            if tok == "(":
+                value = expr()
+                if take() != ")":
+                    raise ValueError("missing ')'")
+                return value
+            try:
+                return float(tok)
+            except ValueError:
+                raise ValueError(f"unexpected token {tok!r}") from None
+
+        result = expr()
+        if pos != len(tokens):
+            raise ValueError(f"unexpected token {tokens[pos]!r}")
+        return result
+
+
+    print(calculate("2 + 3 * (4 - 1) / 2"), calculate("-(2 + 3) * -2"))
+  explanation: |
+    The tokenizer turns text into numbers, operators and parentheses, and rejects anything
+    else. The parser is *recursive descent*: one function per precedence level. `expr`
+    handles `+`/`-`, `term` handles `*`/`/`, and `factor` handles numbers, unary minus and
+    parenthesised sub-expressions.
+
+    Because `expr` calls `term`, which calls `factor`, multiplication is grouped before
+    addition automatically, and the `while` loops make operators left-associative
+    (`8 - 2 - 1` is `5`). A parenthesis simply calls `expr` again, which is how the
+    recursion mirrors the nesting. Leftover tokens or a missing `)` become clear
+    `ValueError`s.
+complexity:
+  time: O(n)
+  space: O(n) (tokens and recursion depth)
+variations:
+  - Add `^` (power, right-associative) and variables from a dict.
+verify: |
+  cases = ["2 + 3 * (4 - 1) / 2", "-(2 + 3) * -2", "8 - 2 - 1", "2 * (3 + 4) * 5", "1.5 + .5", "-3", "((7))", "10 / 4 * 2"]
+  for c in cases:
+      assert abs(calculate(c) - eval(c)) < 1e-12, c
+  for bad in ["", "2 +", "(1 + 2", "1 + 2)", "2 $ 3", "3 4"]:
+      try:
+          calculate(bad)
+      except ValueError:
+          pass
+      else:
+          raise AssertionError(bad)
+  try:
+      calculate("1 / (2 - 2)")
+  except ZeroDivisionError:
+      pass
+  else:
+      raise AssertionError

@@ -1,0 +1,146 @@
+---
+title: Conditions and match
+summary: Make decisions with if, elif and else, understand truthiness and short-circuiting, and use structural pattern matching (match/case) to branch on the shape of data.
+estimatedMinutes: 15
+difficulty: easy
+section: Basics
+objectives:
+  - Write if / elif / else chains and conditional expressions
+  - Predict truthiness and the value returned by `and` / `or`
+  - Use chained comparisons such as `0 < x < 10`
+  - Match sequences, alternatives, dicts and guards with `match` / `case`
+prerequisites:
+  - Variables, objects and types
+tags: [python, control-flow, match]
+practice: [py-p-003, py-p-024]
+interview: [py-i-008]
+---
+
+## Intuition: a row of doors
+
+An `if / elif / else` chain is a corridor of doors. Python tries each door's condition **in order**
+and walks through the **first** one that opens. The rest are skipped, even if they would also open.
+`else` is the exit at the end for when nothing else opened.
+
+## See it
+
+This is a recorded run of real code. Watch which `return` line runs for each score. Once a branch
+matches, the later checks are never evaluated.
+
+<CodeStepper
+  trace="conditions-grade"
+  title="if / elif / else, step by step"
+  caption="For 80, the first test (>= 90) fails, the elif (>= 75) passes, and the function returns 'B' immediately. The remaining branch is never checked."
+/>
+
+## The precise rules
+
+- A condition can be **any object**. `if obj:` asks `bool(obj)`. **Falsy:** `None`, `False`, `0`,
+  `0.0`, `""`, `[]`, `()`, `{}`, `set()`, `range(0)`. Everything else is truthy by default.
+- `a and b` returns `a` if `a` is falsy, otherwise `b`. `a or b` returns `a` if `a` is truthy,
+  otherwise `b`. Both **short-circuit**: the right side runs only if it's needed.
+- `x if cond else y` is an expression that produces one of two values.
+- Comparisons chain: `a < b < c` means `a < b and b < c`, with `b` evaluated once.
+- `match subject:` tries each `case` pattern top to bottom and runs the first that matches.
+  Patterns can **destructure** (pull out parts) and bind names. `case _:` matches anything.
+
+## Worked example
+
+```python title="decisions.py"
+x = 0
+print(x or "default", None or 0 or "last", 3 and 4)
+
+age = 20
+status = "adult" if age >= 18 else "minor"
+print(status, 1 < age < 30)
+
+
+def describe(cmd: str) -> str:
+    match cmd.split():
+        case ["go", direction]:
+            return f"moving {direction}"
+        case ["pick", "up", item] | ["take", item]:
+            return f"taking {item}"
+        case ["quit" | "exit"]:
+            return "bye"
+        case _:
+            return "unknown command"
+
+
+for c in ["go north", "take lamp", "pick up key", "exit", "dance"]:
+    print(describe(c))
+
+
+def area(shape: dict) -> float | str | None:
+    match shape:
+        case {"kind": "circle", "r": r}:
+            return round(3.14159 * r * r, 2)
+        case {"kind": "rect", "w": w, "h": h} if w == h:
+            return f"square {w * h}"
+        case {"kind": "rect", "w": w, "h": h}:
+            return w * h
+    return None
+
+
+print(area({"kind": "circle", "r": 1}), area({"kind": "rect", "w": 2, "h": 2}))
+print(area({"kind": "rect", "w": 2, "h": 3}), area({"kind": "triangle"}))
+```
+
+```text title="Output"
+default last 4
+adult True
+moving north
+taking lamp
+taking key
+bye
+unknown command
+3.14 square 4
+6 None
+```
+
+What to notice:
+
+- `x or "default"` is a common idiom for falling back when `x` is falsy. It also replaces a
+  legitimate `0`, so use `x if x is not None else default` when `0` is a valid value.
+- `["go", direction]` matches a list of exactly two items whose first is `"go"`, and **binds**
+  the second to `direction`.
+- `|` combines alternatives. `["quit" | "exit"]` matches a one-item list with either word.
+- Mapping patterns such as `{"kind": "circle", "r": r}` match dicts that _have_ those keys. Extra
+  keys are allowed.
+- `if w == h` is a **guard**: the case matches only if the pattern fits **and** the guard is true.
+
+<Callout type="tip" title="When to use match">
+  Use `match` when you branch on the **shape** of data: commands, parsed JSON, tuples of different
+  lengths. For simple value checks, an `if/elif` chain or a dict lookup is often clearer.
+</Callout>
+
+## Common mistakes
+
+<Callout type="warning" title="A bare name in a case captures, it doesn't compare">
+  `case expected:` doesn't compare with a variable called `expected`. It matches **anything** and
+  binds it to the name `expected`. To compare with a constant, use a dotted name (`case
+  Color.RED:`), a literal, or a guard (`case x if x == expected:`).
+</Callout>
+
+- **`if x == 1 or 2:`** is always true, because it means `(x == 1) or 2`. Write
+  `if x in (1, 2):`.
+- **`if items == []:`** works, but `if not items:` is the idiom, and it also covers `None` and
+  other empty containers.
+- **Order matters.** Put specific conditions before general ones. `elif score >= 60` placed before
+  `elif score >= 90` would swallow the high scores.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: what does print([] or [0] and 'yes') show?">
+  `yes`. `and` binds tighter than `or`, so this is `[] or ([0] and 'yes')`. `[0]` is truthy (a
+  non-empty list), so `and` returns `'yes'`. `[]` is falsy, so `or` returns its right side.
+</Reveal>
+
+<KeyTakeaways>
+
+- Python runs the **first** branch whose condition is truthy, and skips the rest.
+- `and` / `or` return one of their **operands** (not always `True` / `False`) and short-circuit.
+- Empty containers, zero and `None` are falsy. Almost everything else is truthy.
+- `match` branches on the **shape** of data and can bind its parts. A bare name in a `case` captures.
+
+</KeyTakeaways>

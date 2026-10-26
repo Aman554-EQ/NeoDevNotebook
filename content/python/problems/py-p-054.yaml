@@ -1,0 +1,72 @@
+id: py-p-054
+title: Edit distance
+difficulty: hard
+tags:
+  - dynamic-programming
+  - strings
+statement: |
+  Write `edit_distance(a, b)` that returns the minimum number of single-character insertions,
+  deletions or substitutions needed to turn `a` into `b` (the Levenshtein distance), using
+  O(min(len(a), len(b))) extra memory.
+constraints:
+  - "`0 <= len(a), len(b) <= 2000`"
+examples:
+  - input: edit_distance("kitten", "sitting")
+    output: "3"
+  - input: edit_distance("", "abc")
+    output: "3"
+hints:
+  - "`d[i][j]` = distance between the first i letters of a and the first j letters of b."
+  - Each row only needs the previous row.
+solution:
+  language: python
+  code: |
+    def edit_distance(a: str, b: str) -> int:
+        if len(a) < len(b):
+            a, b = b, a  # keep the row as short as possible
+        previous = list(range(len(b) + 1))  # distance from "" to b[:j]
+        for i, ca in enumerate(a, start=1):
+            current = [i]
+            for j, cb in enumerate(b, start=1):
+                current.append(
+                    min(
+                        previous[j] + 1,  # delete ca
+                        current[j - 1] + 1,  # insert cb
+                        previous[j - 1] + (ca != cb),  # substitute (free if equal)
+                    )
+                )
+            previous = current
+        return previous[-1]
+
+
+    print(edit_distance("kitten", "sitting"), edit_distance("", "abc"), edit_distance("flaw", "lawn"))
+  explanation: |
+    Dynamic programming: the best way to align `a[:i]` with `b[:j]` must end with a delete,
+    an insert or a substitution (a match is a free substitution). Each case reuses an answer
+    we've already computed for shorter prefixes, which gives the three-way `min`.
+
+    The table needs only the **previous** row to compute the next, so we keep two lists of
+    length `len(b) + 1`. Swapping so that `b` is the shorter string makes the memory
+    O(min(n, m)), and time stays O(n·m). `(ca != cb)` is `True` (1) or `False` (0), a common
+    Python trick.
+complexity:
+  time: O(n · m)
+  space: O(min(n, m))
+variations:
+  - Also return the list of edit operations (keep the full table and backtrack).
+verify: |
+  from functools import lru_cache
+  import random
+  random.seed(8)
+  def ref(a, b):
+      @lru_cache(None)
+      def d(i, j):
+          if i == 0 or j == 0:
+              return i + j
+          return min(d(i - 1, j) + 1, d(i, j - 1) + 1, d(i - 1, j - 1) + (a[i - 1] != b[j - 1]))
+      return d(len(a), len(b))
+  for _ in range(200):
+      a = "".join(random.choice("ab") for _ in range(random.randint(0, 7)))
+      b = "".join(random.choice("abc") for _ in range(random.randint(0, 7)))
+      assert edit_distance(a, b) == ref(a, b) == edit_distance(b, a), (a, b)
+  assert edit_distance("kitten", "sitting") == 3

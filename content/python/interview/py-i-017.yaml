@@ -1,0 +1,37 @@
+id: py-i-017
+question: Why is `x in some_set` faster than `x in some_list`?
+difficulty: simple
+tags:
+  - sets
+  - complexity
+  - hashing
+shortAnswer: |
+  A list must compare `x` with items one by one: O(n). A set is a hash table, so it jumps to
+  the slot given by `hash(x)` and usually checks one or two entries: O(1) on average. For
+  repeated membership tests, convert to a set once.
+detailedAnswer: |
+  The difference is dramatic at scale. A membership test inside a loop over a list makes the
+  whole loop O(n·m). With a set, it's O(n + m).
+
+  Trade-offs: building a set costs O(m) time and extra memory. The items must be hashable,
+  and the set loses order and duplicates. For a handful of items, or a single test, a list
+  or tuple is fine.
+
+  The same applies to dict keys (`key in d` is O(1)), but **not** to `x in d.values()`, which
+  scans.
+code:
+  language: python
+  code: |
+    import timeit
+
+    data = list(range(100_000))
+    as_set = set(data)
+    t_list = timeit.timeit(lambda: 99_999 in data, number=100)
+    t_set = timeit.timeit(lambda: 99_999 in as_set, number=100)
+    print("set faster by over 100x:", t_list / t_set > 100)
+pitfalls:
+  - Converting to a set inside the loop, which rebuilds it every iteration.
+followUps:
+  - Is `x in dict.values()` O(1)?
+verify: |
+  assert t_list > t_set

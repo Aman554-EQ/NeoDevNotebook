@@ -1,0 +1,13 @@
+title: Python
+part: 1
+order: 0
+description: From your first script to interview-ready, with a picture for every idea. Basics, data structures, the core language, packages and debugging.
+icon: code
+idPrefix: py
+# Targets from plan/part-1-python/plan.md, enforced by pnpm verify:content (soul.md §12).
+targets:
+  lessons: 36
+  problems: 60
+  problemsPerDifficulty: 15
+  interview: 56
+  interviewPerDifficulty: 8

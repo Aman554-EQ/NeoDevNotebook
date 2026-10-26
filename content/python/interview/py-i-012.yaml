@@ -1,0 +1,49 @@
+id: py-i-012
+question: Explain the LEGB rule, and when you need `global` or `nonlocal`.
+difficulty: medium
+tags:
+  - scope
+  - closures
+shortAnswer: |
+  Names are looked up in Local, Enclosing, Global, then Built-in scope, and the first match
+  wins. Assigning to a name inside a function makes it local for the whole function, so to
+  rebind an outer variable you declare it `nonlocal` (enclosing function) or `global`
+  (module).
+detailedAnswer: |
+  Scope is decided at **compile time** by looking for assignments. That's why this fails:
+
+  - `count = 0`, then `def bump(): count += 1` raises `UnboundLocalError`. The `+=` makes
+    `count` local, and it's read before it's assigned.
+
+  Fixes:
+
+  - `nonlocal count` inside a nested function rebinds the enclosing function's variable.
+    This is the basis of closures with state.
+  - `global count` rebinds a module-level name. It works, but it couples code to global
+    state.
+  - Often better: pass values in and `return` results, or use a class.
+
+  Note that **mutating** an outer object (`items.append(x)`) needs no declaration, because
+  it doesn't rebind the name.
+code:
+  language: python
+  code: |
+    def make_counter():
+        count = 0
+
+        def bump():
+            nonlocal count
+            count += 1
+            return count
+
+        return bump
+
+
+    counter = make_counter()
+    print(counter(), counter())
+pitfalls:
+  - Saying you need `global` to append to a module-level list. Mutation needs no declaration.
+followUps:
+  - What is a closure, and how does late binding affect it?
+verify: |
+  assert counter() == 3

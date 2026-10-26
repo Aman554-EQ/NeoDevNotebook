@@ -1,0 +1,184 @@
+---
+title: Exceptions
+summary: Errors in Python are objects that travel up the call stack until something catches them. Learn try/except/else/finally, raising and chaining exceptions, custom exception classes, and handling several errors at once.
+estimatedMinutes: 18
+difficulty: medium
+section: Core Language
+objectives:
+  - Trace how an exception unwinds the call stack, and when finally runs
+  - Use try / except / else / finally, each for its purpose
+  - Raise exceptions with clear messages, and chain them with `from`
+  - Define custom exceptions and handle ExceptionGroup with `except*`
+prerequisites:
+  - Functions
+tags: [python, exceptions, errors]
+practice: [py-p-013, py-p-027]
+interview: [py-i-053]
+---
+
+## Intuition: a problem escalating up the chain
+
+A junior employee hits a problem they can't solve, so they pass it to their manager. The manager
+can't either and escalates it to the director, who decides what to do. On the way, everyone tidies
+their desk (`finally`). If nobody can handle it, the company stops: your program crashes with a
+traceback.
+
+## See it
+
+<ExceptionUnwindViz />
+
+## The precise rules
+
+```python title="shape.py" norun
+try:
+    risky()
+except ValueError as err:       # runs if a ValueError (or subclass) was raised
+    handle(err)
+except (KeyError, IndexError):  # several types at once
+    ...
+else:                           # runs only if NO exception happened
+    use_result()
+finally:                        # ALWAYS runs: success, error, return or break
+    cleanup()
+```
+
+- `except` clauses are tried in order, and the first match wins. A clause catches its class **and
+  subclasses**, so put specific exceptions first.
+- `raise NewError(...) from err` records the original as `__cause__`. The traceback shows both:
+  "The above exception was the direct cause of…".
+- A bare `raise` inside `except` re-raises the current exception unchanged.
+- `except*` handles parts of an `ExceptionGroup` (several errors raised together, for example by
+  concurrent tasks).
+
+## Worked example
+
+```python title="exceptions.py"
+def parse(text):
+    return int(text)
+
+
+def load(path):
+    try:
+        return parse("x")
+    finally:
+        print("closing", path)
+
+
+def main():
+    try:
+        load("ages.txt")
+    except ValueError as err:
+        print("bad data:", err)
+
+
+main()
+
+
+def parse_age(text: str) -> int:
+    try:
+        age = int(text)
+    except ValueError as err:
+        raise ValueError(f"age must be a number, got {text!r}") from err
+    if age < 0:
+        raise ValueError("age cannot be negative")
+    return age
+
+
+for raw in ["42", "x", "-1"]:
+    try:
+        print(parse_age(raw))
+    except ValueError as err:
+        print("ValueError:", err, "| caused by:", type(err.__cause__).__name__ if err.__cause__ else None)
+
+
+def divide(x: float) -> None:
+    try:
+        result = 10 / x
+    except ZeroDivisionError:
+        print("cannot divide by zero")
+    else:
+        print("result", result)
+    finally:
+        print("cleanup")
+
+
+divide(2)
+divide(0)
+
+
+class InsufficientFunds(Exception):
+    def __init__(self, needed: int) -> None:
+        super().__init__(f"need {needed} more")
+        self.needed = needed
+
+
+try:
+    raise InsufficientFunds(5)
+except InsufficientFunds as err:
+    print(type(err).__name__, err, err.needed)
+
+try:
+    raise ExceptionGroup("batch failed", [ValueError("bad"), TypeError("worse")])
+except* ValueError as group:
+    print("values:", [str(e) for e in group.exceptions])
+except* TypeError as group:
+    print("types:", [str(e) for e in group.exceptions])
+```
+
+```text title="Output"
+closing ages.txt
+bad data: invalid literal for int() with base 10: 'x'
+42
+ValueError: age must be a number, got 'x' | caused by: ValueError
+ValueError: age cannot be negative | caused by: None
+result 5.0
+cleanup
+cannot divide by zero
+cleanup
+InsufficientFunds need 5 more 5
+values: ['bad']
+types: ['worse']
+```
+
+What to notice:
+
+- The first three functions are exactly the program in the visual: `finally` printed before the
+  handler in `main` ran.
+- `from err` keeps the low-level cause (the original `int()` failure) while giving the caller a
+  clear, domain-level message.
+- The `else` block runs only when no exception happened. Keep the `try` body small, so you don't
+  accidentally catch errors from code that was never meant to be protected.
+- Custom exceptions subclass `Exception`, can carry extra data (`needed`), and let callers catch
+  _your_ errors specifically.
+
+## Common mistakes
+
+<Callout type="warning" title="Swallowing every error">
+  `except Exception: pass` hides real bugs, and a bare `except:` also catches `KeyboardInterrupt`
+  and `SystemExit`. Catch the narrowest exception you can actually handle, and log or re-raise the
+  rest.
+</Callout>
+
+- **A `try` block that's too big.** You end up catching errors from code you didn't mean to
+  protect.
+- **Using exceptions for normal control flow** in hot loops. Checking first (`if key in d`) can be
+  clearer. Both styles exist: "ask forgiveness" (EAFP) and "look before you leap" (LBYL).
+- **Losing the original error.** Re-raising a new exception without `from` (or a bare `raise`)
+  hides the root cause.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: if the try block returns, does finally still run?">
+  Yes. `finally` runs on the way out regardless: after a `return`, `break`, `continue` or an
+  exception. That's why it's the place for cleanup (closing files, releasing locks). Context
+  managers (next lesson) package exactly this.
+</Reveal>
+
+<KeyTakeaways>
+
+- Exceptions climb the call stack until a matching `except` catches them, and `finally` runs on the way.
+- `else` runs only without an error, and `finally` always runs.
+- Raise clear errors, chain them with `from`, and define custom exception classes for your domain.
+- Catch the narrowest exception you can handle. Never silently swallow errors.
+
+</KeyTakeaways>

@@ -1,0 +1,144 @@
+---
+title: Context managers
+summary: The with statement guarantees setup and cleanup, even when errors happen. Learn the __enter__/__exit__ protocol, write context managers with contextlib, and know the ones Python gives you.
+estimatedMinutes: 12
+difficulty: medium
+section: Core Language
+objectives:
+  - Explain what `with` does in terms of `__enter__` and `__exit__`
+  - Guarantee cleanup with built-in context managers (files, locks, suppress)
+  - Write a context manager as a class and with `@contextmanager`
+  - Decide whether `__exit__` should suppress an exception
+prerequisites:
+  - Exceptions
+  - Iterators and generators
+tags: [python, context-managers, with]
+practice: [py-p-043]
+interview: [py-i-032]
+---
+
+## Intuition: a hotel key card
+
+Checking in (`__enter__`) gives you a key card. Whatever happens during your stay, whether you leave
+happily or the fire alarm goes off, checking out (`__exit__`) always happens, and the room is cleaned.
+A context manager is that check-in/check-out pair, and `with` guarantees the check-out.
+
+## See it
+
+A recorded run of a tiny context manager, used once normally and once with an error inside the
+`with` block.
+
+<CodeStepper
+  trace="context-manager"
+  title="__enter__ and __exit__, including on errors"
+  caption="__exit__ runs both times. The second time it receives the ValueError's type; it returns False, so the exception continues and is handled outside."
+/>
+
+## The precise rules
+
+```python title="with_desugared.py" norun
+with EXPR as name:
+    body
+# roughly means:
+manager = EXPR
+name = manager.__enter__()
+try:
+    body
+except BaseException as exc:
+    if not manager.__exit__(type(exc), exc, exc.__traceback__):
+        raise          # __exit__ returned falsy: re-raise
+else:
+    manager.__exit__(None, None, None)
+```
+
+- `__enter__`'s return value is what `as name` binds (often `self`, a file, or a connection).
+- `__exit__` receives the exception details (or three `None`s). **Returning `True` suppresses the
+  exception.** Do that only on purpose.
+- `@contextlib.contextmanager` turns a generator into a context manager: code before `yield` is the
+  setup, and code after it (in `finally`) is the cleanup.
+
+## Worked example
+
+```python title="contexts.py"
+import threading
+from contextlib import contextmanager, suppress
+
+
+@contextmanager
+def tag(name: str):
+    print(f"<{name}>")
+    try:
+        yield name  # the value bound by "as"
+    finally:
+        print(f"</{name}>")  # runs even if the body raises
+
+
+with tag("p") as t:
+    print("inside", t)
+
+with suppress(KeyError):  # the standard way to ignore one specific error
+    {}["missing"]
+    print("not reached")
+print("after suppress")
+
+lock = threading.Lock()
+with lock:  # acquire on enter, release on exit, even on errors
+    print("locked:", lock.locked())
+print("locked:", lock.locked())
+
+try:
+    with tag("div"):
+        raise RuntimeError("oops")
+except RuntimeError as err:
+    print("caught", err)
+```
+
+```text title="Output"
+<p>
+inside p
+</p>
+after suppress
+locked: True
+locked: False
+<div>
+</div>
+caught oops
+```
+
+What to notice:
+
+- The closing `</div>` printed **before** the error was caught outside. Cleanup ran during the
+  unwinding.
+- `suppress(KeyError)` stops the `with` body at the error and continues after the block. Code
+  after the failing line inside the block doesn't run.
+- Files work the same way: `with open(path) as f:` closes `f` when the block exits, however it
+  exits.
+
+## Common mistakes
+
+<Callout type="warning" title="open() without with">
+  `f = open(path)` with no `close()` (or an exception before it) leaks a file handle until the
+  garbage collector notices. Always use `with open(...) as f:`.
+</Callout>
+
+- **Forgetting `try/finally` around `yield`** in a `@contextmanager`. If the body raises, the code
+  after `yield` never runs.
+- **Returning `True` from `__exit__` by accident.** That hides every exception in the block.
+- **Using the resource after the block.** A file is closed after `with`, so reading it then raises
+  `ValueError: I/O operation on closed file.`
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: how do you open two files safely at once?">
+  `with open("in.txt") as src, open("out.txt", "w") as dst:`. Both are closed in reverse order when
+  the block ends, even if an error occurs.
+</Reveal>
+
+<KeyTakeaways>
+
+- `with` calls `__enter__` before the block and **always** calls `__exit__` after it.
+- `__exit__` returning `True` suppresses the exception, so do it rarely and on purpose.
+- `@contextmanager` plus `try/yield/finally` is the quickest way to write one.
+- Use context managers for files, locks, connections, temporary changes and timers.
+
+</KeyTakeaways>

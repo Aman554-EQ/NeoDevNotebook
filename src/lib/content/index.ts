@@ -99,7 +99,7 @@ export async function getInterviewQuestion(moduleSlug: string, id: string) {
   if (index === -1) return undefined
   const { verify: _verify, ...question } = list[index]!
   const link = (q: InterviewQuestion | undefined) =>
-    q && { href: `/interview/${moduleSlug}/${q.id}`, title: q.question }
+    q && { href: `/interview/${moduleSlug}/${q.id}`, title: q.question.replace(/`([^`]+)`/g, "$1") }
   return { question, prev: link(list[index - 1]), next: link(list[index + 1]) }
 }
 

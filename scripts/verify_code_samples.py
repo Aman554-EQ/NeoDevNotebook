@@ -32,7 +32,7 @@ def check(sample: dict) -> str | None:
         script.write_text(code, encoding="utf-8")
         try:
             result = subprocess.run(
-                [sys.executable, "-I", str(script)],
+                [sys.executable, "-I", "-X", "utf8", str(script)],
                 capture_output=True,
                 text=True,
                 timeout=TIMEOUT_S,

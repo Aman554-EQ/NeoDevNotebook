@@ -4,14 +4,14 @@ Where everything lives. Update this whenever a module, lesson, route, component 
 
 ## Project control files
 
-| What                  | Path                                                     |
-| --------------------- | -------------------------------------------------------- |
-| Rulebook (read first) | [../soul.md](../soul.md)                                 |
-| Original brief        | [../initial-prompt.md](../initial-prompt.md)             |
-| Roadmap & plan status | [../plan/README.md](../plan/README.md)                   |
-| Documentation index   | [../documentation/README.md](../documentation/README.md) |
-| Changelog             | [../changelog/](../changelog/)                           |
-| Per-part maps         | [part-0-setup.md](part-0-setup.md)                       |
+| What                  | Path                                                                      |
+| --------------------- | ------------------------------------------------------------------------- |
+| Rulebook (read first) | [../soul.md](../soul.md)                                                  |
+| Original brief        | [../initial-prompt.md](../initial-prompt.md)                              |
+| Roadmap & plan status | [../plan/README.md](../plan/README.md)                                    |
+| Documentation index   | [../documentation/README.md](../documentation/README.md)                  |
+| Changelog             | [../changelog/](../changelog/)                                            |
+| Per-part maps         | [part-0-setup.md](part-0-setup.md) · [part-1-python.md](part-1-python.md) |
 
 ## Branches
 
@@ -20,13 +20,15 @@ Where everything lives. Update this whenever a module, lesson, route, component 
 | `main`          | Releases (tag per part)                                                   | v0.1.0 = Part 0                    |
 | `develop`       | Integration                                                               | Part 0 merged                      |
 | `setup/part-0`  | Part 0                                                                    | ✅ merged                          |
+| `module/python` | Part 1: Python                                                            | plan written, ⏳ awaiting approval |
 | `module/<name>` | One per module (python, django, flask, fastapi, git, docker, pytorch, ml) | created when that part is approved |
 
 ## Modules → routes → files → tests
 
-| Part | Module     | Route               | Content               | Visuals                          | E2E               |
-| ---- | ---------- | ------------------- | --------------------- | -------------------------------- | ----------------- |
-| 0    | Start Here | `/learn/start-here` | `content/start-here/` | `src/components/viz/start-here/` | `tests/e2e/core/` |
+| Part | Module     | Route                                                      | Content               | Visuals                                                                      | E2E                 |
+| ---- | ---------- | ---------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------- | ------------------- |
+| 0    | Start Here | `/learn/start-here`                                        | `content/start-here/` | `src/components/viz/start-here/`                                             | `tests/e2e/core/`   |
+| 1    | Python     | `/learn/python` · `/practice/python` · `/interview/python` | `content/python/`     | `src/components/viz/python/`, `_shared/code-stepper*`, `_shared/call-stack/` | `tests/e2e/python/` |
 
 ## Code map
 

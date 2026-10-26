@@ -1,0 +1,120 @@
+---
+title: Heaps and priority queues
+summary: When you repeatedly need the smallest (or largest) item, a heap gives it to you in O(log n) per operation. See how heapq keeps a plain list in heap order, and use it for priority queues and top-k problems.
+estimatedMinutes: 18
+difficulty: medium
+section: Data Structures
+objectives:
+  - Explain the heap property and why h[0] is always the minimum
+  - Use heappush, heappop, heapify, nsmallest and nlargest
+  - Build a priority queue with (priority, item) tuples and handle ties
+  - Simulate a max-heap and solve top-k problems efficiently
+prerequisites:
+  - Stacks and queues
+tags: [python, heapq, priority-queue, complexity]
+practice: [py-p-033, py-p-046, py-p-048, py-p-052]
+interview: [py-i-020]
+---
+
+## Intuition: an emergency room
+
+An emergency room doesn't treat patients in arrival order. It always treats the **most urgent**
+next. When a new patient arrives, they don't need the whole waiting list re-sorted. They just need
+to be placed correctly relative to a few others. A heap is that partial ordering: always ready to
+hand over the top item, and never more ordered than necessary.
+
+## See it
+
+<HeapViz />
+
+## The precise rules
+
+- **Heap property:** for every index `i`, `h[i] <= h[2*i + 1]` and `h[i] <= h[2*i + 2]` (its
+  children). So `h[0]` is the minimum. Siblings are **not** ordered, so a heap is not a sorted list.
+- `heapq.heappush(h, x)`: O(log n). `heapq.heappop(h)`: O(log n). `heapq.heapify(list)`: O(n).
+  Peeking at `h[0]`: O(1).
+- Python's `heapq` is a **min-heap**. For a max-heap, push negated numbers.
+- Tuples compare item by item, so `(priority, name)` orders by priority, then name. If the second
+  items can't be compared, add a counter as a tie-breaker: `(priority, count, task)`.
+
+## Worked example
+
+```python title="heaps.py"
+import heapq
+from itertools import count
+
+h = [5, 3, 8, 1, 4]
+heapq.heapify(h)  # O(n), in place
+print(h, h[0])
+heapq.heappush(h, 2)
+print(heapq.heappop(h), heapq.heappop(h), h)
+
+print(heapq.nsmallest(3, [7, 2, 9, 4]), heapq.nlargest(2, ["bb", "a", "ccc"], key=len))
+
+tasks = []
+for priority, name in [(2, "write"), (1, "plan"), (2, "test")]:
+    heapq.heappush(tasks, (priority, name))
+print([heapq.heappop(tasks) for _ in range(3)])  # ties broken by name
+
+max_heap = []
+for x in [3, 9, 4]:
+    heapq.heappush(max_heap, -x)  # negate for a max-heap
+print(-heapq.heappop(max_heap))
+
+order = count()  # tie-breaker for items that can't be compared
+jobs = []
+heapq.heappush(jobs, (1, next(order), {"id": "a"}))
+heapq.heappush(jobs, (1, next(order), {"id": "b"}))
+print(heapq.heappop(jobs)[2])
+```
+
+```text title="Output"
+[1, 3, 8, 5, 4] 1
+1 2 [3, 4, 8, 5]
+[2, 4, 7] ['ccc', 'bb']
+[(1, 'plan'), (2, 'test'), (2, 'write')]
+9
+{'id': 'a'}
+```
+
+What to notice:
+
+- After `heapify`, the list `[1, 3, 8, 5, 4]` isn't sorted, but `h[0]` is the minimum. That's all a
+  heap promises.
+- Without the counter, two jobs with equal priority would compare their dicts and raise
+  `TypeError: '<' not supported between instances of 'dict' and 'dict'`. The counter also keeps
+  equal priorities in first-in order.
+- For **top-k** of a large stream, `nsmallest` and `nlargest` keep only k items: O(n log k) instead of
+  sorting everything in O(n log n).
+
+## Common mistakes
+
+<Callout type="warning" title="Treating the heap list as sorted">
+  `h[1]` is not the second smallest item in general. Only `h[0]` is meaningful. Pop repeatedly, or
+  use `sorted(h)`, when you need order.
+</Callout>
+
+- **Mixing `heapq` calls with `list.append` / `list.sort`.** That breaks the heap property. Use
+  heapq functions only, or call `heapify` again.
+- **Expecting a max-heap.** Negate the values (or use `nlargest`).
+- **Re-sorting a list after every insert** to find the minimum: O(n log n) each time, versus
+  O(log n) with a heap.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: what is the cheapest way to get the 3 largest of a million numbers?"
+>
+  `heapq.nlargest(3, numbers)`. It keeps a heap of only 3 items while scanning once, so it's about
+  O(n log 3) ≈ O(n). Sorting the whole list would be O(n log n).
+</Reveal>
+
+<KeyTakeaways>
+
+- A heap keeps the smallest item at `h[0]`. Push and pop are O(log n), and heapify is O(n).
+- `heapq` is a min-heap on a plain list. Negate values for a max-heap.
+- Priority queues use `(priority, counter, item)` tuples to avoid comparing items.
+- Use `nsmallest` / `nlargest` for top-k without sorting everything.
+
+</KeyTakeaways>

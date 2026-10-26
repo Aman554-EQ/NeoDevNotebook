@@ -6,8 +6,18 @@ test.describe("navigation", () => {
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Remember it")
     for (const part of [0, 1, 2, 3, 4, 5, 6])
       await expect(page.getByTestId(`part-${part}`)).toBeVisible()
-    await expect(page.getByTestId("part-0").getByRole("link", { name: "Start Here" })).toBeVisible()
-    await expect(page.getByTestId("part-1")).toContainText("Coming soon")
+    // A part is linked exactly when a module for it exists in content/; others say "Coming soon".
+    for (const part of [0, 1, 2, 3, 4, 5, 6]) {
+      const modules = content.filter((b) => b.module.part === part)
+      const card = page.getByTestId(`part-${part}`)
+      if (modules.length) {
+        for (const b of modules) {
+          await expect(card.getByRole("link", { name: b.module.title })).toBeVisible()
+        }
+      } else {
+        await expect(card).toContainText("Coming soon")
+      }
+    }
   })
 
   test("start → lesson 1 → next → lesson 2 → previous", async ({ page }) => {

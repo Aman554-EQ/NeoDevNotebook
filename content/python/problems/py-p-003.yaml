@@ -1,0 +1,44 @@
+id: py-p-003
+title: Leap-year checker
+difficulty: easy
+tags:
+  - conditions
+  - modulo
+statement: |
+  A year is a leap year if it's divisible by 4, **except** years divisible by 100, which are
+  leap years only if they're also divisible by 400. Write `is_leap(year)`.
+constraints:
+  - "`1 <= year <= 10**9`"
+examples:
+  - input: is_leap(2024)
+    output: "True"
+  - input: is_leap(1900)
+    output: "False"
+    explanation: Divisible by 100 but not by 400.
+  - input: is_leap(2000)
+    output: "True"
+hints:
+  - Check the most specific rule first, or combine all three in one boolean expression.
+solution:
+  language: python
+  code: |
+    def is_leap(year: int) -> bool:
+        return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+
+
+    print([y for y in (1900, 2000, 2023, 2024) if is_leap(y)])
+  explanation: |
+    Read the expression left to right: the year must be divisible by 4, **and** either it's
+    not a century (`year % 100 != 0`) or it's a century divisible by 400.
+
+    Thanks to short-circuiting, the second part is evaluated only for years divisible by 4.
+    The standard library has the same rule as `calendar.isleap`.
+complexity:
+  time: O(1)
+  space: O(1)
+variations:
+  - Count the leap years between two years without looping over every year.
+verify: |
+  import calendar
+  for y in range(1, 3001):
+      assert is_leap(y) == calendar.isleap(y), y

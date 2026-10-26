@@ -1,0 +1,70 @@
+id: py-p-049
+title: Word ladder
+difficulty: hard
+tags:
+  - graphs
+  - bfs
+  - deque
+statement: |
+  Transform `start` into `goal` by changing **one letter at a time**, where every
+  intermediate word must be in `words`. Write `ladder_length(start, goal, words)` that returns
+  the number of words in the shortest such sequence (including both ends), or `0` if it's
+  impossible.
+constraints:
+  - All words have the same length.
+  - Up to 5000 words of length <= 10.
+examples:
+  - input: ladder_length("hit", "cog", ["hot", "dot", "dog", "lot", "log", "cog"])
+    output: "5"
+    explanation: hit → hot → dot → dog → cog
+hints:
+  - "Shortest path in an unweighted graph: breadth-first search."
+  - Generate neighbours by trying all 26 letters at each position, and check them against a set.
+solution:
+  language: python
+  code: |
+    from collections import deque
+    from string import ascii_lowercase
+
+
+    def ladder_length(start: str, goal: str, words: list[str]) -> int:
+        allowed = set(words)
+        if goal not in allowed:
+            return 0
+        queue = deque([(start, 1)])
+        visited = {start}
+        while queue:
+            word, steps = queue.popleft()
+            if word == goal:
+                return steps
+            for i in range(len(word)):
+                for letter in ascii_lowercase:
+                    candidate = word[:i] + letter + word[i + 1 :]
+                    if candidate in allowed and candidate not in visited:
+                        visited.add(candidate)
+                        queue.append((candidate, steps + 1))
+        return 0
+
+
+    words = ["hot", "dot", "dog", "lot", "log", "cog"]
+    print(ladder_length("hit", "cog", words), ladder_length("hit", "cog", words[:-1]))
+  explanation: |
+    Each word is a node, and an edge joins words that differ by one letter. BFS explores
+    the graph in layers of increasing distance, so the **first** time we reach `goal` is
+    along a shortest ladder. A `deque` gives O(1) `popleft`, and a list would make BFS
+    quadratic.
+
+    Instead of comparing every pair of words (O(n²)), we generate the 26 × L possible
+    one-letter changes and keep those in the `allowed` set. Marking words as visited when
+    they're **queued** stops the same word being added many times.
+complexity:
+  time: O(n · L · 26)
+  space: O(n)
+variations:
+  - Return one shortest ladder itself, not just its length.
+verify: |
+  words = ["hot", "dot", "dog", "lot", "log", "cog"]
+  assert ladder_length("hit", "cog", words) == 5
+  assert ladder_length("hit", "cog", words[:-1]) == 0
+  assert ladder_length("cog", "cog", ["cog"]) == 1
+  assert ladder_length("aa", "bb", ["ab", "bb"]) == 3

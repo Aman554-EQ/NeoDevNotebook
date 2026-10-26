@@ -1,0 +1,36 @@
+id: py-i-013
+question: What are lambdas, and what are their limitations?
+difficulty: simple
+tags:
+  - functions
+  - lambda
+shortAnswer: |
+  A lambda is an anonymous function defined in a single **expression**: `lambda x: x * 2`.
+  It's handy for short `key=` functions and callbacks. It can't contain statements
+  (assignments, loops, `try`) or annotations, and its name is `<lambda>` in tracebacks.
+detailedAnswer: |
+  `f = lambda x: x + 1` is equivalent to `def f(x): return x + 1`, except the def version is
+  clearer, debuggable (it has a real name) and can carry a docstring. PEP 8 discourages
+  assigning lambdas to names.
+
+  Good uses: `sorted(people, key=lambda p: p.age)` and `max(words, key=len)`. For simple
+  attribute and item access, `operator.attrgetter` and `itemgetter` are even clearer.
+
+  Lambdas are closures, so they suffer from late binding in loops. Fix it with a default
+  argument (`lambda i=i: i`) or `functools.partial`.
+code:
+  language: python
+  code: |
+    from operator import itemgetter
+
+    people = [("ada", 36), ("bo", 25)]
+    print(sorted(people, key=lambda p: p[1]))
+    print(sorted(people, key=itemgetter(1)) == sorted(people, key=lambda p: p[1]))
+    double = lambda x: x * 2  # noqa: E731 (shown for the name only)
+    print(double.__name__)
+pitfalls:
+  - Writing long, nested lambdas that would be clearer as a def.
+followUps:
+  - Why do lambdas created in a loop often return the same value?
+verify: |
+  assert double.__name__ == '<lambda>'

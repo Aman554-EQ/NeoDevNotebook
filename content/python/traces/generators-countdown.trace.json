@@ -1,0 +1,712 @@
+{
+ "version": 1,
+ "python": "3.13",
+ "source": "def countdown(n):\n    print(\"starting\")\n    while n > 0:\n        yield n\n        n -= 1\n\n\nfor value in countdown(3):\n    print(\"got\", value)\n",
+ "steps": [
+  {
+   "line": 1,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": []
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 8,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 1,
+   "event": "call",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 2,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 3,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\n"
+  },
+  {
+   "line": 4,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\n"
+  },
+  {
+   "line": 4,
+   "event": "yield",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\n",
+   "returnValue": "3"
+  },
+  {
+   "line": 9,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\n"
+  },
+  {
+   "line": 8,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\n"
+  },
+  {
+   "line": 4,
+   "event": "resume",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "3"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\n"
+  },
+  {
+   "line": 5,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "3"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\n"
+  },
+  {
+   "line": 3,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "3"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\n"
+  },
+  {
+   "line": 4,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "3"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\n"
+  },
+  {
+   "line": 4,
+   "event": "yield",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "3"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\n",
+   "returnValue": "2"
+  },
+  {
+   "line": 9,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\n"
+  },
+  {
+   "line": 8,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\n"
+  },
+  {
+   "line": 4,
+   "event": "resume",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "2"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\n"
+  },
+  {
+   "line": 5,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "2"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\n"
+  },
+  {
+   "line": 3,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "2"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\n"
+  },
+  {
+   "line": 4,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "2"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\n"
+  },
+  {
+   "line": 4,
+   "event": "yield",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "2"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\n",
+   "returnValue": "1"
+  },
+  {
+   "line": 9,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\n"
+  },
+  {
+   "line": 8,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\ngot 1\n"
+  },
+  {
+   "line": 4,
+   "event": "resume",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "1"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\ngot 1\n"
+  },
+  {
+   "line": 5,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "1"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\ngot 1\n"
+  },
+  {
+   "line": 3,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "1"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\ngot 1\n"
+  },
+  {
+   "line": 3,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "1"
+      ]
+     ]
+    },
+    {
+     "name": "countdown",
+     "locals": [
+      [
+       "n",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\ngot 1\n",
+   "returnValue": "None"
+  },
+  {
+   "line": 8,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "countdown",
+       "function countdown"
+      ],
+      [
+       "value",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "stdout": "starting\ngot 3\ngot 2\ngot 1\n",
+   "returnValue": "None"
+  }
+ ],
+ "stdout": "starting\ngot 3\ngot 2\ngot 1\n",
+ "truncated": false
+}

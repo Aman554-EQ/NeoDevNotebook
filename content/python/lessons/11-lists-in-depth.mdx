@@ -1,0 +1,127 @@
+---
+title: Lists in depth
+summary: Python's workhorse sequence is a dynamic array. See how it's laid out in memory, which operations are cheap and which quietly move every item, and how to sort anything with sort, sorted and key functions.
+estimatedMinutes: 20
+difficulty: simple
+section: Data Structures
+objectives:
+  - Explain why indexing and append are O(1) but insert(0) and pop(0) are O(n)
+  - Use the core list methods and know which ones return None
+  - Sort with `sort` vs `sorted`, custom `key` functions, `reverse`, and multi-key tuples
+  - Rely on sort stability to sort by several fields
+prerequisites:
+  - Mutability, references and copies
+tags: [python, lists, sorting, complexity]
+practice: [py-p-006, py-p-009, py-p-011, py-p-017]
+interview: [py-i-018, py-i-022]
+---
+
+## Intuition: a row of numbered lockers
+
+A list is a row of numbered lockers in one corridor, each holding a **reference** to an object. To
+find locker 7 you walk straight to it (O(1)). Adding a locker at the end is easy if the corridor has
+spare space. Squeezing one in at the **front** means every occupant moves one door to the right.
+
+## See it
+
+<ListArrayViz />
+
+## The precise rules
+
+| Operation                                   | Cost           | Why                     |
+| ------------------------------------------- | -------------- | ----------------------- |
+| `xs[i]`, `xs[i] = v`, `len(xs)`             | O(1)           | slots are contiguous    |
+| `xs.append(v)`, `xs.pop()`                  | O(1) amortized | work at the end only    |
+| `xs.insert(0, v)`, `xs.pop(0)`, `del xs[0]` | O(n)           | every later item shifts |
+| `v in xs`, `xs.index(v)`, `xs.count(v)`     | O(n)           | must scan               |
+| `xs.sort()`, `sorted(xs)`                   | O(n log n)     | Timsort                 |
+
+- `xs.sort()` sorts **in place** and returns `None`. `sorted(iterable)` returns a **new** list and
+  works on any iterable.
+- `key=func` sorts by `func(item)`. Python calls `key` once per item.
+- Sorting is **stable**: items with equal keys keep their original order.
+
+## Worked example
+
+```python title="lists.py"
+nums = [5, 2, 9, 1]
+ordered = sorted(nums)  # new list
+print(ordered, nums)
+result = nums.sort()  # in place
+print(result, nums)
+
+people = [("bo", 25), ("al", 30), ("cy", 25)]
+print(sorted(people, key=lambda p: p[1]))  # stable: bo stays before cy
+print(sorted(people, key=lambda p: (-p[1], p[0])))  # age desc, then name
+
+print(sorted(["b", "A", "c"]), sorted(["b", "A", "c"], key=str.lower))
+
+a = [1, 2, 3]
+a.extend([4, 5])
+a.insert(1, 9)
+print(a, a.index(9))
+print(a.pop(), a)
+a.remove(9)
+print(a)
+
+try:
+    [1, 2].index(7)
+except ValueError as err:
+    print("ValueError:", err)
+
+print([0] * 3, 3 in [1, 2, 3], [1, 2, 3, 4][::-1])
+```
+
+```text title="Output"
+[1, 2, 5, 9] [5, 2, 9, 1]
+None [1, 2, 5, 9]
+[('bo', 25), ('cy', 25), ('al', 30)]
+[('al', 30), ('bo', 25), ('cy', 25)]
+['A', 'b', 'c'] ['A', 'b', 'c']
+[1, 9, 2, 3, 4, 5] 1
+5 [1, 9, 2, 3, 4]
+[1, 2, 3, 4]
+ValueError: 7 is not in list
+[0, 0, 0] True [4, 3, 2, 1]
+```
+
+What to notice:
+
+- `nums.sort()` returned `None`. A classic bug is `nums = nums.sort()`, which leaves you with `None`.
+- Uppercase letters sort before lowercase (`'A'` < `'b'` by code point). `key=str.lower` sorts
+  case-insensitively.
+- A tuple key sorts by the first field, then breaks ties with the next. Negating a number reverses
+  just that field.
+- `remove(v)` deletes the first matching **value**, and `pop(i)` removes by **index** and returns it.
+
+## Common mistakes
+
+<Callout type="warning" title="Using a list as a queue">
+  `queue.pop(0)` is O(n). With a million items that's a million moves per call. Use
+  `collections.deque` (lesson 16).
+</Callout>
+
+- **`if x in big_list` inside a loop** makes the loop O(n²). Convert to a `set` once if you test
+  membership repeatedly.
+- **Sorting mixed types.** `sorted([1, "a"])` raises `TypeError: '<' not supported between
+instances of 'str' and 'int'`.
+- **Copy surprises.** `b = a` aliases. Use `a.copy()` or `a[:]` (lesson 10).
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: how do you sort words by length, longest first, ties alphabetically?"
+>
+  `sorted(words, key=lambda w: (-len(w), w))`. The negated length sorts long words first, and the
+  word itself breaks ties alphabetically.
+</Reveal>
+
+<KeyTakeaways>
+
+- A list is a dynamic array: fast at the end and by index, slow at the front and for searches.
+- `sort()` changes the list and returns `None`. `sorted()` returns a new list.
+- Use `key=` (often a lambda or a tuple) instead of writing comparison logic.
+- Sorting is stable, so multi-field sorts are easy.
+
+</KeyTakeaways>

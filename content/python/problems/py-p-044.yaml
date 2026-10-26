@@ -1,0 +1,94 @@
+id: py-p-044
+title: Retry decorator with a limit
+difficulty: medium
+tags:
+  - decorators
+  - exceptions
+  - functools
+statement: |
+  Write a decorator factory `retry(times, exceptions=(Exception,))` that calls the decorated
+  function up to `times` attempts while it raises one of `exceptions`. Return the first
+  successful result, or re-raise the last error. Other exceptions pass through immediately.
+constraints:
+  - Preserve the function's metadata with `functools.wraps`.
+  - "`times >= 1`"
+examples:
+  - input: "@retry(3, (ConnectionError,)) on a function that fails twice"
+    output: succeeds on attempt 3
+hints:
+  - "Three layers: `retry(...)` returns `decorator(func)`, which returns `wrapper(*args, **kwargs)`."
+  - "`raise` with no argument inside `except` re-raises the current error."
+solution:
+  language: python
+  code: |
+    import functools
+
+
+    def retry(times: int, exceptions: tuple = (Exception,)):
+        def decorator(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                for attempt in range(1, times + 1):
+                    try:
+                        return func(*args, **kwargs)
+                    except exceptions:
+                        if attempt == times:
+                            raise  # out of attempts: keep the original traceback
+
+            return wrapper
+
+        return decorator
+
+
+    calls = {"n": 0}
+
+
+    @retry(3, (ConnectionError,))
+    def flaky_fetch() -> str:
+        """Fails twice, then works."""
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ConnectionError("network down")
+        return "data"
+
+
+    print(flaky_fetch(), calls["n"], flaky_fetch.__name__)
+  explanation: |
+    `retry(3, ...)` returns the real decorator, which wraps the function. The wrapper loops
+    over the attempts and returns as soon as a call succeeds. A listed exception is
+    swallowed, unless it's the final attempt, where a bare `raise` re-raises it with its
+    original traceback.
+
+    Exceptions **not** in the tuple aren't caught at all, so a `TypeError` caused by a bug
+    fails immediately instead of being retried pointlessly. In real code, add a delay
+    (`time.sleep`) with backoff between attempts.
+complexity:
+  time: O(times) calls
+  space: O(1)
+variations:
+  - "Add exponential backoff: wait 0.1 s, 0.2 s, 0.4 s … between attempts."
+verify: |
+  assert flaky_fetch.__name__ == "flaky_fetch" and "twice" in flaky_fetch.__doc__
+  state = {"n": 0}
+
+  @retry(2, (ValueError,))
+  def always_bad():
+      state["n"] += 1
+      raise ValueError("nope")
+
+  try:
+      always_bad()
+  except ValueError:
+      assert state["n"] == 2
+  else:
+      raise AssertionError
+
+  @retry(5, (ValueError,))
+  def wrong_type():
+      state["n"] += 100
+      raise TypeError("bug")
+
+  try:
+      wrong_type()
+  except TypeError:
+      assert state["n"] == 102  # not retried

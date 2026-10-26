@@ -1,0 +1,40 @@
+id: py-i-047
+question: What is free-threaded Python 3.13?
+difficulty: hard
+tags:
+  - gil
+  - python-313
+  - threads
+shortAnswer: |
+  An experimental CPython 3.13 build (PEP 703, often `python3.13t`) with the GIL disabled,
+  so threads can run Python bytecode truly in parallel on multiple cores. It's opt-in and not
+  the default. Single-threaded code may be somewhat slower, and C extensions must be built
+  and declared compatible, otherwise the GIL is re-enabled at runtime.
+detailedAnswer: |
+  How it works: thread-safe reference counting (biased refcounting), per-object locking for
+  built-in containers, and changes to the memory allocator.
+
+  What it means for you:
+
+  - CPU-bound multithreaded code can finally scale across cores, without processes.
+  - Your own shared state still needs locks. Removing the GIL makes races **more** likely,
+    not less.
+  - Check at runtime with `sys._is_gil_enabled()` (3.13+). `python -X gil=0` can force it
+    off.
+
+  The plan is a gradual transition over several releases, guided by ecosystem readiness.
+code:
+  language: python
+  code: |
+    import sys
+    import sysconfig
+
+    free_threaded_build = bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
+    gil_on = sys._is_gil_enabled() if hasattr(sys, "_is_gil_enabled") else True
+    print("free-threaded build:", free_threaded_build, "| GIL enabled:", gil_on)
+pitfalls:
+  - Thinking removing the GIL removes the need for locks.
+followUps:
+  - What is the GIL protecting in the first place?
+verify: |
+  assert isinstance(free_threaded_build, bool)

@@ -1,0 +1,147 @@
+---
+title: Packages and project layout
+summary: Group modules into packages, import between them with absolute and relative imports, control your public API with __init__.py, and lay a project out so it imports the same way in development, in tests and when installed.
+estimatedMinutes: 15
+difficulty: medium
+section: Packages, Imports & Tooling
+objectives:
+  - Build a package and sub-package with `__init__.py`
+  - Use absolute and relative imports correctly
+  - Expose a clean public API from `__init__.py`
+  - Choose a project layout (`src/` layout) and describe `pyproject.toml`
+prerequisites:
+  - Modules and the import system
+tags: [python, packages, imports, project-structure]
+interview: [py-i-049, py-i-052]
+---
+
+## Intuition: folders with a reception desk
+
+A **package** is a folder of modules. Its `__init__.py` is the reception desk: it runs when the
+package is first imported, and it can decide what visitors see at the front (`from shop import
+price_with_tax`) so they don't need to know the internal room numbers (`shop.pricing`).
+
+## See it
+
+The same import machinery as the previous lesson applies to every dotted name. `shop.reports.daily`
+imports `shop`, then `shop.reports`, then the module itself, caching each one.
+
+<ImportViz />
+
+## The precise rules
+
+```text title="Layout"
+project/
+├─ pyproject.toml          # name, version, dependencies, tool config
+├─ src/
+│  └─ shop/                # the import package
+│     ├─ __init__.py       # runs on "import shop"; defines the public API
+│     ├─ tax.py
+│     ├─ pricing.py        # from .tax import RATE
+│     └─ reports/
+│        ├─ __init__.py
+│        └─ daily.py       # from ..pricing import price_with_tax
+└─ tests/
+   └─ test_pricing.py      # from shop.pricing import price_with_tax
+```
+
+- **Absolute import:** `from shop.tax import RATE` works from anywhere once `shop` is importable.
+  It's the default choice.
+- **Relative import:** `from .tax import RATE` (same package) or `from ..pricing import …` (parent).
+  It only works **inside a package**, never in a file you run directly as a script.
+- Run code inside a package as a module: `python -m shop.reports.daily`, not
+  `python src/shop/reports/daily.py`, so relative imports resolve.
+- **`src/` layout:** keeping the package under `src/` forces you to install it
+  (`pip install -e .`), which means tests import exactly what users would.
+
+## Worked example
+
+```python title="packages.py"
+import sys
+import tempfile
+from pathlib import Path
+
+files = {
+    "shop/__init__.py": 'from .pricing import price_with_tax\n__all__ = ["price_with_tax"]\n',
+    "shop/tax.py": "RATE = 0.2\n",
+    "shop/pricing.py": "from .tax import RATE  # relative: a sibling module\n\n"
+    "def price_with_tax(p):\n    return round(p * (1 + RATE), 2)\n",
+    "shop/reports/__init__.py": "",
+    "shop/reports/daily.py": "from ..pricing import price_with_tax  # two dots: parent package\n\n"
+    "def total(prices):\n    return sum(price_with_tax(p) for p in prices)\n",
+}
+
+with tempfile.TemporaryDirectory() as tmp:
+    for name, body in files.items():
+        path = Path(tmp, name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    sys.path.insert(0, tmp)
+
+    import shop
+    from shop.reports.daily import total
+
+    print(shop.price_with_tax(10), total([10, 20]))
+    print(shop.__package__, shop.pricing.__name__, total.__module__)
+    print(sorted(p.relative_to(tmp).as_posix() for p in Path(tmp).rglob("*.py")))
+    sys.path.remove(tmp)
+```
+
+```text title="Output"
+12.0 36.0
+shop shop.pricing shop.reports.daily
+['shop/__init__.py', 'shop/pricing.py', 'shop/reports/__init__.py', 'shop/reports/daily.py', 'shop/tax.py']
+```
+
+What to notice:
+
+- `shop/__init__.py` re-exported `price_with_tax`, so users write `shop.price_with_tax` without
+  knowing about `pricing.py`. You can reorganise the internals later without breaking them.
+- `..pricing` climbed from `shop.reports` to `shop`. Every module knows its full dotted name.
+- `__all__` lists the public names that `from shop import *` would export, and it documents the API.
+
+A minimal `pyproject.toml` for the `src/` layout:
+
+```text title="pyproject.toml"
+[project]
+name = "shop"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["requests>=2.32"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+```
+
+## Common mistakes
+
+<Callout type="warning" title="Running a module inside a package as a script">
+  `python shop/reports/daily.py` fails with `ImportError: attempted relative import with no known
+  parent package`. Run it as `python -m shop.reports.daily` from the folder that contains `shop`.
+</Callout>
+
+- **Forgetting `__init__.py`.** Modern Python allows "namespace packages" without one, but explicit
+  `__init__.py` files avoid surprises and let you define the public API.
+- **Heavy work in `__init__.py`.** It runs on every import of the package. Keep it to re-exports.
+- **Fixing imports with `sys.path` hacks** in application code. Install the project (`pip install -e .`)
+  instead.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: in shop/reports/daily.py, what is the absolute form of 'from ..tax import RATE'?"
+>
+  `from shop.tax import RATE`. Each leading dot goes up one package level: `.` is `shop.reports`,
+  and `..` is `shop`.
+</Reveal>
+
+<KeyTakeaways>
+
+- A package is a folder of modules, and `__init__.py` runs on import and defines the public API.
+- Prefer absolute imports. Relative imports (`.`, `..`) work only inside packages.
+- Run package modules with `python -m package.module`.
+- The `src/` layout plus `pyproject.toml` and `pip install -e .` makes imports consistent everywhere.
+
+</KeyTakeaways>
