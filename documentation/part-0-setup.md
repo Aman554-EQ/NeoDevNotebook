@@ -51,14 +51,14 @@ See the [README](../README.md). The full gate is `pnpm check && pnpm test:e2e`.
 
 ## Test results (final run, 2026-10-26)
 
-| Suite                                     | Result                                                                                                                                  |
-| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| ESLint / Prettier / `tsc --noEmit`        | ✅ clean                                                                                                                                |
-| Vitest (6 files)                          | ✅ **40 / 40** (content loader, MDX pipeline, samples, progress store, components, DB seed + search on the test DB)                     |
-| Content + code verification               | ✅ 6 samples, 5 executed on Python 3.13 (1 is an intentionally buggy `norun` snippet)                                                   |
-| Playwright (4 viewports)                  | ✅ **269 passed**, 7 skipped by design (viewport-specific checks)                                                                       |
-| axe (13 pages × light/dark × 4 viewports) | ✅ 0 serious/critical                                                                                                                   |
-| Lighthouse mobile                         | ✅ Performance 90–97, Accessibility 100, Best Practices 100, CLS ≤ 0.015, TBT ≤ 140 ms · ⚠️ **LCP 2.6–3.5 s (budget 2.5 s), see below** |
+| Suite                                     | Result                                                                                                                            |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| ESLint / Prettier / `tsc --noEmit`        | ✅ clean                                                                                                                          |
+| Vitest (6 files)                          | ✅ **40 / 40** (content loader, MDX pipeline, samples, progress store, components, DB seed + search on the test DB)               |
+| Content + code verification               | ✅ 6 samples, 5 executed on Python 3.13 (1 is an intentionally buggy `norun` snippet)                                             |
+| Playwright (4 viewports)                  | ✅ **269 passed**, 7 skipped by design (viewport-specific checks)                                                                 |
+| axe (13 pages × light/dark × 4 viewports) | ✅ 0 serious/critical                                                                                                             |
+| Lighthouse mobile                         | ✅ Performance 90–97, Accessibility 100, Best Practices 100, CLS ≤ 0.015, TBT ≤ 140 ms · lab LCP 2.6–3.5 s (info only, see below) |
 
 ## Known limitations
 
@@ -66,7 +66,9 @@ See the [README](../README.md). The full gate is `pnpm check && pnpm test:e2e`.
   LCP is 66–262 ms, at the same time as first paint. The simulation charges LCP with every byte requested
   before first paint, which is mostly Next.js/React's fixed runtime (~120 KB gz). Already done: zod removed from
   client JS (−25 KB gz), lazy visualization scenes, a single Fraunces weight, `display: optional` fonts.
-  Tried with no effect, so reverted: inlined CSS, no font preload. **This needs an owner decision** (see the changelog).
+  Tried with no effect, so reverted: inlined CSS, no font preload. **Owner decision (2026-10-26, option A):**
+  LCP < 2.5 s is a field budget (real users, p75, e.g. Vercel Speed Insights once deployed); lab LCP is
+  reported but no longer fails `pnpm perf` (soul.md §11).
 - Search needs the database. If it's unreachable, the dialog shows a clear "Search is unavailable" message.
 - `pnpm` in Git Bash on this machine resolves the wrong `cygpath` (Anaconda), so the Git hooks call `node` directly.
 
