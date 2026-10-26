@@ -365,3 +365,16 @@ a problem page. Lab budgets from soul.md §11.
 ---
 
 **Approval:** ✅ Approved by owner on 2026-10-26 ("proceed").
+
+---
+
+## 11. Addendum (2026-10-27): owner-requested fixes and lesson enrichment
+
+Requested by the owner after Part 1 was built (session 03), on `module/python`:
+
+| #    | Step                                                                                                          | Acceptance criteria                                                                             | Status |
+| ---- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------ |
+| 1.16 | Clear every dev-terminal / Next.js-overlay issue (Suspense for `params`, extension attributes, three warning) | `pnpm check:dev`: 0 warnings/errors on every route, visual and client navigation, 360 + 1440 px | ✅     |
+| 1.17 | Review every step of every 3D visual at 360 and 1440 px; fix legibility and overlaps                          | All labels readable at 360 px, no line crosses a label, CPython facts re-verified               | ✅     |
+| 1.18 | Enrich all 36 lessons: Variations + Putting it together + 3 more self-checks, structure kept                  | Unit test enforces the sections; every new sample verified (428 samples)                        | ✅     |
+| 1.19 | Full gate (unit, verify:code ×3, E2E, Lighthouse) and docs                                                    | Everything green; changelog, documentation, navigation and plan updated                         | ✅     |

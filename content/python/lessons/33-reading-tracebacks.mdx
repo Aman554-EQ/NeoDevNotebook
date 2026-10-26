@@ -1,7 +1,7 @@
 ---
 title: Reading tracebacks
 summary: A traceback is a map from the error back to its cause. Learn to read it bottom-up, use Python 3.13's precise error markers, follow chained exceptions, and turn the trace into a fix.
-estimatedMinutes: 15
+estimatedMinutes: 24
 difficulty: simple
 section: Debugging
 objectives:
@@ -103,6 +103,257 @@ What to notice:
   decides that an empty order counts as `0.0`.
 - `err.__cause__` holds the original error when you `raise … from err`.
 
+## Variations
+
+Each example prints a real traceback. File paths are shortened to the file name so the output is
+the same on every machine.
+
+### "Direct cause" vs "during handling"
+
+```python title="chained_tracebacks.py"
+import re
+import traceback
+
+
+def show(err: BaseException) -> None:
+    text = "".join(traceback.format_exception(err))
+    print(re.sub(r'File ".*?([^\\/]+\.py)"', r'File "\1"', text).strip(), end="\n\n")
+
+
+def load_port(cfg):
+    try:
+        return int(cfg["port"])
+    except KeyError as err:
+        raise ValueError("config has no port") from err      # deliberate: "direct cause"
+
+
+def load_port_buggy(cfg):
+    try:
+        return int(cfg["port"])
+    except KeyError:
+        return int(cfg["PORT"])                               # the handler itself crashes
+
+
+for func in (load_port, load_port_buggy):
+    try:
+        func({})
+    except Exception as err:
+        show(err)
+```
+
+```text title="Output"
+Traceback (most recent call last):
+  File "sample.py", line 12, in load_port
+    return int(cfg["port"])
+               ~~~^^^^^^^^
+KeyError: 'port'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "sample.py", line 26, in <module>
+    func({})
+    ~~~~^^^^
+  File "sample.py", line 14, in load_port
+    raise ValueError("config has no port") from err      # deliberate: "direct cause"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: config has no port
+
+Traceback (most recent call last):
+  File "sample.py", line 19, in load_port_buggy
+    return int(cfg["port"])
+               ~~~^^^^^^^^
+KeyError: 'port'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "sample.py", line 26, in <module>
+    func({})
+    ~~~~^^^^
+  File "sample.py", line 21, in load_port_buggy
+    return int(cfg["PORT"])                               # the handler itself crashes
+               ~~~^^^^^^^^
+KeyError: 'PORT'
+```
+
+- Read chained tracebacks **bottom up**: the last block is the exception you caught; the block
+  above it is what led there.
+- "was the direct cause of" means somebody translated the error on purpose (`raise … from err`).
+- "During handling of the above exception" means the `except` block itself failed, here a second
+  `KeyError` on `"PORT"`. That's almost always a bug in the handler.
+
+### Errors raised inside library code
+
+```python title="library_frames.py"
+import json
+import traceback
+from pathlib import Path
+
+
+def parse_settings(text):
+    return json.loads(text)
+
+
+try:
+    parse_settings('{"debug": true,}')
+except json.JSONDecodeError as err:
+    frames = traceback.extract_tb(err.__traceback__)
+    for f in frames:
+        in_library = Path(f.filename).parent.name == "json"
+        where = "json library" if in_library else f"your code, line {f.lineno}"
+        print(f"{f.name:15} {where}")
+    mine = [f for f in frames if Path(f.filename).parent.name != "json"]
+    print("start reading at:", mine[-1].name, "->", mine[-1].line)
+    print(f"{type(err).__name__}: {err.msg} (line {err.lineno}, column {err.colno})")
+```
+
+```text title="Output"
+<module>        your code, line 11
+parse_settings  your code, line 7
+loads           json library
+decode          json library
+raw_decode      json library
+start reading at: parse_settings -> return json.loads(text)
+JSONDecodeError: Illegal trailing comma before end of object (line 1, column 15)
+```
+
+The deepest frames belong to the `json` package, but the bug is the **input** your code passed in.
+Skip past library frames to the last frame in your own files: that's where the bad value
+entered.
+
+### Recursion errors: repeated frames are collapsed
+
+```python title="recursion_traceback.py"
+import re
+import traceback
+
+
+def count_down(n):
+    return count_down(n - 1)        # no base case
+
+
+try:
+    count_down(3)
+except RecursionError as err:
+    lines = "".join(traceback.format_exception(err)).splitlines()
+    lines = [re.sub(r'File ".*?([^\\/]+\.py)"', r'File "\1"', line) for line in lines]
+    print("\n".join(lines[:6]))
+    print("...")
+    print("\n".join(line for line in lines if "repeated" in line))
+    print(lines[-1])
+```
+
+```text title="Output"
+Traceback (most recent call last):
+  File "sample.py", line 10, in <module>
+    count_down(3)
+    ~~~~~~~~~~^^^
+  File "sample.py", line 6, in count_down
+    return count_down(n - 1)        # no base case
+...
+  [Previous line repeated 996 more times]
+RecursionError: maximum recursion depth exceeded
+```
+
+Instead of printing a thousand identical frames, Python shows the first few and a line like
+"[Previous line repeated N more times]". Seeing the **same frame repeated** means a missing or
+unreachable base case (lesson 09).
+
+### Exception group tracebacks
+
+```python title="group_traceback.py"
+import re
+import traceback
+
+
+def validate(row):
+    problems = []
+    if "@" not in row["email"]:
+        problems.append(ValueError(f"bad email {row['email']!r}"))
+    if row["age"] < 0:
+        problems.append(ValueError(f"negative age {row['age']}"))
+    if problems:
+        raise ExceptionGroup(f"row {row['id']} is invalid", problems)
+
+
+try:
+    validate({"id": 7, "email": "nope", "age": -1})
+except ExceptionGroup as group:
+    text = "".join(traceback.format_exception(group))
+    print(re.sub(r'File ".*?([^\\/]+\.py)"', r'File "\1"', text).strip())
+```
+
+```text title="Output"
++ Exception Group Traceback (most recent call last):
+  |   File "sample.py", line 16, in <module>
+  |     validate({"id": 7, "email": "nope", "age": -1})
+  |     ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "sample.py", line 12, in validate
+  |     raise ExceptionGroup(f"row {row['id']} is invalid", problems)
+  | ExceptionGroup: row 7 is invalid (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | ValueError: bad email 'nope'
+    +---------------- 2 ----------------
+    | ValueError: negative age -1
+    +------------------------------------
+```
+
+An `ExceptionGroup` traceback draws a box with numbered sub-exceptions (`+-+---- 1 ----`), one
+per problem. Each numbered section reads like a normal traceback for that sub-exception.
+
+## Putting it together: a compact crash report
+
+```python title="crash_report.py"
+import json
+import traceback
+from pathlib import Path
+
+
+def crash_report(err: BaseException, project_files: set[str]) -> dict:
+    frames = traceback.extract_tb(err.__traceback__)
+    mine = [f for f in frames if Path(f.filename).name in project_files]
+    culprit = mine[-1] if mine else frames[-1]
+    return {
+        "error": f"{type(err).__name__}: {err}",
+        "where": f"{Path(culprit.filename).name}:{culprit.lineno} in {culprit.name}",
+        "code": culprit.line,
+        "path": " -> ".join(f.name for f in mine),
+        "cause": repr(err.__cause__) if err.__cause__ else None,
+    }
+
+
+def apply_discount(order, code):
+    return order["total"] * {"SAVE10": 0.9, "HALF": 0.5}[code]
+
+
+def checkout(order):
+    try:
+        return apply_discount(order, order["coupon"])
+    except KeyError as err:
+        raise ValueError(f"unknown coupon {order['coupon']!r}") from err
+
+
+try:
+    checkout({"total": 80, "coupon": "FREE"})
+except ValueError as err:
+    print(json.dumps(crash_report(err, {Path(__file__).name}), indent=2))
+```
+
+```text title="Output"
+{
+  "error": "ValueError: unknown coupon 'FREE'",
+  "where": "sample.py:27 in checkout",
+  "code": "raise ValueError(f\"unknown coupon {order['coupon']!r}\") from err",
+  "path": "<module> -> checkout",
+  "cause": "KeyError('FREE')"
+}
+```
+
+The report keeps what a person needs at 3 a.m.: the error line, the exact place in **your** code,
+the path of calls through your code, and the original cause. Error-tracking services (Sentry and
+similar) collect exactly this, plus the variables in each frame.
+
 ## Common mistakes
 
 <Callout type="warning" title="Fixing the line in the last frame by reflex">
@@ -128,11 +379,42 @@ What to notice:
   was passed in. Check what data that call received and where the data came from.
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: a traceback has 12 frames; the last 9 are inside `requests`. Where do you start reading?"
+>
+  At the last line (the exception), then the last frame in **your** files, just above the `requests`
+  frames. That's the call that passed something unexpected into the library.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what does 'During handling of the above exception, another exception occurred' tell you?"
+>
+  That an `except` (or `finally`) block raised a new error while handling the first one. Fix the
+  handler; if the re-raise is deliberate, use `raise New(...) from err` to say so.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: how do you get the line number where an exception happened, in code?"
+>
+  `traceback.extract_tb(err.__traceback__)[-1].lineno` for the innermost frame. `extract_tb` returns
+  every frame with its file, line number, function name and source line.
+</Reveal>
+
 <KeyTakeaways>
 
 - Read bottom-up: the error (what), the last frame (where), then upward (how).
 - The `~` and `^` markers point at the exact failing expression.
 - "Direct cause" means `raise … from`. "During handling" means a crash inside `except`.
 - The bug is often in an earlier frame that produced the bad value.
+- Read chained tracebacks bottom up; "direct cause" is deliberate, "during handling" is usually a
+  bug in the handler.
+- Skip library frames to the last frame in your own code; collapsed repeated frames mean runaway
+  recursion.
+- `traceback.extract_tb` and `format_exception` turn tracebacks into data for logs and reports.
 
 </KeyTakeaways>
+
+{/* enriched */}

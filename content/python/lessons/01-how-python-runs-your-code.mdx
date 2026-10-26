@@ -1,7 +1,7 @@
 ---
 title: How Python runs your code
 summary: What actually happens between pressing Enter and seeing output. Python compiles your file to bytecode, then a small virtual machine runs it one instruction at a time.
-estimatedMinutes: 12
+estimatedMinutes: 24
 difficulty: easy
 section: Basics
 objectives:
@@ -121,6 +121,224 @@ SyntaxError on line 2 - nothing ran
 `compile()` is the same first stage that `python demo.py` performs. Because it failed, the
 `print` on line 1 never executed.
 
+## Variations
+
+### Compile once, run many times
+
+```python title="compile_modes.py"
+expr_code = compile("price * qty", "<formula>", "eval")      # one expression -> a value
+stmt_code = compile("total = price * qty\nlabel = f'{total:.2f}'", "<script>", "exec")
+
+for price, qty in [(2.5, 4), (10, 3)]:
+    print(eval(expr_code, {"price": price, "qty": qty}))
+
+namespace = {"price": 1.25, "qty": 8}
+exec(stmt_code, namespace)                                    # statements -> side effects
+print(namespace["total"], namespace["label"])
+print(type(expr_code).__name__, expr_code.co_names, expr_code.co_filename)
+```
+
+```text title="Output"
+10.0
+30
+10.0 10.00
+code ('price', 'qty') <formula>
+```
+
+- `compile(source, filename, mode)` is the first stage of running Python: `"eval"` for a single
+  expression, `"exec"` for statements.
+- A code object can be executed many times with different variables, which is what the
+  interpreter does every time a function is called.
+- `co_names` lists the names the code looks up; `co_filename` is what tracebacks will show.
+
+### What's inside a code object
+
+```python title="code_object.py"
+def shipping(weight, rate=1.5, *, express=False):
+    """Cost of shipping a parcel."""
+    base = weight * rate
+    return base * 2 if express else base
+
+
+code = shipping.__code__
+print(code.co_argcount, code.co_kwonlyargcount, code.co_varnames)
+print(code.co_consts[:3], shipping.__defaults__, shipping.__kwdefaults__)
+print(code.co_firstlineno, code.co_name)
+```
+
+```text title="Output"
+2 1 ('weight', 'rate', 'express', 'base')
+('Cost of shipping a parcel.', 2) (1.5,) {'express': False}
+1 shipping
+```
+
+The compiler records the number and names of parameters, the local variables (`base`), the
+constants used in the body (the docstring and the `2`), and where the function starts. Defaults
+live on the **function** object (`__defaults__`), because they're evaluated when `def` runs.
+
+### `def` and `class` are statements that run
+
+```python title="def_runs.py"
+import sys
+
+print("module starts")
+
+if sys.version_info >= (3, 0):
+    def greet():                       # this def runs only if the condition is true
+        return "hello from Python 3"
+else:
+    def greet():
+        return "hello from the past"
+
+print(greet())
+
+try:
+    later()
+except NameError as err:
+    print("NameError:", err)          # not defined YET: that def hasn't run
+
+
+def later():
+    return "now it exists"
+
+
+print(later())
+```
+
+```text title="Output"
+module starts
+hello from Python 3
+NameError: name 'later' is not defined
+now it exists
+```
+
+Python executes a file **top to bottom**. A `def` statement creates the function object at the
+moment it runs, so a function can't be called before its `def` has executed, and different
+`def`s can run depending on conditions.
+
+### The bytecode cache, observed
+
+```python title="pyc_cache.py"
+import importlib.util
+import sys
+import tempfile
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as tmp:
+    Path(tmp, "helper.py").write_text("VALUE = 42\n", encoding="utf-8")
+    sys.path.insert(0, tmp)
+    sys.dont_write_bytecode = False
+
+    import helper
+    cache = sorted(p.name for p in Path(tmp, "__pycache__").glob("*.pyc"))
+    print(helper.VALUE, len(cache), cache[0].startswith("helper.") and cache[0].endswith(".pyc"))
+    print("tag matches this interpreter:", sys.implementation.cache_tag in cache[0])
+    print(importlib.util.cache_from_source(str(Path(tmp, "helper.py"))).endswith(cache[0]))
+    sys.path.remove(tmp)
+```
+
+```text title="Output"
+42 1 True
+tag matches this interpreter: True
+True
+```
+
+Importing `helper` compiled it and saved `__pycache__/helper.<tag>.pyc`, where the tag names the
+interpreter (for example `cpython-313`). The next import compares the source's timestamp with
+the cache and skips compiling if nothing changed. Deleting `__pycache__` is always safe: it's
+rebuilt on demand.
+
+### Seeing the structure before the bytecode: `ast`
+
+```python title="ast_view.py"
+import ast
+
+tree = ast.parse("total = price * (1 + tax)")
+print(ast.dump(tree.body[0], indent=1))
+print([type(node).__name__ for node in ast.walk(tree)][:6])
+print(ast.literal_eval("[1, 2.5, {'a': (3, 4)}]"))       # safe: literals only
+```
+
+```text title="Output"
+Assign(
+ targets=[
+  Name(id='total', ctx=Store())],
+ value=BinOp(
+  left=Name(id='price', ctx=Load()),
+  op=Mult(),
+  right=BinOp(
+   left=Constant(value=1),
+   op=Add(),
+   right=Name(id='tax', ctx=Load()))))
+['Module', 'Assign', 'Name', 'BinOp', 'Store', 'Name']
+[1, 2.5, {'a': (3, 4)}]
+```
+
+Before generating bytecode, CPython parses source into an **abstract syntax tree**: assignments,
+names and operators as nested nodes. Linters, formatters and type checkers work on this tree.
+`ast.literal_eval` evaluates **only** literals, which makes it a safe replacement for `eval` when
+reading data.
+
+## Putting it together: a safe calculator
+
+```python title="safe_calc.py"
+import ast
+import math
+import operator
+
+OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+       ast.Div: operator.truediv, ast.Pow: operator.pow, ast.USub: operator.neg}
+NAMES = {"pi": math.pi, "e": math.e}
+FUNCS = {"sqrt": math.sqrt, "round": round}
+
+
+def evaluate(node):
+    match node:
+        case ast.Expression(body=body):
+            return evaluate(body)
+        case ast.Constant(value=int() | float() as value):
+            return value
+        case ast.Name(id=name) if name in NAMES:
+            return NAMES[name]
+        case ast.BinOp(left=left, op=op, right=right) if type(op) in OPS:
+            return OPS[type(op)](evaluate(left), evaluate(right))
+        case ast.UnaryOp(op=op, operand=operand) if type(op) in OPS:
+            return OPS[type(op)](evaluate(operand))
+        case ast.Call(func=ast.Name(id=fname), args=args) if fname in FUNCS:
+            return FUNCS[fname](*(evaluate(a) for a in args))
+    raise ValueError(f"not allowed: {ast.unparse(node)}")
+
+
+def calc(text: str):
+    try:
+        return evaluate(ast.parse(text, mode="eval"))
+    except SyntaxError as err:
+        return f"syntax error: {err.msg}"
+    except (ValueError, ZeroDivisionError) as err:
+        return f"error: {err}"
+
+
+for text in ["2 + 3 * 4", "(2 + 3) * 4", "-2 ** 2", "round(pi * 2 ** 2, 3)", "sqrt(16) / 0",
+             "__import__('os').getcwd()", "2 +"]:
+    print(f"{text:28} -> {calc(text)}")
+```
+
+```text title="Output"
+2 + 3 * 4                    -> 14
+(2 + 3) * 4                  -> 20
+-2 ** 2                      -> -4
+round(pi * 2 ** 2, 3)        -> 12.566
+sqrt(16) / 0                 -> error: float division by zero
+__import__('os').getcwd()    -> error: not allowed: __import__('os').getcwd()
+2 +                          -> syntax error: invalid syntax
+```
+
+- The calculator reuses Python's own parser (`ast.parse(..., mode="eval")`), so precedence is
+  exactly Python's: `-2 ** 2` is `-4`.
+- It then walks the tree and allows only numbers, a few names, arithmetic and two functions.
+  Anything else, like the `__import__` attack, is rejected **before** anything runs. Calling
+  `eval` on user input would have executed it.
+
 ## Common mistakes
 
 <Callout type="warning" title="Running the wrong Python">
@@ -144,6 +362,28 @@ SyntaxError on line 2 - nothing ran
   different: lines 1–39 run first.
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: a file has a syntax error on its last line. Do the earlier lines run?"
+>
+  No. The whole file is compiled before anything executes, so a syntax error anywhere means nothing
+  runs. A runtime error, by contrast, stops the program only when that line is reached.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why can you call a function before its `def` inside another function, but not at module level?"
+>
+  Inside a function body, the call only runs when the outer function is **called**, by which time
+  the module has finished executing all its `def`s. At module level, lines run in order, so the call
+  happens before the `def` statement.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: is it safe to delete `__pycache__` folders?">
+  Yes. They only hold cached bytecode, and Python recompiles from the `.py` sources on the next
+  import.
+</Reveal>
+
 <KeyTakeaways>
 
 - CPython **compiles** your file to **bytecode**, then a **virtual machine** interprets it.
@@ -151,5 +391,13 @@ SyntaxError on line 2 - nothing ran
 - `dis.dis(func)` shows bytecode. It's version-specific, so use it to learn, not to depend on.
 - Imported modules are cached as `.pyc` files in `__pycache__`, and the cache is rebuilt automatically.
 - Run code with the REPL (experiments), `python file.py` (scripts) or `python -m module` (tools).
+- Source → AST → code object (bytecode) → interpreter loop; `compile`, `ast` and `dis` show each
+  stage.
+- `def` and `class` are statements that run top to bottom; functions exist only after their `def`
+  executes.
+- Never `eval` untrusted input; parse it and allow only what you expect (`ast.literal_eval` for
+  data).
 
 </KeyTakeaways>
+
+{/* enriched */}

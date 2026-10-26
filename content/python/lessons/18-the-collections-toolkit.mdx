@@ -1,7 +1,7 @@
 ---
 title: The collections toolkit
 summary: Counter, defaultdict, OrderedDict and ChainMap remove whole categories of boilerplate. Learn what each one is for and the problem it solves in one line.
-estimatedMinutes: 15
+estimatedMinutes: 26
 difficulty: simple
 section: Data Structures
 objectives:
@@ -88,6 +88,307 @@ What to notice:
   build one in the practice problems.
 - `ChainMap` doesn't copy anything. User settings override defaults by lookup order.
 
+## Variations
+
+### More `Counter`: updating, comparing and multiset maths
+
+```python title="counter_more.py"
+from collections import Counter
+
+stock = Counter({"apple": 5, "pear": 2})
+stock.update(["apple", "kiwi", "kiwi"])        # add counts from an iterable
+stock.subtract({"pear": 3})                     # subtract may go negative
+print(stock, stock.total())
+print(sorted(stock.elements()))                 # each item repeated by its count (> 0 only)
+
+print(Counter("listen") == Counter("silent"))   # same letters, same counts: anagrams
+a, b = Counter(x=3, y=1), Counter(x=1, y=4, z=2)
+print(a & b, a | b)                             # min and max of each count
+
+words = "the cat and the hat and the bat".split()
+counts = Counter(words)
+print(counts.most_common(2), counts.most_common()[-1])
+print(+stock)                                   # unary + drops zero and negative counts
+```
+
+```text title="Output"
+Counter({'apple': 6, 'kiwi': 2, 'pear': -1}) 7
+['apple', 'apple', 'apple', 'apple', 'apple', 'apple', 'kiwi', 'kiwi']
+True
+Counter({'x': 1, 'y': 1}) Counter({'y': 4, 'x': 3, 'z': 2})
+[('the', 3), ('and', 2)] ('bat', 1)
+Counter({'apple': 6, 'kiwi': 2})
+```
+
+- `update` adds and `subtract` removes counts; unlike `+` and `-`, they keep zero and negative
+  values (use `+counter` to clean them out).
+- `&` takes the **smaller** count of each key and `|` the larger: multiset intersection and union.
+- Comparing two `Counter`s is the shortest correct anagram check (it also handles repeated letters,
+  which a `set` comparison would get wrong).
+
+### `defaultdict` with different factories
+
+```python title="defaultdict_more.py"
+from collections import defaultdict
+
+edges = [("ann", "bob"), ("ann", "cy"), ("bob", "cy"), ("ann", "bob")]
+followers = defaultdict(set)                     # unique values per key
+for a, b in edges:
+    followers[b].add(a)
+print({k: sorted(v) for k, v in followers.items()})
+
+sales = defaultdict(lambda: defaultdict(int))    # two-level counting
+for region, product, qty in [("eu", "pen", 3), ("us", "pen", 1), ("eu", "ink", 2), ("eu", "pen", 1)]:
+    sales[region][product] += qty
+print({region: dict(products) for region, products in sales.items()})
+
+labels = defaultdict(lambda: "unknown", {200: "OK", 404: "Not Found"})
+print(labels[200], labels[500], 500 in labels)   # reading 500 inserted it
+```
+
+```text title="Output"
+{'bob': ['ann'], 'cy': ['ann', 'bob']}
+{'eu': {'pen': 4, 'ink': 2}, 'us': {'pen': 1}}
+OK unknown True
+```
+
+- The factory can be any zero-argument callable: `list`, `set`, `int`, or a `lambda` returning a
+  default value or even another `defaultdict`.
+- `lambda: defaultdict(int)` builds nested counters without checking whether the inner dict
+  exists.
+- Remember the side effect: reading `labels[500]` **inserted** the key.
+
+### A tree that grows itself
+
+```python title="autovivify.py"
+import json
+from collections import defaultdict
+
+
+def tree():
+    return defaultdict(tree)          # every missing key becomes another tree
+
+
+files = tree()
+for path in ["src/app/main.py", "src/app/utils.py", "src/lib/db.py", "README.md"]:
+    node = files
+    *folders, name = path.split("/")
+    for folder in folders:
+        node = node[folder]           # creates folders on first use
+    node[name] = None                 # a file is a leaf
+
+print(json.dumps(files, indent=2))
+```
+
+```text title="Output"
+{
+  "src": {
+    "app": {
+      "main.py": null,
+      "utils.py": null
+    },
+    "lib": {
+      "db.py": null
+    }
+  },
+  "README.md": null
+}
+```
+
+Because the factory returns another `defaultdict(tree)`, any depth of nesting is created on
+demand. `json.dumps` treats defaultdicts as plain dicts, which makes the structure easy to
+inspect.
+
+### `OrderedDict` equality cares about order
+
+```python title="ordered_equality.py"
+from collections import OrderedDict
+
+print({"a": 1, "b": 2} == {"b": 2, "a": 1})
+print(OrderedDict(a=1, b=2) == OrderedDict(b=2, a=1))
+print(OrderedDict(a=1, b=2) == {"b": 2, "a": 1})       # vs a plain dict: order ignored
+
+od = OrderedDict.fromkeys("abcde")
+od.move_to_end("b", last=False)                          # move to the FRONT
+print("".join(od))
+```
+
+```text title="Output"
+True
+False
+True
+bacde
+```
+
+Plain dicts also keep insertion order, but `OrderedDict` adds order-sensitive equality and the
+`move_to_end` / `popitem(last=...)` operations. Use it when the order **is** the data.
+
+### `ChainMap` for nested scopes
+
+```python title="chainmap_scopes.py"
+from collections import ChainMap
+
+builtins = {"print": "builtin print", "len": "builtin len"}
+module = {"x": 1, "len": "my len"}
+scope = ChainMap(module, builtins)
+print(scope["len"], scope["print"])
+
+local = scope.new_child({"x": 99})          # a new innermost layer
+print(local["x"], scope["x"])
+local["y"] = 5                              # writes go to the FIRST mapping only
+print(local.maps[0], "y" in module)
+print(dict(local))                          # flattened view, inner layers win
+```
+
+```text title="Output"
+my len builtin print
+99 1
+{'x': 99, 'y': 5} False
+{'print': 'builtin print', 'len': 'my len', 'x': 99, 'y': 5}
+```
+
+`ChainMap` searches its maps in order and writes only to the first. `new_child` pushes a new
+layer, which is a model of how Python resolves names in nested scopes (lesson 08).
+
+### Customising a dict with `UserDict`
+
+```python title="userdict.py"
+from collections import UserDict
+
+
+class CaseInsensitiveDict(UserDict):
+    def __setitem__(self, key, value):
+        super().__setitem__(key.lower(), value)
+
+    def __getitem__(self, key):
+        return super().__getitem__(key.lower())
+
+    def __contains__(self, key):
+        return key.lower() in self.data
+
+
+headers = CaseInsensitiveDict({"Content-Type": "text/html"})
+headers["X-Request-ID"] = "42"
+print(headers["content-type"], "CONTENT-TYPE" in headers, headers["x-request-id"])
+print(headers.data)
+```
+
+```text title="Output"
+text/html True 42
+{'content-type': 'text/html', 'x-request-id': '42'}
+```
+
+`UserDict` keeps the real dict in `self.data` and routes every operation through a few methods, so
+overriding `__setitem__` and `__getitem__` changes behaviour everywhere, including the
+constructor. Subclassing `dict` directly would skip your methods in places like `__init__` and
+`update`.
+
+## Putting it together
+
+### Grouping anagrams and finding the most common letters
+
+```python title="anagrams.py"
+from collections import Counter, defaultdict
+
+words = ["listen", "silent", "enlist", "google", "gogole", "cat", "act", "tac", "dog"]
+
+groups = defaultdict(list)
+for w in words:
+    groups["".join(sorted(w))].append(w)        # same letters -> same key
+
+for key, members in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+    if len(members) > 1:
+        print(f"{key}: {members}")
+
+letters = Counter("".join(words))
+print("top letters:", letters.most_common(3))
+```
+
+```text title="Output"
+eilnst: ['listen', 'silent', 'enlist']
+act: ['cat', 'act', 'tac']
+eggloo: ['google', 'gogole']
+top letters: [('t', 6), ('l', 5), ('e', 5)]
+```
+
+Sorting a word's letters gives a **canonical key** that every anagram shares. `defaultdict(list)`
+then groups them in one pass, and `Counter` answers the frequency question in one line.
+
+### An LRU cache with `OrderedDict`
+
+```python title="lru_cache.py"
+from collections import OrderedDict
+
+
+class LRUCache:
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self.items: OrderedDict[str, str] = OrderedDict()
+        self.hits = self.misses = 0
+
+    def get(self, key: str):
+        if key not in self.items:
+            self.misses += 1
+            return None
+        self.hits += 1
+        self.items.move_to_end(key)            # most recently used goes to the end
+        return self.items[key]
+
+    def put(self, key: str, value: str) -> None:
+        self.items[key] = value
+        self.items.move_to_end(key)
+        if len(self.items) > self.capacity:
+            evicted, _ = self.items.popitem(last=False)   # least recently used is first
+            print("  evict", evicted)
+
+
+cache = LRUCache(2)
+cache.put("a", "A")
+cache.put("b", "B")
+print(cache.get("a"))       # touch a: now b is the oldest
+cache.put("c", "C")         # evicts b
+print(cache.get("b"), cache.get("c"), list(cache.items))
+print("hits", cache.hits, "misses", cache.misses)
+```
+
+```text title="Output"
+A
+  evict b
+None C ['a', 'c']
+hits 2 misses 1
+```
+
+Both operations are O(1): `move_to_end` marks a key as recently used and `popitem(last=False)`
+removes the oldest. `functools.lru_cache` gives you the same policy as a decorator for functions.
+
+### Layered configuration
+
+```python title="layered_config.py"
+from collections import ChainMap
+
+defaults = {"host": "localhost", "port": 8000, "debug": False, "workers": 2}
+config_file = {"port": 8080, "workers": 4}
+environment = {"debug": True}
+command_line = {"port": 9000}
+
+config = ChainMap(command_line, environment, config_file, defaults)
+for key in sorted(config):
+    source = next(i for i, m in enumerate(config.maps) if key in m)
+    names = ["command line", "environment", "config file", "defaults"]
+    print(f"{key:8} = {config[key]!r:12} from {names[source]}")
+```
+
+```text title="Output"
+debug    = True         from environment
+host     = 'localhost'  from defaults
+port     = 9000         from command line
+workers  = 4            from config file
+```
+
+The most specific source comes first, so a command-line flag beats an environment variable, which
+beats the config file and the defaults. Nothing is merged or copied, and `config.maps` still tells
+you where each value came from.
+
 ## Common mistakes
 
 <Callout type="warning" title="defaultdict creates keys when you read them">
@@ -108,11 +409,36 @@ What to notice:
   log n) for `sorted(a) == sorted(b)`.
 </Reveal>
 
+<Reveal kind="hint" label="Quick check: what's `Counter('aab') - Counter('abb')`?">
+  `Counter({'a': 1})`. For `a`: 2 − 1 = 1 is kept; for `b`: 1 − 2 = −1 is dropped, because `-`
+  keeps only positive counts.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: how do you count words per first letter with `defaultdict`?"
+>
+  `counts = defaultdict(int)`, then `for w in words: counts[w[0]] += 1`. Or in one line:
+  `Counter(w[0] for w in words)`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: in `ChainMap(a, b)`, where does `cm['k'] = 1` write?">
+  Into `a`, the first mapping, even if `k` already exists in `b`. Lookups search all maps; writes
+  and deletes touch only the first.
+</Reveal>
+
 <KeyTakeaways>
 
 - `Counter` counts and supports `most_common` and `+` / `-` arithmetic.
 - `defaultdict(list | int | set)` removes "is the key there yet?" code.
 - `OrderedDict` adds explicit reordering (LRU caches). `ChainMap` layers lookups.
 - Reading a missing key on a defaultdict inserts it. Use `in` to test.
+- `Counter` supports arithmetic and multiset `&` / `|`; comparing Counters is the anagram check.
+- `defaultdict` takes any factory: `set` for unique groups, a `lambda` for nested counters or a
+  self-growing tree.
+- `OrderedDict` gives O(1) LRU bookkeeping; `ChainMap` layers scopes and configuration without
+  copying.
 
 </KeyTakeaways>
+
+{/* enriched */}

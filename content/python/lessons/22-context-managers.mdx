@@ -1,7 +1,7 @@
 ---
 title: Context managers
 summary: The with statement guarantees setup and cleanup, even when errors happen. Learn the __enter__/__exit__ protocol, write context managers with contextlib, and know the ones Python gives you.
-estimatedMinutes: 12
+estimatedMinutes: 26
 difficulty: medium
 section: Core Language
 objectives:
@@ -114,6 +114,302 @@ What to notice:
 - Files work the same way: `with open(path) as f:` closes `f` when the block exits, however it
   exits.
 
+## Variations
+
+### A class-based context manager
+
+```python title="class_based.py"
+class Indent:
+    """Each nested `with Indent()` indents printed lines one more level."""
+    level = 0
+
+    def __enter__(self):
+        Indent.level += 1
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        Indent.level -= 1
+        return False                 # don't suppress exceptions
+
+    def say(self, text):
+        print("    " * Indent.level + text)
+
+
+with Indent() as a:
+    a.say("level one")
+    with Indent() as b:
+        b.say("level two")
+    a.say("back to one")
+print("level after:", Indent.level)
+
+
+class Ignore:
+    def __init__(self, *types):
+        self.types = types
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.caught = exc
+        return exc_type is not None and issubclass(exc_type, self.types)   # True suppresses
+
+
+with Ignore(ZeroDivisionError) as ig:
+    1 / 0
+print("suppressed:", repr(ig.caught))
+```
+
+```text title="Output"
+    level one
+        level two
+    back to one
+level after: 0
+suppressed: ZeroDivisionError('division by zero')
+```
+
+- `__enter__` runs at the start of the block and its return value is bound by `as`.
+- `__exit__` always runs at the end. Returning a true value **suppresses** the exception, which is
+  how `contextlib.suppress` is implemented.
+
+### Several managers, exited in reverse order
+
+```python title="multiple.py"
+from contextlib import contextmanager
+
+
+@contextmanager
+def step(name):
+    print("enter", name)
+    try:
+        yield
+    finally:
+        print("exit ", name)
+
+
+with (
+    step("database"),
+    step("cache"),
+    step("lock"),
+):
+    print("  working")
+```
+
+```text title="Output"
+enter database
+enter cache
+enter lock
+  working
+exit  lock
+exit  cache
+exit  database
+```
+
+Managers are entered left to right and exited **right to left** (last in, first out), so the
+lock is released before the cache, and the database connection closes last. Parentheses let a
+long `with` span several lines (Python 3.10+).
+
+### Handy helpers from `contextlib`
+
+```python title="contextlib_helpers.py"
+import io
+from contextlib import nullcontext, redirect_stdout
+from decimal import Decimal, localcontext
+
+buffer = io.StringIO()
+with redirect_stdout(buffer):                  # capture everything print() writes
+    print("hello from inside")
+    print("captured, not shown")
+print("captured text:", buffer.getvalue().splitlines())
+
+
+def process(lock=None):
+    with lock if lock is not None else nullcontext():   # an optional manager
+        return "processed"
+
+
+print(process(), process(lock=nullcontext()))
+
+with localcontext() as ctx:                    # temporary decimal settings
+    ctx.prec = 4
+    print(Decimal(1) / Decimal(7))
+print(Decimal(1) / Decimal(7))                 # back to the default precision (28)
+```
+
+```text title="Output"
+captured text: ['hello from inside', 'captured, not shown']
+processed processed
+0.1429
+0.1428571428571428571428571429
+```
+
+- `redirect_stdout` temporarily swaps `sys.stdout`: handy for testing functions that print.
+- `nullcontext()` is a do-nothing manager, so code can say `with something_or_nothing:` without
+  an `if`.
+- `decimal.localcontext()` changes precision for one block and restores it afterwards. The pattern
+  "change a setting, always change it back" is the most common reason to write a context manager.
+
+### Temporary changes that always undo themselves
+
+```python title="temporary.py"
+import os
+import tempfile
+from contextlib import chdir, contextmanager
+
+
+@contextmanager
+def env_var(name, value):
+    old = os.environ.get(name)
+    os.environ[name] = value
+    try:
+        yield
+    finally:
+        if old is None:
+            del os.environ[name]
+        else:
+            os.environ[name] = old
+
+
+with env_var("APP_MODE", "test"):
+    print("inside:", os.environ["APP_MODE"])
+print("after:", os.environ.get("APP_MODE"))
+
+start = os.getcwd()
+with tempfile.TemporaryDirectory() as tmp:
+    with chdir(tmp):                                  # Python 3.11+
+        print("in temp dir:", os.path.samefile(os.getcwd(), tmp))
+    print("back home:", os.getcwd() == start)
+print("temp dir deleted:", not os.path.exists(tmp))
+```
+
+```text title="Output"
+inside: test
+after: None
+in temp dir: True
+back home: True
+temp dir deleted: True
+```
+
+`env_var` remembers the old value and restores it in `finally`, so the environment is unchanged
+even if the body raises. `TemporaryDirectory` deletes the directory and everything in it when
+the block exits.
+
+### A variable number of resources: `ExitStack`
+
+```python title="exitstack.py"
+import os
+import tempfile
+from contextlib import ExitStack
+
+with tempfile.TemporaryDirectory() as tmp:
+    names = []
+    for i, text in enumerate(["b\nd\n", "a\ne\n", "c\n"]):
+        path = os.path.join(tmp, f"part{i}.txt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        names.append(path)
+
+    with ExitStack() as stack:
+        files = [stack.enter_context(open(n, encoding="utf-8")) for n in names]
+        lines = sorted(line.strip() for f in files for line in f)
+        print(lines, all(not f.closed for f in files))
+    print("all closed:", all(f.closed for f in files))
+```
+
+```text title="Output"
+['a', 'b', 'c', 'd', 'e'] True
+all closed: True
+```
+
+When you don't know in advance how many files or connections you'll open, `ExitStack` collects
+them as you go and closes **all** of them at the end, even if opening the fifth one fails.
+
+## Putting it together
+
+### Database transactions with `sqlite3`
+
+```python title="transactions.py"
+import sqlite3
+
+conn = sqlite3.connect(":memory:")
+conn.execute("CREATE TABLE accounts (name TEXT PRIMARY KEY, balance INTEGER CHECK (balance >= 0))")
+conn.executemany("INSERT INTO accounts VALUES (?, ?)", [("ada", 100), ("bob", 20)])
+conn.commit()
+
+
+def transfer(src, dst, amount):
+    try:
+        with conn:                                   # commit on success, rollback on error
+            conn.execute("UPDATE accounts SET balance = balance + ? WHERE name = ?", (amount, dst))
+            conn.execute("UPDATE accounts SET balance = balance - ? WHERE name = ?", (amount, src))
+        print(f"ok   {src}->{dst} {amount}")
+    except sqlite3.IntegrityError as err:
+        print(f"fail {src}->{dst} {amount}: {err}")
+
+
+def balances():
+    return dict(conn.execute("SELECT name, balance FROM accounts ORDER BY name"))
+
+
+transfer("ada", "bob", 30)
+transfer("bob", "ada", 500)      # would make bob negative: CHECK constraint fails
+print(balances())
+conn.close()
+```
+
+```text title="Output"
+ok   ada->bob 30
+fail bob->ada 500: CHECK constraint failed: balance >= 0
+{'ada': 70, 'bob': 50}
+```
+
+A `sqlite3` connection is a context manager for **transactions**. In the failed transfer, `ada` had
+already been credited 500 when the second update broke the constraint; leaving the `with` block
+with an exception rolled that back, so no money appeared from nowhere.
+
+### A timer you can test
+
+```python title="timer.py"
+import time
+from contextlib import contextmanager
+
+
+@contextmanager
+def timed(label, clock=time.perf_counter, report=print):
+    start = clock()
+    try:
+        yield
+    finally:
+        report(f"{label}: {clock() - start:.3f}s")
+
+
+ticks = iter([10.0, 10.25, 20.0, 21.5])          # a fake clock makes the output predictable
+fake_clock = ticks.__next__                       # each call returns the next value
+
+with timed("load", clock=fake_clock):
+    data = list(range(1000))
+try:
+    with timed("crunch", clock=fake_clock):
+        raise ValueError("bad input")
+except ValueError:
+    pass
+
+messages = []
+with timed("real work", report=messages.append):
+    sum(range(10_000))
+print(messages[0].startswith("real work: "), len(messages))
+```
+
+```text title="Output"
+load: 0.250s
+crunch: 1.500s
+True 1
+```
+
+- `finally` reports the duration even when the block fails (`crunch`).
+- Passing `clock` and `report` as parameters (dependency injection) makes the manager easy to
+  test: a fake clock gives exact numbers, and a list collects the messages.
+
 ## Common mistakes
 
 <Callout type="warning" title="open() without with">
@@ -134,11 +430,40 @@ What to notice:
   the block ends, even if an error occurs.
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: in `with A() as a, B() as b:`, which `__exit__` runs first?"
+>
+  `B`'s. Managers exit in reverse order of entry, like nested `with` blocks.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what happens if `__exit__` returns `True` when the block raised?"
+>
+  The exception is suppressed: execution continues after the `with` block as if nothing happened.
+  Return `False` (or `None`) to let it propagate.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why wrap `yield` in `try/finally` inside a `@contextmanager`?"
+>
+  If the `with` body raises, the exception is thrown into the generator at the `yield`. Without
+  `finally`, the cleanup code after `yield` would be skipped.
+</Reveal>
+
 <KeyTakeaways>
 
 - `with` calls `__enter__` before the block and **always** calls `__exit__` after it.
 - `__exit__` returning `True` suppresses the exception, so do it rarely and on purpose.
 - `@contextmanager` plus `try/yield/finally` is the quickest way to write one.
 - Use context managers for files, locks, connections, temporary changes and timers.
+- Write a class with `__enter__`/`__exit__`, or a `@contextmanager` generator with `try/finally`.
+- Managers exit in reverse order; `ExitStack` handles a variable number of resources.
+- Use them for "set something, always undo it": transactions, env vars, working directory,
+  precision, captured output.
 
 </KeyTakeaways>
+
+{/* enriched */}

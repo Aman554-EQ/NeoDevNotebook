@@ -8,6 +8,9 @@ import { getModule, getNavTree } from "@/lib/content"
 import { groupBySection, sectionId } from "@/lib/content/sections"
 
 export const ensureStatic = "navigation"
+// Fully prerendered, so the complete page is in the first paint. Opting out of instant-navigation
+// validation avoids a Suspense skeleton that would flash (and shift the layout) on every page load.
+export const instant = false
 
 export async function generateStaticParams() {
   return (await getNavTree()).map((m) => ({ module: m.slug }))

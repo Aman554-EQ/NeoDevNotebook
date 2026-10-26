@@ -1,7 +1,7 @@
 ---
 title: Error catalogue and bug patterns
 summary: A reference page. The errors you'll meet most, with their exact Python 3.13 messages, what each really means, and the usual fix, plus the silent bug patterns that raise no error at all.
-estimatedMinutes: 20
+estimatedMinutes: 28
 difficulty: simple
 section: Debugging
 objectives:
@@ -127,6 +127,191 @@ IndentationError           IndentationError: expected an indented block after fu
 - **Modifying a collection while iterating** skips items or raises `RuntimeError` (lessons 6 and 13).
 - **`is` instead of `==`** for values (lesson 2).
 
+## More errors you'll meet
+
+A second catalogue of errors that show up in real projects, again produced by running the code:
+
+```python title="error_catalogue_2.py"
+import math
+from collections import Counter
+
+
+class Cart:
+    def add(self, item):
+        return item
+
+
+def counter():
+    count += 1           # noqa: F821  (assignment makes count local)
+
+
+def first(it):
+    return next(iter(it))
+
+
+cases = {
+    "UnboundLocalError": counter,
+    "TypeError (unhashable)": lambda: {["a"]: 1},
+    "TypeError (None[...])": lambda: None["key"],
+    "TypeError (not iterable)": lambda: [x for x in 5],
+    "TypeError (missing self)": lambda: Cart.add("pen"),
+    "TypeError (bad keyword)": lambda: sorted([3, 1], reversed=True),
+    "TypeError (< mixed)": lambda: sorted([3, "a"]),
+    "AttributeError (typo)": lambda: Counter("aab").most_comon(1),
+    "OverflowError": lambda: math.exp(1000),
+    "UnicodeDecodeError": lambda: b"caf\xe9".decode("utf-8"),
+    "StopIteration": lambda: first([]),
+    "RuntimeError (dict size)": lambda: [d.pop(k) for d in [{"a": 1, "b": 2}] for k in d],
+    "IndexError (pop empty)": lambda: [].pop(),
+    "ValueError (math domain)": lambda: math.sqrt(-1),
+}
+
+for label, trigger in cases.items():
+    try:
+        trigger()
+    except Exception as err:
+        print(f"{label:26} {type(err).__name__}: {str(err) or '(no message)'}")
+```
+
+```text title="Output"
+UnboundLocalError          UnboundLocalError: cannot access local variable 'count' where it is not associated with a value
+TypeError (unhashable)     TypeError: unhashable type: 'list'
+TypeError (None[...])      TypeError: 'NoneType' object is not subscriptable
+TypeError (not iterable)   TypeError: 'int' object is not iterable
+TypeError (missing self)   TypeError: Cart.add() missing 1 required positional argument: 'item'
+TypeError (bad keyword)    TypeError: sort() got an unexpected keyword argument 'reversed'. Did you mean 'reverse'?
+TypeError (< mixed)        TypeError: '<' not supported between instances of 'str' and 'int'
+AttributeError (typo)      AttributeError: 'Counter' object has no attribute 'most_comon'
+OverflowError              OverflowError: math range error
+UnicodeDecodeError         UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe9 in position 3: unexpected end of data
+StopIteration              StopIteration: (no message)
+RuntimeError (dict size)   RuntimeError: dictionary changed size during iteration
+IndexError (pop empty)     IndexError: pop from empty list
+ValueError (math domain)   ValueError: math domain error
+```
+
+| Error                                   | Usual cause                                                  | Usual fix                                                   |
+| --------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------- |
+| `UnboundLocalError`                     | assigning to a name somewhere in the function makes it local | pass the value in and return the result (lesson 08)         |
+| `TypeError: unhashable type`            | a list, dict or set used as a dict key or set member         | use a tuple or `frozenset` (lesson 10)                      |
+| `TypeError: 'NoneType' … subscriptable` | a function returned `None` and you indexed the result        | find the missing `return` or the method that returns `None` |
+| `TypeError: … not iterable`             | looping over a number or `None`                              | loop over `range(n)` or check for `None`                    |
+| `TypeError: missing … 'item'`           | calling a method on the **class** instead of an instance     | create an instance first: `Cart().add("pen")`               |
+| `TypeError: unexpected keyword`         | misspelt or wrong keyword argument                           | check the signature (`help(sorted)`: it's `reverse`)        |
+| `AttributeError` with a typo            | misspelt method name                                         | read the "Did you mean" hint in the traceback               |
+| `OverflowError`                         | a float result too large (`math.exp(1000)`)                  | work in logs, use `Decimal`, or rescale                     |
+| `UnicodeDecodeError`                    | bytes in a different encoding than you assumed               | pass the real `encoding=` (often `"cp1252"` or `"latin-1"`) |
+| `StopIteration`                         | `next()` on an exhausted or empty iterator                   | `next(it, default)`                                         |
+| `RuntimeError: … changed size`          | adding or removing dict keys while looping over it           | loop over `list(d)` (lesson 10)                             |
+
+## Debugging the most common crash: `'NoneType' object has no attribute`
+
+```python title="none_hunt.py"
+def find_user(users, name):
+    for user in users:
+        if user["name"] == name:
+            return user
+    # falls off the end: returns None
+
+
+def greeting(users, name):
+    return "Hello, " + find_user(users, name)["name"].title()
+
+
+users = [{"name": "ada"}, {"name": "grace"}]
+print(greeting(users, "grace"))
+try:
+    print(greeting(users, "linus"))
+except TypeError as err:
+    print("TypeError:", err)
+
+
+def greeting_fixed(users, name):
+    user = find_user(users, name)
+    if user is None:                       # handle "not found" where it's decided
+        return f"No user called {name!r}"
+    return "Hello, " + user["name"].title()
+
+
+print(greeting_fixed(users, "linus"))
+```
+
+```text title="Output"
+Hello, Grace
+TypeError: 'NoneType' object is not subscriptable
+No user called 'linus'
+```
+
+The error appears where `None` is **used**, but the cause is where it was **produced**: a
+function that doesn't return on every path. Ask "which call returned `None`, and why?", then
+decide what "not found" should mean (a message, a default, or a clear exception).
+
+## Putting it together: hunting silent bugs
+
+These functions run without errors and return plausible numbers, but every one is wrong. The
+script compares each buggy version with its fix on the same input.
+
+```python title="silent_bugs.py"
+def total_buggy(prices, discounts=[]):            # 1. mutable default shared between calls
+    discounts.append(0.1)
+    return round(sum(prices) * (1 - sum(discounts)), 2)
+
+
+def total_fixed(prices, discounts=None):
+    discounts = [0.1] if discounts is None else [*discounts, 0.1]
+    return round(sum(prices) * (1 - sum(discounts)), 2)
+
+
+def every_other_buggy(items):                     # 2. off-by-one: starts at index 1
+    return [items[i] for i in range(1, len(items), 2)]
+
+
+def every_other_fixed(items):
+    return items[::2]
+
+
+def is_tiny_buggy(x):                              # 3. exact float comparison
+    return x - 0.3 == 0
+
+
+def is_tiny_fixed(x):
+    import math
+    return math.isclose(x, 0.3)
+
+
+def dedupe_buggy(names):                           # 4. removing while iterating
+    for name in names:
+        if names.count(name) > 1:
+            names.remove(name)
+    return names
+
+
+def dedupe_fixed(names):
+    return list(dict.fromkeys(names))
+
+
+print("1.", total_buggy([10, 10]), total_buggy([10, 10]), "|", total_fixed([10, 10]), total_fixed([10, 10]))
+print("2.", every_other_buggy(list("abcde")), "|", every_other_fixed(list("abcde")))
+print("3.", is_tiny_buggy(0.1 + 0.2), "|", is_tiny_fixed(0.1 + 0.2))
+print("4.", dedupe_buggy(["x", "x", "x", "x"]), dedupe_buggy(["a", "b", "a", "b", "a"]), "|",
+      dedupe_fixed(["x", "x", "x", "x"]), dedupe_fixed(["a", "b", "a", "b", "a"]))
+```
+
+```text title="Output"
+1. 18.0 16.0 | 18.0 18.0
+2. ['b', 'd'] | ['a', 'c', 'e']
+3. False | True
+4. ['x', 'x'] ['b', 'b', 'a'] | ['x'] ['a', 'b']
+```
+
+1. The default list grows on every call, so the second call applies **two** discounts.
+2. Starting the range at 1 silently skips the first item.
+3. `0.1 + 0.2 - 0.3` is about `5.5e-17`, not `0`.
+4. `remove` shifts the list under the loop, so some duplicates survive and the order changes.
+
+None of these crash, which is exactly why each fix should come with a test that pins the
+expected value.
+
 ## Common mistakes
 
 - **Catching everything** (`except Exception: pass`) turns loud errors into silent bugs.
@@ -143,11 +328,41 @@ IndentationError           IndentationError: expected an indented block after fu
   some_list.sort()`. Both methods return `None`. Remove the assignment.
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: `TypeError: 'NoneType' object is not subscriptable` on `data = load()[0]`. Where's the bug?"
+>
+  In `load()`: it returned `None` (a missing `return`, or a branch that falls off the end). The line
+  that crashed is only where the `None` was first used.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe9`. What's the likely cause?"
+>
+  The file was saved in another encoding, typically Windows-1252 or Latin-1, where `é` is the single
+  byte `0xe9`. Open it with the right `encoding=`, and don't use `errors="ignore"` to hide it.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why is `Cart.add('pen')` a TypeError but `Cart().add('pen')` fine?"
+>
+  `Cart.add` is a plain function on the class, so `'pen'` lands in `self` and `item` is missing.
+  Calling it on an instance passes the instance as `self` automatically.
+</Reveal>
+
 <KeyTakeaways>
 
 - The exception type plus its message usually names the problem exactly.
 - `NoneType` errors mean something returned `None`, so trace where it came from.
 - `ModuleNotFoundError` for an installed package means the wrong environment.
 - Silent bugs (aliasing, late binding, off-by-one, float `==`) need tests, not try/except.
+- Read the error type and message first; most have one or two usual causes (see both tables).
+- A `NoneType` error points to where `None` was **used**; look for where it was **produced**.
+- Silent bugs (mutable defaults, off-by-one, float equality, mutating while looping) need tests,
+  because nothing crashes.
 
 </KeyTakeaways>
+
+{/* enriched */}

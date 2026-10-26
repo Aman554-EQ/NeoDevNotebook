@@ -180,3 +180,48 @@ Module folder: `content/python/` · visuals: `src/components/viz/python/` (+ sha
 | `tests/unit/viz-models.test.ts`                     | heap/list/deque/dict visuals vs real CPython                                                                         |
 | `tests/unit/trace.test.ts`, `code-stepper.test.tsx` | recorder, yield/resume, stale traces, stepper UI                                                                     |
 | `tests/unit/internal-links.test.ts`                 | every internal content link resolves                                                                                 |
+
+## Lesson depth (enrichment, 2026-10-27)
+
+Every lesson keeps its original sections and adds **Variations** (focused forms of the concept), **Putting it
+together** (realistic programs) and more self-checks. Counts are generated from the content; every `Output`
+block is executed by `pnpm verify:code`.
+
+| #   | Variations | Realistic programs                                                                                                       | Verified outputs | Self-checks |
+| --- | ---------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------- | ----------- |
+| 01  | 5          | A safe calculator                                                                                                        | 8                | 4           |
+| 02  | 5          | Typed values from text                                                                                                   | 7                | 4           |
+| 03  | 6          | A receipt that adds up to the cent; Seconds to a readable duration                                                       | 9                | 4           |
+| 04  | 6          | Cleaning and validating user input; Text statistics in a few lines                                                       | 9                | 4           |
+| 05  | 7          | Shipping cost rules; Routing events by their shape; Leap years: a condition with exceptions to the exception             | 11               | 4           |
+| 06  | 7          | Analysing a web server log; Guessing a number with halving                                                               | 10               | 4           |
+| 07  | 6          | A reusable `retry` helper; Small functions composed into a pipeline                                                      | 9                | 4           |
+| 08  | 6          | A tiny event bus                                                                                                         | 8                | 4           |
+| 09  | 5          | Tower of Hanoi; Counting islands on a map                                                                                | 8                | 4           |
+| 10  | 6          | Undo history needs real copies; Merging settings without touching the defaults                                           | 9                | 4           |
+| 11  | 8          | A gradebook                                                                                                              | 10               | 4           |
+| 12  | 5          | Parsing records                                                                                                          | 7                | 4           |
+| 13  | 6          | Processing orders against an inventory; A search index: word → line numbers                                              | 9                | 4           |
+| 14  | 5          | Role-based permissions; Course overlaps; Friend suggestions                                                              | 9                | 4           |
+| 15  | 8          | Cleaning raw data into a summary; Matrix multiplication                                                                  | 11               | 4           |
+| 16  | 5          | A calculator for postfix (RPN) expressions; Shortest path through a maze (breadth-first search); A round-robin scheduler | 9                | 4           |
+| 17  | 5          | Shortest routes with Dijkstra's algorithm; Simulating events in time order                                               | 8                | 4           |
+| 18  | 6          | Grouping anagrams and finding the most common letters; An LRU cache with `OrderedDict`; Layered configuration            | 10               | 4           |
+| 19  | 5          | Fixing a slow report                                                                                                     | 7                | 4           |
+| 20  | 6          | Paging through an API lazily; A streaming log pipeline                                                                   | 9                | 4           |
+| 21  | 6          | Importing a batch: collect errors, keep going; A money transfer with an exception hierarchy                              | 9                | 4           |
+| 22  | 5          | Database transactions with `sqlite3`; A timer you can test                                                               | 8                | 4           |
+| 23  | 5          | A tiny web router with access control; Checking argument types from annotations                                          | 8                | 4           |
+| 24  | 5          | A bank account that protects its balance; A small library system                                                         | 8                | 4           |
+| 25  | 8          | A shape report with polymorphism; A `Money` value type                                                                   | 11               | 4           |
+| 26  | 6          | From CSV files to a JSON summary; Finding duplicate files by content                                                     | 9                | 4           |
+| 27  | 5          | A polite concurrent crawler with asyncio; A worker pool with `asyncio.Queue`                                             | 8                | 4           |
+| 28  | 5          | A plug-in loader                                                                                                         | 7                | 4           |
+| 29  | 4          | A tiny installable layout                                                                                                | 6                | 4           |
+| 30  | 4          | Checking requirements                                                                                                    | 4                | 4           |
+| 31  | 6          | A command-line log analyser                                                                                              | 8                | 4           |
+| 32  | 4          | Validating config against type hints                                                                                     | 6                | 4           |
+| 33  | 4          | A compact crash report                                                                                                   | 6                | 4           |
+| 34  | 5          | Structured (JSON) logs; Shrinking a failing input automatically                                                          | 8                | 4           |
+| 35  | 4          | A debugging checklist in code                                                                                            | 6                | 4           |
+| 36  | 2          | Hunting silent bugs                                                                                                      | 4                | 4           |

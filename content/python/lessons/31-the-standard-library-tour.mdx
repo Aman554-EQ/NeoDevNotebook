@@ -1,7 +1,7 @@
 ---
 title: The standard library tour
 summary: Python ships "batteries included". Get to know the modules you'll reach for every week (os, sys, pathlib, datetime, itertools, functools, re, math, random, statistics, collections) so you stop reinventing them.
-estimatedMinutes: 20
+estimatedMinutes: 28
 difficulty: simple
 section: Packages, Imports & Tooling
 objectives:
@@ -95,6 +95,294 @@ What to notice:
 - `random.seed(42)` makes "random" results repeatable, which is essential for tests and ML
   experiments.
 
+## Variations
+
+### Regular expressions with `re`
+
+```python title="regex.py"
+import re
+
+text = "Order #1042 shipped 2026-10-27 to ada@example.com; order #77 pending."
+
+print(re.findall(r"#(\d+)", text))                          # capture group -> just the digits
+m = re.search(r"(\d{4})-(\d{2})-(\d{2})", text)
+print(m.group(0), m.groups(), m.start())
+
+email = re.compile(r"(?P<user>[\w.]+)@(?P<domain>[\w.]+\.\w+)")
+found = email.search(text)
+print(found["user"], found["domain"], found.groupdict())
+
+print(re.sub(r"#(\d+)", r"order-\1", text))                 # backreference in the replacement
+print(re.sub(r"\d", lambda m: str(9 - int(m[0])), "2026"))   # a function computes each replacement
+print(re.split(r"[;,]\s*", "a, b;c,  d"), bool(re.fullmatch(r"\d{3}-\d{4}", "555-1234")))
+print(re.findall(r"order", text, flags=re.IGNORECASE))
+```
+
+```text title="Output"
+['1042', '77']
+2026-10-27 ('2026', '10', '27') 20
+ada example.com {'user': 'ada', 'domain': 'example.com'}
+Order order-1042 shipped 2026-10-27 to ada@example.com; order order-77 pending.
+7973
+['a', 'b', 'c', 'd'] True
+['Order', 'order']
+```
+
+- Always write patterns as **raw strings** (`r"\d+"`) so backslashes reach `re` unchanged.
+- `search` finds the first match anywhere, `fullmatch` requires the whole string to match, and
+  `findall` returns every match (or every captured group).
+- Named groups `(?P<name>...)` make matches readable: `found["user"]` instead of `found.group(1)`.
+- `re.compile` once and reuse the pattern when you match many strings.
+
+### Dates, times and time zones
+
+```python title="datetimes.py"
+import calendar
+from datetime import date, datetime, timedelta, timezone
+
+meeting = datetime(2026, 10, 27, 9, 30, tzinfo=timezone.utc)
+ist = timezone(timedelta(hours=5, minutes=30), "IST")
+print(meeting.isoformat(), "->", meeting.astimezone(ist).strftime("%H:%M %Z"))
+
+deadline = date(2026, 12, 31)
+today = date(2026, 10, 27)
+left = deadline - today
+print(left.days, "days,", left.days // 7, "weeks and", left.days % 7, "days")
+print(today.strftime("%A %d %B %Y"), today.isocalendar().week, today.weekday())
+
+parsed = datetime.strptime("27/10/2026 18:45", "%d/%m/%Y %H:%M")
+print(parsed, parsed.date() == today, (parsed + timedelta(hours=8)).strftime("%a %H:%M"))
+
+first = today.replace(day=1)
+last = (first.replace(month=first.month % 12 + 1, day=1) - timedelta(days=1)) if first.month < 12 \
+    else first.replace(day=31)
+print("month runs", first, "to", last)
+```
+
+```text title="Output"
+2026-10-27T09:30:00+00:00 -> 15:00 IST
+65 days, 9 weeks and 2 days
+Tuesday 27 October 2026 44 1
+2026-10-27 18:45:00 True Wed 02:45
+month runs 2026-10-01 to 2026-10-31
+```
+
+- A datetime **with** `tzinfo` is "aware" and converts between zones with `astimezone`. Store and
+  compute in UTC; convert to local time only for display. (`zoneinfo.ZoneInfo("Asia/Kolkata")`
+  gives named zones with daylight-saving rules.)
+- `strftime` formats and `strptime` parses, using the same `%` codes.
+- Subtracting dates gives a `timedelta`; `calendar.monthrange(year, month)[1]` gives the number of
+  days in a month, leap years included.
+
+### Command-line arguments with `argparse`
+
+```python title="cli_args.py"
+import argparse
+
+parser = argparse.ArgumentParser(prog="resize", description="Resize images.")
+parser.add_argument("files", nargs="+", help="images to process")
+parser.add_argument("-w", "--width", type=int, default=800, help="target width in pixels")
+parser.add_argument("--format", choices=["png", "jpg"], default="png")
+parser.add_argument("-v", "--verbose", action="store_true")
+
+args = parser.parse_args(["cat.png", "dog.jpg", "-w", "640", "--verbose"])
+print(args.files, args.width, args.format, args.verbose)
+
+try:
+    parser.parse_args(["cat.png", "--format", "gif"])
+except SystemExit as exit_:
+    print("argparse exited with code", exit_.code)
+print(parser.format_usage().strip())
+```
+
+```text title="Output"
+['cat.png', 'dog.jpg'] 640 png True
+argparse exited with code 2
+usage: resize [-h] [-w WIDTH] [--format {png,jpg}] [-v] files [files ...]
+```
+
+`argparse` converts types (`type=int`), validates choices, generates `--help` text and usage
+messages, and exits with code 2 and an explanation on bad input (printed to stderr). Passing a
+list to `parse_args` is how you test a CLI without a terminal.
+
+### Copying, moving and archiving with `shutil`
+
+```python title="shutil_demo.py"
+import shutil
+import tempfile
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as tmp:
+    src = Path(tmp, "project")
+    (src / "docs").mkdir(parents=True)
+    (src / "main.py").write_text("print('hi')\n", encoding="utf-8")
+    (src / "docs" / "guide.md").write_text("# guide\n", encoding="utf-8")
+
+    shutil.copytree(src, Path(tmp, "backup"))                  # whole folder tree
+    shutil.copy2(src / "main.py", Path(tmp, "main_copy.py"))   # one file, keeps timestamps
+    shutil.move(Path(tmp, "main_copy.py"), Path(tmp, "backup", "old_main.py"))
+    archive = shutil.make_archive(str(Path(tmp, "release")), "zip", root_dir=src)
+
+    print(sorted(p.relative_to(tmp).as_posix() for p in Path(tmp, "backup").rglob("*")))
+    print(Path(archive).name, Path(archive).stat().st_size > 0)
+    shutil.rmtree(Path(tmp, "backup"))                         # delete a tree (careful!)
+    print(Path(tmp, "backup").exists())
+```
+
+```text title="Output"
+['backup/docs', 'backup/docs/guide.md', 'backup/main.py', 'backup/old_main.py']
+release.zip True
+False
+```
+
+`pathlib` handles single paths; `shutil` handles whole files and trees: copying, moving across
+drives, zipping and deleting recursively. `rmtree` deletes without asking, so double-check the
+path you pass it.
+
+### Small modules that save code: `enum`, `textwrap`, `hashlib`, `base64`
+
+```python title="small_modules.py"
+import base64
+import hashlib
+import textwrap
+from enum import Enum, auto
+
+
+class Status(Enum):
+    DRAFT = auto()
+    PUBLISHED = auto()
+    ARCHIVED = auto()
+
+
+s = Status.PUBLISHED
+print(s, s.name, s.value, Status["DRAFT"], [m.name for m in Status])
+
+paragraph = "Python's standard library is often called batteries included because it ships with so much."
+print(textwrap.fill(paragraph, width=40))
+print(textwrap.shorten(paragraph, width=30, placeholder=" ..."))
+
+digest = hashlib.sha256(b"hello").hexdigest()
+print(digest[:16], len(digest))
+token = base64.urlsafe_b64encode(b"user:42").decode()
+print(token, base64.urlsafe_b64decode(token))
+```
+
+```text title="Output"
+Status.PUBLISHED PUBLISHED 2 Status.DRAFT ['DRAFT', 'PUBLISHED', 'ARCHIVED']
+Python's standard library is often
+called batteries included because it
+ships with so much.
+Python's standard library ...
+2cf24dba5fb0a30e 64
+dXNlcjo0Mg== b'user:42'
+```
+
+- `Enum` gives named constants that can't be confused with plain strings or ints, and you can
+  iterate over them.
+- `textwrap.fill` wraps text to a width; `shorten` truncates on word boundaries.
+- `hashlib` produces fixed-size fingerprints (checksums, cache keys). `base64` turns bytes into
+  safe text for URLs and JSON. It's an encoding, not encryption.
+
+### Running other programs with `subprocess`
+
+```python title="subprocess_demo.py"
+import subprocess
+import sys
+
+result = subprocess.run(
+    [sys.executable, "-c", "import sys; print('child sees', sys.argv[1:]); sys.exit(3)", "a", "b"],
+    capture_output=True,
+    text=True,
+)
+print(result.returncode, result.stdout.strip())
+
+try:
+    subprocess.run([sys.executable, "-c", "raise SystemExit(1)"], check=True)
+except subprocess.CalledProcessError as err:
+    print("CalledProcessError: exit code", err.returncode)
+```
+
+```text title="Output"
+3 child sees ['a', 'b']
+CalledProcessError: exit code 1
+```
+
+- Pass the command as a **list** of arguments (no shell parsing, no injection risk), and use
+  `sys.executable` to run "the same Python as me".
+- `capture_output=True, text=True` collects stdout/stderr as strings; `check=True` raises if the
+  program fails.
+
+## Putting it together: a command-line log analyser
+
+```python title="log_cli.py"
+import argparse
+import re
+from collections import Counter
+from datetime import datetime, timedelta
+
+LOG = """\
+2026-10-27 09:58:12 ERROR db: connection refused
+2026-10-27 10:01:03 INFO web: GET /home 200
+2026-10-27 10:02:44 WARNING web: slow response 1.8s
+2026-10-27 10:15:00 ERROR db: connection refused
+2026-10-27 11:30:09 ERROR payment: card declined
+2026-10-27 11:31:40 INFO web: GET /cart 200"""
+
+LINE = re.compile(r"(?P<stamp>\S+ \S+) (?P<level>[A-Z]+) (?P<source>\w+): (?P<message>.*)")
+
+
+def main(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(prog="logs")
+    parser.add_argument("--level", default="ERROR")
+    parser.add_argument("--since", help="HH:MM, only lines at or after this time")
+    args = parser.parse_args(argv)
+
+    entries = []
+    for line in LOG.splitlines():
+        m = LINE.fullmatch(line)
+        if m:
+            entry = m.groupdict()
+            entry["stamp"] = datetime.strptime(entry["stamp"], "%Y-%m-%d %H:%M:%S")
+            entries.append(entry)
+
+    if args.since:
+        hh, mm = map(int, args.since.split(":"))
+        cutoff = entries[0]["stamp"].replace(hour=hh, minute=mm, second=0)
+        entries = [e for e in entries if e["stamp"] >= cutoff]
+
+    chosen = [e for e in entries if e["level"] == args.level]
+    since = f" since {args.since}" if args.since else ""
+    print(f"{len(chosen)} {args.level} line(s){since}")
+    for source, n in Counter(e["source"] for e in chosen).most_common():
+        print(f"  {source:8} {n}")
+    if len(chosen) > 1:
+        span: timedelta = chosen[-1]["stamp"] - chosen[0]["stamp"]
+        print("  first to last:", span)
+
+
+main([])
+main(["--level", "ERROR", "--since", "10:00"])
+main(["--level", "INFO"])
+```
+
+```text title="Output"
+3 ERROR line(s)
+  db       2
+  payment  1
+  first to last: 1:31:57
+2 ERROR line(s) since 10:00
+  db       1
+  payment  1
+  first to last: 1:15:09
+2 INFO line(s)
+  web      2
+  first to last: 1:30:37
+```
+
+A realistic tool usually combines several modules: `argparse` for options, a compiled `re` pattern
+with named groups to parse each line, `datetime` to filter and measure time, and `Counter` to
+summarise. Calling `main([...])` with explicit argument lists doubles as a test of the CLI.
+
 ## Common mistakes
 
 <Callout type="warning" title="groupby without sorting">
@@ -118,11 +406,36 @@ What to notice:
   matters (home and away games).
 </Reveal>
 
+<Reveal kind="hint" label="Quick check: what does `re.findall(r'(\w+)@', 'a@x b@y')` return?">
+  `['a', 'b']`. With one capture group, `findall` returns just the captured text of each match, not
+  the whole match.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: how many days are there between 2026-02-01 and 2026-03-01?">
+  `(date(2026, 3, 1) - date(2026, 2, 1)).days` is `28`: 2026 isn't a leap year. Let `datetime` do
+  calendar arithmetic instead of assuming 30-day months.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why pass `[sys.executable, 'script.py']` to subprocess instead of the string `'python script.py'`?"
+>
+  A list needs no shell to split it (so file names with spaces and special characters are safe), and
+  `sys.executable` guarantees the same interpreter and virtual environment as the parent.
+</Reveal>
+
 <KeyTakeaways>
 
 - Check the standard library before writing helpers or installing packages.
 - Use `datetime` and `timedelta` for date maths, and `zoneinfo` for time zones.
 - `itertools` and `functools` compose iterables and functions; sort before `groupby`.
 - Seed `random` for reproducibility, and use `secrets` for anything security-related.
+- `re` with raw strings and named groups parses text; `datetime` with UTC and `timedelta` handles
+  time.
+- `argparse` gives you validation and help for free; test it by passing argument lists.
+- `shutil` copies, moves, archives and deletes trees; `subprocess.run([...], check=True)` runs
+  programs safely.
 
 </KeyTakeaways>
+
+{/* enriched */}

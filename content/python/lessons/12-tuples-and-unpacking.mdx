@@ -1,7 +1,7 @@
 ---
 title: Tuples and unpacking
 summary: Tuples are fixed-size, immutable records. Learn when to choose a tuple over a list, how packing and unpacking work (including the star), and how namedtuple gives fields names.
-estimatedMinutes: 12
+estimatedMinutes: 24
 difficulty: easy
 section: Data Structures
 objectives:
@@ -103,6 +103,225 @@ What to notice:
   tuples. Use `@dataclass` (lesson 25) when you want defaults, methods or mutability.
 </Callout>
 
+## Variations
+
+### What you can do with a tuple
+
+```python title="tuple_ops.py"
+t = (3, 1, 4, 1, 5)
+print(t[0], t[-1], t[1:3], len(t), 4 in t)
+print(t.count(1), t.index(4), min(t), max(t), sum(t))
+print(t + (9,), (0,) * 3, sorted(t), tuple("hey"))
+
+print((1, 2, 3) < (1, 3), (2, 0) > (1, 99), ("b", 1) < ("b", 2))
+```
+
+```text title="Output"
+3 5 (1, 4) 5 True
+2 2 1 5 14
+(3, 1, 4, 1, 5, 9) (0, 0, 0) [1, 1, 3, 4, 5] ('h', 'e', 'y')
+True True True
+```
+
+- Tuples support every **read** operation lists do: indexing, slicing, `in`, `count`, `index`.
+  "Changing" ones (`+`, `*`) build a **new** tuple, and `sorted` returns a list.
+- Tuples compare **lexicographically**: first items first, the next item only breaks ties. That's
+  why tuple sort keys work.
+
+### Nested and partial unpacking
+
+```python title="unpacking_more.py"
+record = ("ada", (1815, 12, 10), ["math", "computing"])
+name, (year, month, day), interests = record          # mirror the structure
+print(name, year, interests[0])
+
+name, _, _ = record                                   # _ = "don't care"
+print(name)
+
+head, *_, tail = range(10)
+print(head, tail)
+
+pairs = [("x", 1), ("y", 2)]
+for i, (letter, value) in enumerate(pairs, start=1):  # unpack inside the loop header
+    print(i, letter, value)
+
+(a, b), c = "hi", "!"                                  # strings unpack too
+print(a, b, c)
+```
+
+```text title="Output"
+ada 1815 math
+ada
+0 9
+1 x 1
+2 y 2
+h i !
+```
+
+The left side can mirror any nesting on the right. `_` is an ordinary name that, by convention,
+means "I'm ignoring this value".
+
+### Spreading with `*` and `**`
+
+```python title="spreading.py"
+point = (3, 4)
+print(*point)                          # same as print(3, 4)
+print(divmod(*(17, 5)))
+
+a, b = [1, 2], (3, 4)
+print([*a, *b, 5], (*a, *b), {*a, *b})
+
+base = {"color": "red", "size": "M"}
+print({**base, "size": "L"})           # dicts spread with **
+
+
+def area(width, height):
+    return width * height
+
+
+dims = {"width": 3, "height": 5}
+print(area(*point), area(**dims))
+```
+
+```text title="Output"
+3 4
+(3, 2)
+[1, 2, 3, 4, 5] (1, 2, 3, 4) {1, 2, 3, 4}
+{'color': 'red', 'size': 'L'}
+12 15
+```
+
+`*` unpacks an iterable into positional arguments or into a list, tuple or set literal; `**`
+unpacks a mapping into keyword arguments or a dict literal. It's the reverse of `*args` and
+`**kwargs` in a function definition.
+
+### `typing.NamedTuple`: records with types and defaults
+
+```python title="named_tuple.py"
+from typing import NamedTuple
+
+
+class Point(NamedTuple):
+    x: float
+    y: float
+    label: str = "?"
+
+    def distance_to(self, other: "Point") -> float:
+        return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2) ** 0.5
+
+
+a = Point(0, 0, "home")
+b = Point(3, 4)
+print(a, b.label, a.distance_to(b))
+print(b._asdict(), Point._fields)
+print(Point._make(["5", "6", "csv"]))     # build from any iterable
+x, y, label = b                           # still a tuple underneath
+print(x + y, b == (3, 4, "?"))
+```
+
+```text title="Output"
+Point(x=0, y=0, label='home') ? 5.0
+{'x': 3, 'y': 4, 'label': '?'} ('x', 'y', 'label')
+Point(x='5', y='6', label='csv')
+7 True
+```
+
+- The class syntax gives each field a type hint and optionally a default, and you can add
+  methods.
+- `_asdict()` converts to a dict (handy for JSON), `_fields` lists the names, `_make` builds from
+  an iterable.
+- A NamedTuple **is** a tuple, so it compares equal to a plain tuple with the same values. Note
+  that `_make` doesn't convert `"5"` to a number: type hints aren't enforced.
+
+### Tuples as composite keys
+
+```python title="composite_keys.py"
+sales = [
+    ("2026-01-15", 120), ("2026-01-28", 80), ("2026-02-03", 200),
+    ("2025-12-30", 50), ("2026-02-27", 30),
+]
+
+by_month: dict[tuple[int, int], int] = {}
+for date, amount in sales:
+    year, month, _ = map(int, date.split("-"))
+    key = (year, month)                        # two values, one dict key
+    by_month[key] = by_month.get(key, 0) + amount
+
+for (year, month), total in sorted(by_month.items()):  # tuples sort chronologically
+    print(f"{year}-{month:02}: {total}")
+
+distances = {("ams", "ber"): 577, ("ber", "pra"): 280}
+route = ("ber", "ams")
+print(distances.get(route) or distances.get(route[::-1]))
+```
+
+```text title="Output"
+2025-12: 50
+2026-01: 200
+2026-02: 230
+577
+```
+
+- A `(year, month)` tuple groups by two fields at once, and sorting the keys sorts by year, then
+  month, for free.
+- Tuples are ordered, so `("ber", "ams")` and `("ams", "ber")` are different keys. Look up both
+  orders (or store a `frozenset`) when direction doesn't matter.
+
+## Putting it together: parsing records
+
+```python title="flights.py"
+from typing import NamedTuple
+
+CSV = """\
+code,origin,dest,minutes,delay
+BA117,LHR,JFK,470,12
+LH400,FRA,JFK,535,0
+AF006,CDG,JFK,500,45
+BA283,LHR,LAX,665,-5"""
+
+
+class Flight(NamedTuple):
+    code: str
+    origin: str
+    dest: str
+    minutes: int
+    delay: int
+
+    @property
+    def hours(self) -> str:
+        h, m = divmod(self.minutes, 60)
+        return f"{h}h{m:02}"
+
+
+header, *lines = CSV.splitlines()
+flights = []
+for line in lines:
+    code, origin, dest, minutes, delay = line.split(",")
+    flights.append(Flight(code, origin, dest, int(minutes), int(delay)))
+
+longest = max(flights, key=lambda f: f.minutes)
+print("longest:", longest.code, longest.hours)
+on_time = [f.code for f in flights if f.delay <= 0]
+print("on time or early:", on_time)
+for f in sorted(flights, key=lambda f: (f.dest, -f.delay)):
+    print(f"{f.dest} {f.code} delay {f.delay:+}")
+```
+
+```text title="Output"
+longest: BA283 11h05
+on time or early: ['LH400', 'BA283']
+JFK AF006 delay +45
+JFK BA117 delay +12
+JFK LH400 delay +0
+LAX BA283 delay -5
+```
+
+- `header, *lines = ...` separates the first line from the rest in one step.
+- Unpacking `line.split(",")` into five names checks the column count for free: a bad line raises
+  `ValueError` right there.
+- Fields read as `f.delay` instead of `row[4]`, which makes the sorting and filtering code
+  self-explanatory.
+
 ## Common mistakes
 
 - **`(1)` vs `(1,)`.** Only the comma makes a tuple.
@@ -118,6 +337,24 @@ What to notice:
   "values I don't care about".
 </Reveal>
 
+<Reveal kind="hint" label="Quick check: what is `type(())`, `type((5))` and `type((5,))`?">
+  `tuple`, `int` and `tuple`. Empty parentheses are the empty tuple; for one item, the comma is what
+  makes the tuple.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: is `(1, 2, 3) < (1, 2)` true?">
+  No, it's `False`. The first two items are equal, and when one tuple runs out, the **shorter** one
+  is smaller. So `(1, 2) < (1, 2, 3)` is `True`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: unpack `data = [('a', [1, 2]), ('b', [3, 4])]` to print `a 1 2` and `b 3 4`."
+>
+  `for name, (x, y) in data: print(name, x, y)`. The pattern in the loop header mirrors one item's
+  structure.
+</Reveal>
+
 <KeyTakeaways>
 
 - Tuples are fixed-size, immutable records where position has meaning. Lists are growable
@@ -125,5 +362,11 @@ What to notice:
 - The comma makes a tuple, so `(x,)` is a one-item tuple.
 - Unpacking matches positions, and a starred target collects the rest as a list.
 - Hashable tuples can be dict keys. `namedtuple` adds readable field names.
+- Tuples compare item by item, which is what makes them good sort keys and composite dict keys.
+- Unpacking can mirror nesting, ignore values with `_`, and spread with `*` / `**` into calls and
+  literals.
+- `typing.NamedTuple` gives tuple records field names, types, defaults and methods.
 
 </KeyTakeaways>
+
+{/* enriched */}

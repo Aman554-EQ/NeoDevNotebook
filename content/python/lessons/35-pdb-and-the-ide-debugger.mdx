@@ -1,7 +1,7 @@
 ---
 title: pdb and the IDE debugger
 summary: Stop guessing and look. Pause a program at any line with breakpoint(), step through it, inspect variables, move up and down the call stack, and do post-mortem debugging, in the terminal with pdb or in VS Code.
-estimatedMinutes: 18
+estimatedMinutes: 26
 difficulty: medium
 section: Debugging
 objectives:
@@ -121,6 +121,225 @@ tests pass: 20.0
 3. Use the toolbar: Continue (F5), Step Over (F10), Step Into (F11), Step Out (Shift+F11).
 4. The **Variables**, **Watch** and **Call Stack** panels show what `p`, `display` and `w` show in pdb.
 
+## Variations
+
+pdb reads its commands from standard input, so you can drive it from a script. The examples below
+do exactly that with `subprocess`, which makes each session reproducible and lets this page check
+the transcripts.
+
+### A conditional breakpoint
+
+```python title="pdb_conditional.py"
+import re
+import subprocess
+import sys
+import tempfile
+import textwrap
+from pathlib import Path
+
+SCRIPT = textwrap.dedent("""\
+    def running_totals(values):
+        totals, total = [], 0
+        for i, v in enumerate(values):
+            total += v
+            totals.append(total)
+        return totals
+
+    print(running_totals([5, -2, -7, 9, 4]))
+""")
+COMMANDS = ["b 5, total < 0", "c", "p i, v, total", "c"]   # stop only when total goes negative
+
+
+def run_pdb(script: str, commands: list[str]) -> str:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp, "totals.py")
+        path.write_text(script, encoding="utf-8")
+        out = subprocess.run([sys.executable, "-m", "pdb", str(path)], input="\n".join(commands) + "\n",
+                             capture_output=True, text=True).stdout
+    return re.sub(r"\S*totals\.py", "totals.py", out)            # shorten the temp path
+
+
+print(run_pdb(SCRIPT, COMMANDS).strip())
+```
+
+```text title="Output"
+> totals.py(1)<module>()
+-> def running_totals(values):
+(Pdb) Breakpoint 1 at totals.py:5
+(Pdb) > totals.py(5)running_totals()
+-> totals.append(total)
+(Pdb) (2, -7, -4)
+(Pdb) [5, 3, -4, 5, 9]
+The program finished and will be restarted
+> totals.py(1)<module>()
+-> def running_totals(values):
+(Pdb)
+```
+
+- `b 5, total < 0` sets a breakpoint on line 5 that only triggers when the condition is true. The
+  loop ran silently until the running total first dropped below zero, at the 3rd item (i == 2).
+- That's how you debug "it goes wrong after 10,000 iterations" without pressing `n` 10,000 times.
+
+### Post-mortem: inspect the crash where it happened
+
+```python title="pdb_postmortem.py"
+import re
+import subprocess
+import sys
+import tempfile
+import textwrap
+from pathlib import Path
+
+SCRIPT = textwrap.dedent("""\
+    def price_per_item(order):
+        return order["total"] / order["count"]
+
+    orders = [{"total": 10, "count": 2}, {"total": 7, "count": 0}]
+    for order in orders:
+        print(price_per_item(order))
+""")
+COMMANDS = ["c", "p order", "u", "p orders.index(order)", "q"]
+
+with tempfile.TemporaryDirectory() as tmp:
+    path = Path(tmp, "prices.py")
+    path.write_text(SCRIPT, encoding="utf-8")
+    out = subprocess.run([sys.executable, "-m", "pdb", str(path)], input="\n".join(COMMANDS) + "\n",
+                         capture_output=True, text=True).stdout
+lines = [re.sub(r"\S*prices\.py", "prices.py", line) for line in out.splitlines()]
+print("\n".join(line for line in lines if not line.startswith(("Traceback", "  File", "    "))))
+```
+
+```text title="Output"
+> prices.py(1)<module>()
+-> def price_per_item(order):
+(Pdb) 5.0
+Uncaught exception. Entering post mortem debugging
+Running 'cont' or 'step' will restart the program
+> prices.py(2)price_per_item()
+-> return order["total"] / order["count"]
+(Pdb) {'total': 7, 'count': 0}
+(Pdb) > prices.py(6)<module>()
+-> print(price_per_item(order))
+(Pdb) 1
+(Pdb)
+```
+
+When an exception isn't caught, `python -m pdb` stops **at the crash** with every variable still
+alive. `p order` shows the offending input, and `u` moves up to the caller's frame to see which
+iteration it was. In a REPL or notebook, `import pdb; pdb.pm()` does the same for the last
+exception.
+
+### Turning `breakpoint()` off without editing code
+
+```python title="breakpoint_env.py"
+import os
+import subprocess
+import sys
+
+code = "x = 41\nbreakpoint()\nprint('reached the end with x =', x + 1)"
+env = {**os.environ, "PYTHONBREAKPOINT": "0"}          # 0 = ignore every breakpoint() call
+result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+print(result.stdout.strip())
+```
+
+```text title="Output"
+reached the end with x = 42
+```
+
+`breakpoint()` calls whatever `PYTHONBREAKPOINT` names: `pdb.set_trace` by default, another
+debugger (for example `PYTHONBREAKPOINT=ipdb.set_trace`), or nothing at all with `0`. A forgotten
+`breakpoint()` then can't freeze a production job, although it still belongs out of committed code.
+
+### Inspecting a crash without a debugger
+
+```python title="crash_locals.py"
+import traceback
+
+
+def parse_row(row: str) -> dict:
+    name, age = row.split(",")
+    return {"name": name.strip(), "age": int(age)}
+
+
+def load(rows: list[str]) -> list[dict]:
+    result = []
+    for line_no, row in enumerate(rows, start=1):
+        result.append(parse_row(row))
+    return result
+
+
+try:
+    load(["ada, 36", "bob, 41", "cy, forty"])
+except ValueError as err:
+    print(type(err).__name__, err)
+    tb = err.__traceback__
+    while tb is not None:                                # walk from outer to inner frame
+        frame = tb.tb_frame
+        if frame.f_code.co_name != "<module>":
+            shown = {k: v for k, v in frame.f_locals.items() if k in {"row", "line_no", "age", "name"}}
+            print(f"  in {frame.f_code.co_name}() at line {tb.tb_lineno}: {shown}")
+        tb = tb.tb_next
+    print("".join(traceback.format_exception_only(err)).strip())
+```
+
+```text title="Output"
+ValueError invalid literal for int() with base 10: ' forty'
+  in load() at line 12: {'line_no': 3, 'row': 'cy, forty'}
+  in parse_row() at line 6: {'row': 'cy, forty', 'name': 'cy', 'age': ' forty'}
+ValueError: invalid literal for int() with base 10: ' forty'
+```
+
+Each traceback entry keeps a reference to its **frame**, and each frame keeps its local variables.
+Walking `tb_next` and reading `f_locals` shows the values at the moment of the crash: here
+`line_no = 3` and the row `'cy, forty'`. Error trackers use this to attach variables to crash
+reports.
+
+## Putting it together: a debugging checklist in code
+
+```python title="debug_checklist.py"
+def median(values):
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    return ordered[mid]                       # bug: wrong for even lengths
+
+
+cases = {(1, 3, 2): 2, (4, 1, 3, 2): 2.5, (7,): 7, (5, 5, 1, 9): 5.0}
+
+# 1. Reproduce: run the cases and keep the failures.
+failures = {inp: (median(inp), want) for inp, want in cases.items() if median(inp) != want}
+print("1. failing cases:", failures)
+
+# 2. Minimise: pick the smallest failing input.
+smallest = min(failures, key=len)
+print("2. smallest:", smallest)
+
+# 3. Inspect: print the intermediate values (or set a breakpoint on the return line).
+ordered = sorted(smallest)
+print("3. ordered:", ordered, "mid:", len(ordered) // 2, "-> picks", ordered[len(ordered) // 2])
+
+
+# 4. Fix the cause, 5. re-run every case.
+def median_fixed(values):
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2 == 0:
+        return (ordered[mid - 1] + ordered[mid]) / 2
+    return ordered[mid]
+
+
+print("5. all pass:", all(median_fixed(inp) == want for inp, want in cases.items()))
+```
+
+```text title="Output"
+1. failing cases: {(4, 1, 3, 2): (3, 2.5)}
+2. smallest: (4, 1, 3, 2)
+3. ordered: [1, 2, 3, 4] mid: 2 -> picks 3
+5. all pass: True
+```
+
+Reproduce, minimise, inspect, fix, re-test. Keeping the cases in a dict means the same checks
+prove the fix, and they can move straight into a test file so the bug can't come back.
+
 ## Common mistakes
 
 <Callout type="warning" title="Committing breakpoint()">
@@ -142,11 +361,38 @@ tests pass: 20.0
   pauses only on the iteration that matters.
 </Reveal>
 
+<Reveal kind="hint" label="Quick check: how do you stop at line 30 only when `user_id == 42`?">
+  In pdb: `b 30, user_id == 42`, then `c`. In an IDE: right-click the breakpoint and add the
+  condition. Both skip every other iteration automatically.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: your script crashed. How do you look at its variables without re-adding prints?"
+>
+  Re-run it under `python -m pdb script.py` and type `c`: pdb stops at the uncaught exception
+  (post-mortem). Use `p name` to print values and `u` / `d` to move between frames.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what's the difference between `n` and `s` on a line that calls a function?"
+>
+  `n` runs the whole call and stops at the next line of the current function; `s` steps **into** the
+  called function's first line.
+</Reveal>
+
 <KeyTakeaways>
 
 - `breakpoint()` or `python -m pdb` pauses the program so you can look instead of guessing.
 - `n` steps over, `s` steps into, `c` continues, `p` prints, `w` shows the stack, and `u` / `d` move along it.
 - Post-mortem debugging opens the debugger at the crash with every variable intact.
 - After finding the bug, write a test that would have caught it.
+- Conditional breakpoints (`b line, condition`) jump straight to the interesting iteration.
+- Post-mortem debugging (`python -m pdb`, `pdb.pm()`) inspects a crash with all variables alive;
+  frames' `f_locals` give the same view in code.
+- `PYTHONBREAKPOINT=0` disables `breakpoint()`; debug by reproduce, minimise, inspect, fix, re-test.
 
 </KeyTakeaways>
+
+{/* enriched */}

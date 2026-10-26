@@ -1,7 +1,7 @@
 ---
 title: Packages and project layout
 summary: Group modules into packages, import between them with absolute and relative imports, control your public API with __init__.py, and lay a project out so it imports the same way in development, in tests and when installed.
-estimatedMinutes: 15
+estimatedMinutes: 24
 difficulty: medium
 section: Packages, Imports & Tooling
 objectives:
@@ -114,6 +114,221 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 ```
 
+## Variations
+
+The examples build small packages in a temporary folder, so each one runs anywhere without
+touching your real files.
+
+### What `__init__.py` runs, and when
+
+```python title="init_order.py"
+import sys
+import tempfile
+from pathlib import Path
+
+files = {
+    "app/__init__.py": "print('init app')\nVERSION = '1.2'\n",
+    "app/core/__init__.py": "print('init app.core')\n",
+    "app/core/engine.py": "print('load app.core.engine')\ndef run(): return 'running'\n",
+}
+with tempfile.TemporaryDirectory() as tmp:
+    for name, body in files.items():
+        path = Path(tmp, name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    sys.path.insert(0, tmp)
+
+    from app.core.engine import run          # runs every parent package's __init__ first
+    import app
+    print(run(), app.VERSION, sorted(m for m in sys.modules if m.startswith("app")))
+    sys.path.remove(tmp)
+```
+
+```text title="Output"
+init app
+init app.core
+load app.core.engine
+running 1.2 ['app', 'app.core', 'app.core.engine']
+```
+
+Importing `app.core.engine` first runs `app/__init__.py`, then `app/core/__init__.py`, then the
+module itself, each only once. That's why heavy work in an `__init__.py` slows down **every**
+import from the package: keep them light.
+
+### Namespace packages: folders without `__init__.py`
+
+```python title="namespace_pkg.py"
+import sys
+import tempfile
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+    Path(a, "company", "billing").mkdir(parents=True)
+    Path(a, "company", "billing", "invoice.py").write_text("NAME = 'invoice'\n", encoding="utf-8")
+    Path(b, "company", "shipping").mkdir(parents=True)
+    Path(b, "company", "shipping", "label.py").write_text("NAME = 'label'\n", encoding="utf-8")
+    sys.path[:0] = [a, b]
+
+    import company.billing.invoice
+    import company.shipping.label
+    print(company.billing.invoice.NAME, company.shipping.label.NAME)
+    print(len(company.__path__), "folders combined into one package")
+    del sys.path[:2]
+```
+
+```text title="Output"
+invoice label
+2 folders combined into one package
+```
+
+A folder without `__init__.py` is a **namespace package**: several folders (even in different
+distributions) can contribute sub-packages to the same name. Regular packages with `__init__.py`
+are still the default for your own code, because they're explicit and faster to find.
+
+### Running a package with `python -m`
+
+```python title="package_main.py"
+import runpy
+import sys
+import tempfile
+from pathlib import Path
+
+files = {
+    "todo/__init__.py": "",
+    "todo/core.py": "def add(items, text):\n    return [*items, text]\n",
+    "todo/__main__.py": (
+        "import sys\n"
+        "from .core import add          # relative imports work under -m\n"
+        "items = []\n"
+        "for text in sys.argv[1:]:\n"
+        "    items = add(items, text)\n"
+        "print(f'{len(items)} item(s):', items)\n"
+    ),
+}
+with tempfile.TemporaryDirectory() as tmp:
+    for name, body in files.items():
+        Path(tmp, name).parent.mkdir(parents=True, exist_ok=True)
+        Path(tmp, name).write_text(body, encoding="utf-8")
+    sys.path.insert(0, tmp)
+    sys.argv = ["todo", "buy milk", "call bob"]
+    runpy.run_module("todo", run_name="__main__")      # same as: python -m todo "buy milk" "call bob"
+    sys.path.remove(tmp)
+```
+
+```text title="Output"
+2 item(s): ['buy milk', 'call bob']
+```
+
+`python -m package` runs the package's `__main__.py`. Running a module **inside** a package as
+`python todo/core.py` breaks relative imports (`ImportError: attempted relative import with no known
+parent package`); `python -m todo.core` from the project root works.
+
+### Data files inside a package
+
+```python title="package_data.py"
+import json
+import sys
+import tempfile
+from importlib import resources
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as tmp:
+    pkg = Path(tmp, "geo")
+    (pkg / "data").mkdir(parents=True)
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "data" / "capitals.json").write_text(json.dumps({"fr": "Paris", "jp": "Tokyo"}),
+                                                encoding="utf-8")
+    sys.path.insert(0, tmp)
+
+    text = resources.files("geo").joinpath("data/capitals.json").read_text(encoding="utf-8")
+    capitals = json.loads(text)
+    print(capitals["jp"], sorted(capitals))
+    sys.path.remove(tmp)
+```
+
+```text title="Output"
+Tokyo ['fr', 'jp']
+```
+
+`importlib.resources.files(package)` locates files shipped **inside** a package, wherever it's
+installed (a folder, a zip, a wheel). Paths built from `__file__` or the current directory break as
+soon as the package is installed somewhere else.
+
+## Putting it together: a tiny installable layout
+
+```text title="Project layout"
+wordtools/
+├── pyproject.toml
+├── README.md
+├── src/
+│   └── wordtools/
+│       ├── __init__.py      # public API: from .stats import summary
+│       ├── __main__.py      # python -m wordtools
+│       └── stats.py
+└── tests/
+    └── test_stats.py
+```
+
+```python title="wordtools_demo.py"
+import runpy
+import sys
+import tempfile
+import textwrap
+from pathlib import Path
+
+FILES = {
+    "src/wordtools/__init__.py": """
+        from .stats import summary
+        __all__ = ["summary"]
+        __version__ = "0.1.0"
+    """,
+    "src/wordtools/stats.py": """
+        from collections import Counter
+
+        def summary(text: str) -> dict:
+            words = text.lower().split()
+            top, count = Counter(words).most_common(1)[0]
+            return {"words": len(words), "unique": len(set(words)), "top": top}
+    """,
+    "src/wordtools/__main__.py": """
+        import sys
+        from . import summary, __version__
+        print(f"wordtools {__version__}:", summary(" ".join(sys.argv[1:])))
+    """,
+    "tests/test_stats.py": """
+        from wordtools import summary
+
+        def test_summary():
+            assert summary("a b a") == {"words": 3, "unique": 2, "top": "a"}
+    """,
+}
+
+with tempfile.TemporaryDirectory() as tmp:
+    for name, body in FILES.items():
+        path = Path(tmp, name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(body), encoding="utf-8")
+    sys.path.insert(0, str(Path(tmp, "src")))       # what `pip install -e .` arranges for you
+
+    sys.argv = ["wordtools", "the", "cat", "and", "the", "hat"]
+    runpy.run_module("wordtools", run_name="__main__")
+
+    test_ns = runpy.run_path(str(Path(tmp, "tests", "test_stats.py")))
+    test_ns["test_summary"]()                          # what pytest would do
+    print("test_summary passed")
+    sys.path.remove(str(Path(tmp, "src")))
+```
+
+```text title="Output"
+wordtools 0.1.0: {'words': 5, 'unique': 4, 'top': 'the'}
+test_summary passed
+```
+
+- The code lives under `src/`, so tests can only import it the way users will: after installing it
+  (here, by adding `src` to the path, which `pip install -e .` does properly).
+- `__init__.py` defines the public API and version; `__main__.py` provides the command line; tests
+  import the package by name, never by relative file paths.
+
 ## Common mistakes
 
 <Callout type="warning" title="Running a module inside a package as a script">
@@ -137,11 +352,34 @@ build-backend = "setuptools.build_meta"
   and `..` is `shop`.
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: why does `python mypkg/tool.py` fail with 'attempted relative import with no known parent package'?"
+>
+  Run as a file, `tool.py` has `__name__ == "__main__"` and no package, so `from .x import y` has
+  nothing to be relative to. Run it as a module from the project root: `python -m mypkg.tool`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: what's the job of `__init__.py` in a regular package?">
+  It marks the folder as a package and runs on first import. Use it to define the package's public
+  API (re-export names, `__all__`, `__version__`), and keep it free of slow work.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why use the `src/` layout?">
+  It stops tests from accidentally importing the local folder instead of the installed package, so
+  packaging mistakes (missing files, wrong imports) show up in tests rather than for users.
+</Reveal>
+
 <KeyTakeaways>
 
 - A package is a folder of modules, and `__init__.py` runs on import and defines the public API.
 - Prefer absolute imports. Relative imports (`.`, `..`) work only inside packages.
 - Run package modules with `python -m package.module`.
 - The `src/` layout plus `pyproject.toml` and `pip install -e .` makes imports consistent everywhere.
+- Importing `a.b.c` runs `a/__init__.py` and `a/b/__init__.py` first, once each: keep them light.
+- `__main__.py` makes `python -m package` work; run package modules with `-m`, not by file path.
+- Ship data inside the package and read it with `importlib.resources`; use the `src/` layout.
 
 </KeyTakeaways>
+
+{/* enriched */}

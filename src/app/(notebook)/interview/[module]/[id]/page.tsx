@@ -13,6 +13,9 @@ import { allInterviewParams, getInterviewQuestion, getModule } from "@/lib/conte
 import { Markdown } from "@/lib/mdx/render"
 
 export const ensureStatic = "navigation"
+// Fully prerendered, so the complete page is in the first paint. Opting out of instant-navigation
+// validation avoids a Suspense skeleton that would flash (and shift the layout) on every page load.
+export const instant = false
 
 export async function generateStaticParams() {
   return allInterviewParams()

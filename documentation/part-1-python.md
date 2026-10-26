@@ -11,9 +11,10 @@
 | Practice    | **60 problems**, 15 per tier (easy / simple / medium / hard), **8** find-and-fix-the-bug                                                                         |
 | Interview   | **56 questions**: 9 easy · 14 simple · 21 medium · 12 hard                                                                                                       |
 | Cross-links | Every lesson lists related problems and interview questions ("Practise this lesson")                                                                             |
+| Depth       | Every lesson adds **Variations** and **Putting it together** (realistic programs) plus extra self-checks; see the depth table in the navigation map              |
 
 Every code sample, solution (plus hidden asserts), interview snippet and recorded trace runs on **Python 3.13**
-in `pnpm verify:code`: 172 samples (158 executed) and 10 traces.
+in `pnpm verify:code`: 428 samples (414 executed) and 10 traces.
 
 ## Platform features added in this part (usable by every later part)
 
@@ -29,11 +30,23 @@ in `pnpm verify:code`: 172 samples (158 executed) and 10 traces.
 4. **Lesson → practice links:** `practice:` and `interview:` ID lists in lesson front matter. Missing IDs fail the
    build, and the lesson page renders them automatically.
 5. **Shared three.js toolkit** (`src/components/viz/_shared/three/toolkit.tsx`): theme colours, `TextFace`,
-   camera-facing `NameTag3D`, and `SceneStage` with a `fitWidth` camera for narrow screens.
+   camera-facing `NameTag3D`, `SceneStage` with `fit={{ width, height, center }}` (the camera frames the scene's
+   content box at every canvas size) and `useNarrow()` for phone layouts. It also filters three's
+   `THREE.Clock` deprecation warning, which @react-three/fiber 9 triggers.
 6. **VizFrame:** optional `badge`, and a progress bar for long step sequences.
 7. **Inline code in titles:** `` `code` `` in question and problem titles renders as code. Page titles,
    bookmarks, prev/next and search show plain text.
 8. **Practice browser:** long tag lists collapse to the 10 most-used tags, with an "All N tags" toggle.
+9. **Dynamic pages set `export const instant = false`** next to `ensureStatic = "navigation"`. Next.js
+   otherwise reports "URL data outside of Suspense" in development. Wrapping the page in `<Suspense>` also
+   silences it, but the prerendered HTML then starts with the fallback, which painted first and shifted the
+   layout (CLS 0.13 at 360 px, measured), and `notFound()` inside the boundary raised React error #419 on 404
+   pages. Since every page is fully static, blocking navigation costs almost nothing. Use the same export on
+   new dynamic routes.
+10. **`pnpm check:dev`** (`scripts/check-dev.ts`): a dev-server health check covering every route, every visual
+    (stepped and replayed) and every next-link sequence as client navigation. It fails on any warning, error or
+    dev-overlay issue. Development also renders `ExtensionAttrScript`, which strips attributes injected by browser
+    extensions before hydration.
 
 ## Architecture decisions
 
@@ -55,18 +68,20 @@ pnpm dev                    # http://localhost:3000/learn/python
 pnpm traces                 # re-record traces after editing content/python/traces/*.py
 pnpm check                  # lint + typecheck + unit + content + code + traces
 pnpm test:e2e               # build + Playwright (4 viewports)
+pnpm check:dev              # with `pnpm dev` running: every route, visual and navigation, zero warnings
 pnpm db:seed                # refresh the search index after content changes
 ```
 
-## Test results (2026-10-27)
+## Test results (2026-10-27, after the enrichment)
 
-| Suite                        | Result                                                                                 |
-| ---------------------------- | -------------------------------------------------------------------------------------- |
-| ESLint, Prettier, `tsc`      | ✅ clean                                                                               |
-| Vitest (14 files)            | ✅ **79 / 79** (incl. viz models vs CPython, traces, content rules, internal links)    |
-| verify:code                  | ✅ **172 samples** (158 executed) + **10 traces** up to date                           |
-| Playwright (4 viewports)     | ✅ **557 passed**, 239 skipped by design                                               |
-| Lighthouse (8 pages, mobile) | ✅ Performance 90–97, Accessibility 100, Best Practices 100, CLS ≤ 0.015, TBT ≤ 162 ms |
+| Suite                        | Result                                                                                               |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------- |
+| ESLint, Prettier, `tsc`      | ✅ clean                                                                                             |
+| Vitest (14 files)            | ✅ **80 / 80** (incl. viz models vs CPython, traces, content and lesson-depth rules, internal links) |
+| verify:code                  | ✅ **428 samples** (414 executed) + **10 traces** up to date                                         |
+| check:dev (360 + 1440 px)    | ✅ 170 routes, 36 visuals, 152 client navigations: 0 warnings, errors or dev-overlay issues          |
+| Playwright (4 viewports)     | ✅ **557 passed**, 239 skipped by design                                                             |
+| Lighthouse (8 pages, mobile) | ✅ Performance 90–97, Accessibility 100, Best Practices 100, CLS ≤ 0.015, TBT ≤ 154 ms               |
 
 ## Known limitations
 

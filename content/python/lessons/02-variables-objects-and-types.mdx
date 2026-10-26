@@ -1,7 +1,7 @@
 ---
 title: Variables, objects and types
 summary: In Python a variable is a name that points at an object, and every object carries its own type. This one idea explains assignment, None, dynamic typing and most "surprising" behaviour.
-estimatedMinutes: 15
+estimatedMinutes: 20
 difficulty: easy
 section: Basics
 objectives:
@@ -95,6 +95,197 @@ Line by line:
   this a lot.
 </Callout>
 
+## Variations
+
+The same rule (names point at objects) explains every form of assignment. Each snippet below shows
+one variation and what it prints.
+
+### Several names at once, and the one-line swap
+
+```python title="multi_assign.py"
+x, y, z = 1, 2, 3          # one tuple on the right, unpacked into three names
+print(x, y, z)
+
+x, y = y, x                # the right side is built first, then unpacked: a swap
+print(x, y)
+
+total = count = 0          # chained: BOTH names point at the same object 0
+print(total, count, total is count)
+```
+
+```text title="Output"
+1 2 3
+2 1
+0 0 True
+```
+
+- In `x, y = y, x` Python evaluates `y, x` into a tuple `(2, 1)` **before** binding anything, so no
+  temporary variable is needed.
+- Chained assignment is fine for immutable values like `0`. With a list (`a = b = []`) both names
+  share **one** list, which is rarely what you want (lesson 10).
+
+### Converting between types on purpose
+
+Python never converts silently between `str` and numbers, so you call the type you want:
+
+```python title="convert.py"
+print(int("42") + 1, float("3.5") * 2, str(7) + "!")
+print(int(3.99), int(-3.99))      # int() truncates toward zero
+print(round(3.5), round(4.5))     # round() uses banker's rounding (to even)
+print(int("ff", 16), int("0b101", 0), hex(255), bin(5))
+print(bool(""), bool("False"), bool(0), bool([0]))
+
+try:
+    int("4.2")
+except ValueError as err:
+    print("ValueError:", err)
+```
+
+```text title="Output"
+43 7.0 7!
+3 -3
+4 4
+255 5 0xff 0b101
+False True False True
+ValueError: invalid literal for int() with base 10: '4.2'
+```
+
+- `int()` on a float **cuts off** the fraction; it doesn't round. Use `round()` when you mean
+  rounding, and remember it rounds halves to the even neighbour.
+- `int(text, base)` parses other bases; base `0` reads the prefix (`0b`, `0o`, `0x`).
+- `bool("False")` is `True`: any non-empty string is truthy. To parse a yes/no setting, compare
+  the text: `text.strip().lower() in {"1", "true", "yes"}`.
+- `int("4.2")` fails because `"4.2"` is not an integer literal. Convert in two steps:
+  `int(float("4.2"))`.
+
+### Checking types the right way
+
+```python title="check_types.py"
+values = [3, 3.0, True, "3", None, [3]]
+for v in values:
+    print(repr(v).ljust(5), type(v).__name__.ljust(8), isinstance(v, (int, float)))
+
+print(type(True) is int, isinstance(True, int))   # bool is a subclass of int
+```
+
+```text title="Output"
+3     int      True
+3.0   float    True
+True  bool     True
+'3'   str      False
+None  NoneType False
+[3]   list     False
+False True
+```
+
+- `isinstance(v, (int, float))` accepts a **tuple of types**, which is the idiom for "is it a
+  number?".
+- `True` passes `isinstance(..., int)` because `bool` inherits from `int`. If you must exclude
+  booleans, check `type(v) is int` or test `isinstance(v, bool)` first.
+- `repr(v)` shows the value as code would write it (`'3'` with quotes), which makes types visible
+  in output. Prefer it for debugging prints.
+
+### Names come and go: `del` and rebinding
+
+```python title="del_name.py"
+a = [1, 2, 3]
+b = a
+del a                  # removes the NAME a, not the list
+print(b)               # the list lives on: b still points at it
+
+try:
+    print(a)
+except NameError as err:
+    print("NameError:", err)
+```
+
+```text title="Output"
+[1, 2, 3]
+NameError: name 'a' is not defined
+```
+
+`del name` unbinds a name. The object is freed only when **no** name or container refers to it
+any more. Here `b` still does, so the list survives.
+
+### Naming conventions Python programmers expect
+
+```python title="naming.py"
+import keyword
+
+MAX_RETRIES = 3                 # UPPER_CASE: a constant by convention (not enforced)
+user_name = "ada"               # snake_case for variables and functions
+_internal_cache = {}            # leading underscore: "private, don't touch from outside"
+class_ = "math"                 # trailing underscore avoids a clash with a keyword
+
+print(keyword.iskeyword("class"), keyword.iskeyword("class_"))
+print(len(keyword.kwlist), "keywords, e.g.", keyword.kwlist[:5])
+```
+
+```text title="Output"
+True False
+35 keywords, e.g. ['False', 'None', 'True', 'and', 'as']
+```
+
+Python doesn't stop you from reassigning `MAX_RETRIES`; the capitals tell other programmers not
+to. Linters (and type checkers with `typing.Final`) can enforce it.
+
+## Putting it together: typed values from text
+
+Real programs receive text (from files, forms, the command line) and must turn it into typed
+values. This parser converts each `key=value` line to the most specific type that fits, and
+reports lines it can't read instead of crashing.
+
+```python title="parse_settings.py"
+def parse_value(text: str):
+    text = text.strip()
+    if text.lower() in {"true", "false"}:
+        return text.lower() == "true"
+    for convert in (int, float):
+        try:
+            return convert(text)
+        except ValueError:
+            pass
+    if text.lower() == "none":
+        return None
+    return text
+
+
+raw = """port = 8080
+ratio = 0.75
+debug = TRUE
+name = ada
+timeout = none
+broken line"""
+
+settings = {}
+for line_no, line in enumerate(raw.splitlines(), start=1):
+    if "=" not in line:
+        print(f"line {line_no}: skipped {line!r}")
+        continue
+    key, value = line.split("=", 1)
+    settings[key.strip()] = parse_value(value)
+
+for key, value in settings.items():
+    print(f"{key:8} {value!r:8} {type(value).__name__}")
+```
+
+```text title="Output"
+line 6: skipped 'broken line'
+port     8080     int
+ratio    0.75     float
+debug    True     bool
+name     'ada'    str
+timeout  None     NoneType
+```
+
+What to notice:
+
+- Booleans are checked **before** numbers, and `int` before `float`, so `"8080"` stays an `int`.
+- `try`/`except ValueError` is the normal way to ask "can this text be an int?", because Python
+  favours trying over pre-checking (EAFP: easier to ask forgiveness than permission).
+- `split("=", 1)` splits only at the first `=`, so a value may itself contain `=`.
+- `{value!r:8}` formats with `repr` and pads to 8 characters, so the types are easy to read.
+
 ## Common mistakes
 
 <Callout type="warning" title="Using is to compare values">
@@ -116,11 +307,38 @@ Line by line:
   object. No object was changed, only a tag was moved.
 </Reveal>
 
+<Reveal kind="hint" label="Quick check: after `a = b = []` and `a.append(1)`, what is `b`?">
+  `[1]`. Chained assignment binds both names to **one** list, so mutating through `a` is visible
+  through `b`. Write `a, b = [], []` for two separate lists.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what do `int(-2.7)`, `round(2.5)` and `round(2.675, 2)` give?"
+>
+  `-2` (truncates toward zero), `2` (halves round to even) and `2.67`, not `2.68`: the float closest
+  to 2.675 is slightly below it. Use `decimal.Decimal` when exact decimal rounding matters.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why is `isinstance(True, int)` True, and when does it matter?"
+>
+  `bool` is a subclass of `int` (`True == 1`). It matters when validating input: a check like
+  `isinstance(age, int)` accepts `True`. Reject booleans explicitly if they aren't valid.
+</Reveal>
+
 <KeyTakeaways>
 
 - A variable is a **name bound to an object**. Assignment never copies.
 - Every object has an **identity**, a **type** and a **value**.
 - **Dynamic typing:** names have no type. **Strong typing:** objects never change type silently.
 - Use `==` for value, `is` for identity (mostly `is None`), and `isinstance` for type checks.
+- `x, y = y, x` swaps because the right side is evaluated before any name is bound.
+- Convert types explicitly: `int()` truncates, `round()` rounds halves to even, `bool("False")` is
+  `True`.
+- `del name` removes a name; the object lives while anything still refers to it.
 
 </KeyTakeaways>
+
+{/* enriched */}

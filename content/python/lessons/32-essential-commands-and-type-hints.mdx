@@ -1,7 +1,7 @@
 ---
 title: Essential commands and type hints
 summary: A reference page. The python command-line options and built-in helpers you'll use daily, then type hints, which document what functions expect and let tools like mypy find bugs before you run anything.
-estimatedMinutes: 15
+estimatedMinutes: 26
 difficulty: simple
 section: Packages, Imports & Tooling
 objectives:
@@ -110,6 +110,222 @@ What to notice:
   `Argument 1 to "scale" has incompatible type "str"; expected "list[float]"`.
 - `find(...) -> int | None` forces callers to handle the `None` case, and a type checker reminds them.
 
+## Variations
+
+### Accept broad types, return specific ones
+
+```python title="broad_types.py"
+from collections.abc import Callable, Iterable, Mapping, Sequence
+
+
+def total(values: Iterable[float]) -> float:            # list, tuple, set, generator... all fine
+    return sum(values)
+
+
+def first_or(items: Sequence[str], default: str = "") -> str:   # needs indexing and len
+    return items[0] if items else default
+
+
+def describe(scores: Mapping[str, int]) -> list[str]:    # read-only dict-like input
+    return [f"{k}={v}" for k, v in sorted(scores.items())]
+
+
+def apply(func: Callable[[int], int], values: list[int]) -> list[int]:
+    return [func(v) for v in values]
+
+
+print(total([1, 2]), total((3.5, 1)), total(x / 2 for x in range(4)))
+print(first_or(("a", "b")), repr(first_or([])), describe({"b": 2, "a": 1}))
+print(apply(abs, [-3, 4]), apply(lambda n: n * n, [5]))
+```
+
+```text title="Output"
+3 4.5 3.0
+a '' ['a=1', 'b=2']
+[3, 4] [25]
+```
+
+- For **parameters**, ask for the least you need: `Iterable` if you only loop, `Sequence` if you
+  index, `Mapping` if you only read a dict. More callers then fit your function.
+- For **return values**, be specific (`list[str]`), so callers know exactly what they get.
+- `Callable[[int], int]` describes "a function taking one int and returning an int".
+
+### Generics: one function, many types
+
+```python title="generics.py"
+def first[T](items: list[T]) -> T:                  # Python 3.12 syntax; T is a type parameter
+    return items[0]
+
+
+def pair_up[K, V](keys: list[K], values: list[V]) -> dict[K, V]:
+    return dict(zip(keys, values, strict=True))
+
+
+type Matrix = list[list[float]]                     # a named type alias (3.12+)
+
+
+def identity(n: int) -> Matrix:
+    return [[1.0 if r == c else 0.0 for c in range(n)] for r in range(n)]
+
+
+print(first([3, 1, 2]), first(["x", "y"]), pair_up(["a", "b"], [1, 2]))
+print(identity(2), first.__type_params__)
+```
+
+```text title="Output"
+3 x {'a': 1, 'b': 2}
+[[1.0, 0.0], [0.0, 1.0]] (T,)
+```
+
+A type parameter like `T` links types together: `first` returns **the same type** that the list
+contains, so a checker knows `first(["x"])` is a `str`. On older Pythons the same idea is written
+with `T = TypeVar("T")`.
+
+### `Final`, `NewType` and `Self`
+
+```python title="special_hints.py"
+from typing import Final, NewType, Self
+
+MAX_USERS: Final = 100                     # a checker flags any reassignment
+
+UserId = NewType("UserId", int)            # an int that a checker treats as distinct
+OrderId = NewType("OrderId", int)
+
+
+def load_user(uid: UserId) -> str:
+    return f"user {uid}"
+
+
+class Builder:
+    def __init__(self) -> None:
+        self.parts: list[str] = []
+
+    def add(self, part: str) -> Self:      # returns "this class", even in subclasses
+        self.parts.append(part)
+        return self
+
+
+print(load_user(UserId(7)), UserId(7) == 7, type(UserId(7)).__name__)
+print(Builder().add("a").add("b").parts, MAX_USERS)
+```
+
+```text title="Output"
+user 7 True int
+['a', 'b'] 100
+```
+
+- `NewType` costs nothing at runtime (`UserId(7)` is just `7`), but mypy will reject
+  `load_user(OrderId(7))`: mixing up two kinds of id becomes a type error.
+- `Self` types fluent methods that return `self` correctly in subclasses.
+
+### Command-line tools that ship with Python
+
+```python title="python_m_tools.py"
+import subprocess
+import sys
+
+
+def run(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, *args], input=stdin, capture_output=True, text=True)
+
+
+pretty = run("-m", "json.tool", "--sort-keys", stdin='{"b": 1, "a": [1, 2]}')
+print(pretty.stdout.strip())
+
+print(run("-c", "import sys; print(sys.version_info[:2] >= (3, 11))").stdout.strip())
+
+check = run("-c", "compile('def f(:\\n  pass', 'broken.py', 'exec')")
+print("syntax error found:", "SyntaxError" in check.stderr, "| exit code", check.returncode)
+
+asserts = run("-O", "-c", "assert False, 'boom'; print('asserts were removed by -O')")
+print(asserts.stdout.strip())
+```
+
+```text title="Output"
+{
+    "a": [
+        1,
+        2
+    ],
+    "b": 1
+}
+True
+syntax error found: True | exit code 1
+asserts were removed by -O
+```
+
+- `python -m json.tool` pretty-prints JSON from stdin or a file, handy for API responses.
+- `python -c` runs one line; `compile(...)` (or `python -m py_compile file.py`) checks syntax
+  without running anything.
+- `python -O` strips `assert` statements, which is why asserts must never guard real input
+  (lesson 34).
+
+## Putting it together: validating config against type hints
+
+```python title="typed_config.py"
+import json
+from dataclasses import dataclass, field, fields
+from typing import Literal, get_args, get_origin, get_type_hints
+
+
+@dataclass
+class ServerConfig:
+    host: str
+    port: int
+    mode: Literal["dev", "prod"] = "dev"
+    allowed_hosts: list[str] = field(default_factory=list)
+    limits: dict[str, int] = field(default_factory=dict)
+
+
+def matches(value, hint) -> bool:
+    origin, args = get_origin(hint), get_args(hint)
+    if origin is Literal:
+        return value in args
+    if origin is list:
+        return isinstance(value, list) and all(matches(v, args[0]) for v in value)
+    if origin is dict:
+        return isinstance(value, dict) and all(
+            matches(k, args[0]) and matches(v, args[1]) for k, v in value.items())
+    if hint is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, hint)
+
+
+def load(cls, text: str):
+    data = json.loads(text)
+    hints = get_type_hints(cls)
+    errors = [f"{f.name}: expected {hints[f.name]}, got {data[f.name]!r}"
+              for f in fields(cls) if f.name in data and not matches(data[f.name], hints[f.name])]
+    unknown = sorted(set(data) - {f.name for f in fields(cls)})
+    errors += [f"{name}: unknown setting" for name in unknown]
+    if errors:
+        raise ValueError("; ".join(errors))
+    return cls(**data)
+
+
+good = '{"host": "0.0.0.0", "port": 8080, "mode": "prod", "allowed_hosts": ["a.com"], "limits": {"rps": 50}}'
+print(load(ServerConfig, good))
+bad = '{"host": "x", "port": "8080", "mode": "test", "allowed_hosts": ["a", 2], "debug": true}'
+try:
+    load(ServerConfig, bad)
+except ValueError as err:
+    for problem in str(err).split("; "):
+        print(" -", problem)
+```
+
+```text title="Output"
+ServerConfig(host='0.0.0.0', port=8080, mode='prod', allowed_hosts=['a.com'], limits={'rps': 50})
+ - port: expected <class 'int'>, got '8080'
+ - mode: expected typing.Literal['dev', 'prod'], got 'test'
+ - allowed_hosts: expected list[str], got ['a', 2]
+ - debug: unknown setting
+```
+
+- `get_type_hints` reads the annotations; `get_origin` and `get_args` take apart generic types
+  like `list[str]` (origin `list`, args `(str,)`) so the checker can recurse into them.
+- The hints double as documentation **and** as the validation rules, so they can't drift apart.
+  Libraries such as pydantic are this idea, done thoroughly and fast.
+
 ## Common mistakes
 
 <Callout type="warning" title="Believing hints validate data">
@@ -128,11 +344,36 @@ What to notice:
   `def oldest(ages: dict[str, int]) -> str | None:` (return `max(ages, key=ages.get) if ages else None`).
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: what's a better parameter hint than `list[int]` for a function that only loops over its input?"
+>
+  `Iterable[int]` (from `collections.abc`). It accepts lists, tuples, sets, ranges and generators,
+  because the function only needs to iterate.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: does `def f(x: int)` stop `f('a')` from running?">
+  No. Hints aren't enforced at runtime; the call runs (and may fail later). A type checker such as
+  mypy, or explicit validation, is what catches it.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: how do you pretty-print a JSON file from the terminal?">
+  `python -m json.tool data.json` (add `--sort-keys` to order the keys). It also validates the JSON
+  and reports the line of a syntax error.
+</Reveal>
+
 <KeyTakeaways>
 
 - `python -m <module>` runs tools (pip, venv, pdb, timeit, http.server) with the right interpreter.
 - `help`, `dir`, `type` and `vars` are your interactive explorers.
 - Type hints document intent, and `mypy` and editors check them. Python doesn't enforce them.
 - Use `X | None`, built-in generics, `Protocol` for duck typing, and `TypedDict` for dict shapes.
+- Accept abstract types (`Iterable`, `Mapping`, `Callable`), return concrete ones.
+- Generics (`def first[T](items: list[T]) -> T`) connect input and output types; `NewType`
+  separates look-alike ids.
+- `get_type_hints` + `get_origin`/`get_args` let code read hints at runtime, e.g. to validate
+  config.
 
 </KeyTakeaways>
+
+{/* enriched */}

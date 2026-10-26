@@ -1,7 +1,7 @@
 ---
 title: Concurrency basics
 summary: Make programs do several things at once. Understand the GIL, when threads and asyncio help (waiting on I/O), when you need processes (heavy computation), and how to share data safely.
-estimatedMinutes: 20
+estimatedMinutes: 30
 difficulty: hard
 section: Core Language
 objectives:
@@ -119,6 +119,321 @@ What to notice:
   turns under the GIL.
 - `total` is exactly 400,000 because of the lock. Remove it and some increments can be lost.
 
+## Variations
+
+Concurrent code can finish in a different order on every run, so these examples **collect**
+results and print them in a fixed order.
+
+### Futures: results, exceptions and `as_completed`
+
+```python title="futures.py"
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def work(n: int) -> int:
+    time.sleep(0.15 * (3 - n))          # later items finish first
+    if n == 1:
+        raise ValueError(f"item {n} is broken")
+    return n * 10
+
+
+with ThreadPoolExecutor(max_workers=3) as pool:
+    futures = {pool.submit(work, n): n for n in range(3)}   # submit returns a Future
+    finished_order = []
+    results, errors = {}, {}
+    for future in as_completed(futures):                     # yields as each one finishes
+        n = futures[future]
+        finished_order.append(n)
+        try:
+            results[n] = future.result()                     # re-raises the task's exception
+        except ValueError as err:
+            errors[n] = str(err)
+
+print("finish order:", finished_order)
+print("results:", dict(sorted(results.items())), "errors:", errors)
+```
+
+```text title="Output"
+finish order: [2, 1, 0]
+results: {0: 0, 2: 20} errors: {1: 'item 1 is broken'}
+```
+
+- `submit` returns a **Future**: a placeholder for a result that isn't ready yet.
+- `as_completed` hands back futures in the order they **finish**, which is ideal for progress
+  reporting. `pool.map` instead returns results in input order.
+- An exception inside a task is stored in its future and re-raised by `.result()`, so you handle it
+  where you collect the result.
+
+### Producer and consumer with `queue.Queue`
+
+```python title="producer_consumer.py"
+import queue
+import threading
+
+tasks: queue.Queue = queue.Queue()
+results = []
+STOP = object()                             # a unique sentinel
+
+
+def consumer():
+    while True:
+        item = tasks.get()
+        if item is STOP:
+            break
+        results.append(item.upper())         # list.append is thread-safe in CPython
+        tasks.task_done()
+
+
+workers = [threading.Thread(target=consumer) for _ in range(3)]
+for w in workers:
+    w.start()
+for word in ["alpha", "beta", "gamma", "delta", "epsilon"]:
+    tasks.put(word)                          # the producer
+tasks.join()                                 # wait until every item is processed
+for _ in workers:
+    tasks.put(STOP)                          # one stop signal per worker
+for w in workers:
+    w.join()
+print(sorted(results))
+```
+
+```text title="Output"
+['ALPHA', 'BETA', 'DELTA', 'EPSILON', 'GAMMA']
+```
+
+`queue.Queue` handles all the locking: producers `put`, consumers `get`, and `join()` waits
+until each item has been marked `task_done()`. Sending one sentinel per worker shuts them all down
+cleanly.
+
+### asyncio: tasks, timeouts and a concurrency limit
+
+```python title="asyncio_more.py"
+import asyncio
+
+
+async def fetch(name: str, delay: float) -> str:
+    await asyncio.sleep(delay)
+    return f"{name} done"
+
+
+async def main():
+    task = asyncio.create_task(fetch("background", 0.05))   # starts running right away
+    print("task started, doing other work")
+    print(await task)
+
+    try:
+        await asyncio.wait_for(fetch("slow", 1.0), timeout=0.05)
+    except TimeoutError:
+        print("slow fetch timed out")
+
+    limit = asyncio.Semaphore(2)
+    running = peak = 0
+
+    async def limited(n: int) -> int:
+        nonlocal running, peak
+        async with limit:                     # at most 2 inside at once
+            running += 1
+            peak = max(peak, running)
+            await asyncio.sleep(0.02)
+            running -= 1
+        return n
+
+    print(await asyncio.gather(*(limited(n) for n in range(6))), "peak concurrency:", peak)
+
+
+asyncio.run(main())
+```
+
+```text title="Output"
+task started, doing other work
+background done
+slow fetch timed out
+[0, 1, 2, 3, 4, 5] peak concurrency: 2
+```
+
+- `create_task` schedules a coroutine to run concurrently; awaiting the task later collects its
+  result.
+- `asyncio.wait_for(..., timeout=...)` cancels the operation and raises `TimeoutError` if it takes
+  too long.
+- An `asyncio.Semaphore` caps how many coroutines run a section at once, which keeps you from
+  opening 10,000 connections to one server.
+
+### `TaskGroup`: run together, fail together
+
+```python title="taskgroup.py"
+import asyncio
+
+
+async def job(name: str, delay: float, fail: bool = False) -> str:
+    await asyncio.sleep(delay)
+    if fail:
+        raise ConnectionError(f"{name} failed")
+    return name
+
+
+async def main():
+    async with asyncio.TaskGroup() as tg:                 # Python 3.11+
+        a = tg.create_task(job("a", 0.02))
+        b = tg.create_task(job("b", 0.01))
+    print("all finished:", a.result(), b.result())
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(job("ok", 0.05))
+            tg.create_task(job("bad", 0.01, fail=True))
+    except* ConnectionError as group:
+        print("errors:", [str(e) for e in group.exceptions])
+
+
+asyncio.run(main())
+```
+
+```text title="Output"
+all finished: a b
+errors: ['bad failed']
+```
+
+A `TaskGroup` waits for all of its tasks. If one fails, the others are **cancelled** and the
+failures are raised together as an `ExceptionGroup`, handled with `except*` (lesson 21). No task is
+left running in the background by accident.
+
+### What a process pool can and can't run
+
+```python title="pickling.py"
+import math
+from concurrent.futures import ProcessPoolExecutor
+
+
+def is_prime(n: int) -> bool:                  # top-level function: picklable
+    return n > 1 and all(n % d for d in range(2, math.isqrt(n) + 1))
+
+
+if __name__ == "__main__":
+    with ProcessPoolExecutor(max_workers=2) as pool:
+        print(list(pool.map(is_prime, [97, 98, 7919, 7920], chunksize=2)))
+        try:
+            list(pool.map(lambda n: n * 2, [1, 2]))
+        except Exception as err:
+            print(type(err).__name__, "- a lambda can't be sent to another process")
+```
+
+```text title="Output"
+[True, False, True, False]
+PicklingError - a lambda can't be sent to another process
+```
+
+Arguments, results and the function itself travel to worker processes by **pickling**. Top-level
+functions pickle fine; lambdas and nested functions don't. `chunksize` sends several items per
+message, which matters when each item is quick to process.
+
+## Putting it together
+
+### A polite concurrent crawler with asyncio
+
+```python title="crawler.py"
+import asyncio
+
+SITE = {                                     # url -> (delay, links or an error)
+    "/": (0.03, ["/a", "/b", "/c"]),
+    "/a": (0.02, ["/a/1", "/b"]),
+    "/b": (0.05, ["/"]),
+    "/c": (0.20, []),                        # slower than the timeout
+    "/a/1": (0.01, ["/missing"]),
+    "/missing": (0.01, "404"),
+}
+
+
+async def get(url: str) -> list[str]:
+    delay, body = SITE.get(url, (0.01, "404"))
+    await asyncio.sleep(delay)
+    if body == "404":
+        raise LookupError(f"{url} not found")
+    return body
+
+
+async def crawl(start: str, max_parallel: int = 2, timeout: float = 0.1) -> dict:
+    seen, report = {start}, {}
+    limit = asyncio.Semaphore(max_parallel)
+
+    async def visit(url: str):
+        async with limit:
+            try:
+                links = await asyncio.wait_for(get(url), timeout)
+            except TimeoutError:
+                report[url] = "timeout"
+                return
+            except LookupError as err:
+                report[url] = f"error: {err}"
+                return
+        report[url] = f"{len(links)} link(s)"
+        new = [link for link in links if link not in seen]
+        seen.update(new)
+        await asyncio.gather(*(visit(link) for link in new))
+
+    await visit(start)
+    return dict(sorted(report.items()))
+
+
+for url, status in asyncio.run(crawl("/")).items():
+    print(f"{url:9} {status}")
+```
+
+```text title="Output"
+/         3 link(s)
+/a        2 link(s)
+/a/1      1 link(s)
+/b        1 link(s)
+/c        timeout
+/missing  error: /missing not found
+```
+
+- Each page is fetched at most once (`seen`), at most two at a time (the semaphore), and never
+  longer than the timeout.
+- Errors and timeouts are recorded per page; one bad link doesn't stop the crawl.
+- Every `await` is a point where another page's work can run, so the slow `/c` doesn't hold up the
+  others.
+
+### A worker pool with `asyncio.Queue`
+
+```python title="async_workers.py"
+import asyncio
+
+
+async def worker(name: str, jobs: asyncio.Queue, done: list):
+    while True:
+        n = await jobs.get()
+        await asyncio.sleep(0.01 * (n % 3))       # pretend I/O of varying length
+        done.append((n, n * n, name))
+        jobs.task_done()
+
+
+async def main():
+    jobs: asyncio.Queue = asyncio.Queue()
+    for n in range(8):
+        jobs.put_nowait(n)
+    done: list = []
+    workers = [asyncio.create_task(worker(f"w{i}", jobs, done)) for i in range(3)]
+    await jobs.join()                              # every job processed
+    for w in workers:
+        w.cancel()                                 # workers loop forever: stop them
+    await asyncio.gather(*workers, return_exceptions=True)
+    print(sorted((n, sq) for n, sq, _ in done))
+    print(len(done), "jobs done by", len({name for _, _, name in done}), "workers")
+
+
+asyncio.run(main())
+```
+
+```text title="Output"
+[(0, 0), (1, 1), (2, 4), (3, 9), (4, 16), (5, 25), (6, 36), (7, 49)]
+8 jobs done by 3 workers
+```
+
+The async equivalent of the threaded producer/consumer: `jobs.join()` waits for `task_done()` on
+every job, then the idle workers are cancelled. `return_exceptions=True` collects their
+`CancelledError`s instead of raising them.
+
 ## Common mistakes
 
 <Callout type="warning" title="Blocking the event loop">
@@ -144,11 +459,42 @@ What to notice:
   CPU-bound, so use a `ProcessPoolExecutor` with about one worker per core.
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: which tool fits resizing 10,000 images on an 8-core machine?"
+>
+  A `ProcessPoolExecutor`: it's CPU-bound, so you want several processes (each with its own GIL)
+  rather than threads or asyncio.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what's wrong with calling `time.sleep(1)` inside an `async def`?"
+>
+  It blocks the whole event loop, so no other coroutine can run during that second. Use `await
+  asyncio.sleep(1)`, and run blocking calls with `await asyncio.to_thread(func)`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: how do you limit an asyncio program to 5 requests at a time?"
+>
+  Create `limit = asyncio.Semaphore(5)` and wrap each request in `async with limit:`. The sixth
+  coroutine waits until one of the five finishes.
+</Reveal>
+
 <KeyTakeaways>
 
 - The GIL lets only one thread run Python bytecode at a time on a standard CPython build.
 - I/O-bound work goes to threads or asyncio, and CPU-bound work to processes.
 - `pool.map` / `asyncio.gather` keep the input order. Guard process pools with `__main__`.
 - Protect shared mutable state with a lock, or don't share it.
+- Futures carry a result **or** an exception; `as_completed` gives finish order, `map` gives input
+  order.
+- `queue.Queue` / `asyncio.Queue` with sentinels or cancellation build safe worker pools.
+- In asyncio, limit concurrency with a `Semaphore`, bound waits with `wait_for`, and use `TaskGroup`
+  so failures cancel siblings.
 
 </KeyTakeaways>
+
+{/* enriched */}

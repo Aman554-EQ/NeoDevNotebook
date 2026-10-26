@@ -1,7 +1,7 @@
 ---
 title: Dictionaries
 summary: The most important data structure in Python. See how hashing turns a key into a slot, why lookups are O(1) on average, why keys must be hashable, and why dicts remember insertion order. Then use the methods that make dict code short and safe.
-estimatedMinutes: 22
+estimatedMinutes: 30
 difficulty: simple
 section: Data Structures
 objectives:
@@ -93,6 +93,266 @@ What to notice:
   key object is kept and the last value wins.
 - Iterating a dict yields its keys in insertion order. Use `.items()` for key–value pairs.
 
+## Variations
+
+### Five ways to build a dict
+
+```python title="build_dicts.py"
+print({"a": 1, "b": 2})
+print(dict(a=1, b=2))                            # keyword arguments (keys must be valid names)
+print(dict([("a", 1), ("b", 2)]))                # from (key, value) pairs
+print(dict(zip(["a", "b"], [1, 2])))             # pair up two lists
+print({ch: ord(ch) for ch in "ab"})              # comprehension
+print(dict.fromkeys(["x", "y"], 0))              # same value for every key
+
+shared = dict.fromkeys(["x", "y"], [])           # trap: ONE list for every key
+shared["x"].append(1)
+print(shared)
+fresh = {k: [] for k in ["x", "y"]}              # a new list per key
+fresh["x"].append(1)
+print(fresh)
+```
+
+```text title="Output"
+{'a': 1, 'b': 2}
+{'a': 1, 'b': 2}
+{'a': 1, 'b': 2}
+{'a': 1, 'b': 2}
+{'a': 97, 'b': 98}
+{'x': 0, 'y': 0}
+{'x': [1], 'y': [1]}
+{'x': [1], 'y': []}
+```
+
+`dict.fromkeys(keys, value)` reuses the **same** value object for every key, which is fine for
+`0` or `None` but a bug for lists. A comprehension evaluates `[]` once per key.
+
+### Views: `keys()`, `values()` and `items()`
+
+```python title="views.py"
+prices = {"tea": 2.5, "cake": 4.0, "soup": 6.0}
+keys = prices.keys()
+prices["bread"] = 3.0                # views are LIVE: they see later changes
+print(list(keys), len(keys))
+print(sum(prices.values()), max(prices.values()))
+print("tea" in prices, 4.0 in prices.values())   # keys: O(1); values: O(n) scan
+
+menu_a = {"tea": 2.5, "cake": 4.0}
+menu_b = {"cake": 4.5, "pie": 5.0}
+both = menu_a.keys() & menu_b.keys()
+only_a = menu_a.keys() - menu_b.keys()
+either = menu_a.keys() | menu_b.keys()
+print(sorted(both), sorted(only_a), sorted(either))   # sorted: set order isn't fixed
+```
+
+```text title="Output"
+['tea', 'cake', 'soup', 'bread'] 4
+15.5 6.0
+True True
+['cake'] ['tea'] ['cake', 'pie', 'tea']
+```
+
+- Views don't copy anything; they show the dict's current state. Wrap in `list(...)` to take a
+  snapshot.
+- `in` on a dict checks **keys** in O(1). Checking `values()` is a linear scan.
+- `keys()` views support set operations, which is the quickest way to compare two dicts' keys.
+
+### Updating and removing
+
+```python title="update_remove.py"
+user = {"name": "ada", "role": "dev"}
+user.update(role="lead", team="core")      # update from kwargs (or another dict)
+print(user)
+
+print(user.pop("team"), user.pop("missing", "n/a"))   # pop with a default never raises
+del user["role"]
+user["x"] = 1
+user["y"] = 2
+print(user.popitem(), user)                # popitem removes the LAST inserted pair
+
+order = {"a": 1, "b": 2, "c": 3}
+order["a"] = order.pop("a")                # move "a" to the end
+print(list(order), {"x": 1, "y": 2} == {"y": 2, "x": 1})
+```
+
+```text title="Output"
+{'name': 'ada', 'role': 'lead', 'team': 'core'}
+core n/a
+('y', 2) {'name': 'ada', 'x': 1}
+['b', 'c', 'a'] True
+```
+
+- `pop(key, default)` is the safe "remove if present" operation.
+- `popitem()` is LIFO (last in, first out), which makes a dict usable as an ordered stack of pairs.
+- Dict equality ignores order, even though iteration follows insertion order.
+
+### Sorting, inverting and transforming
+
+```python title="transform.py"
+scores = {"ada": 91, "bob": 78, "cy": 91, "dee": 85}
+
+print(sorted(scores))                                        # keys, alphabetically
+print(sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:2])
+print(dict(sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))))
+
+by_score = {}
+for name, s in scores.items():                               # invert, keeping duplicates
+    by_score.setdefault(s, []).append(name)
+print(by_score)
+
+print({name: s + 5 for name, s in scores.items()})           # map the values
+print({name: s for name, s in scores.items() if s >= 85})    # filter
+print(max(scores, key=scores.get))                           # key with the largest value
+```
+
+```text title="Output"
+['ada', 'bob', 'cy', 'dee']
+[('ada', 91), ('cy', 91)]
+{'ada': 91, 'cy': 91, 'dee': 85, 'bob': 78}
+{91: ['ada', 'cy'], 78: ['bob'], 85: ['dee']}
+{'ada': 96, 'bob': 83, 'cy': 96, 'dee': 90}
+{'ada': 91, 'cy': 91, 'dee': 85}
+ada
+```
+
+- `sorted(d.items(), key=...)` sorts pairs; wrap the result in `dict(...)` to get a dict in that
+  order.
+- Inverting `{name: score}` naively (`{v: k for k, v in d.items()}`) **loses** names that share a
+  score. Grouping into lists keeps them all.
+- `max(d, key=d.get)` returns the **key** whose value is largest.
+
+### Grouping and counting by hand
+
+```python title="group_count.py"
+words = ["apple", "avocado", "banana", "blueberry", "cherry", "apricot"]
+
+by_letter: dict[str, list[str]] = {}
+for w in words:
+    by_letter.setdefault(w[0], []).append(w)     # create the list on first use
+print(by_letter)
+
+lengths: dict[int, int] = {}
+for w in words:
+    lengths[len(w)] = lengths.get(len(w), 0) + 1
+print(dict(sorted(lengths.items())))
+```
+
+```text title="Output"
+{'a': ['apple', 'avocado', 'apricot'], 'b': ['banana', 'blueberry'], 'c': ['cherry']}
+{5: 1, 6: 2, 7: 2, 9: 1}
+```
+
+`setdefault(key, [])` returns the existing list or inserts a new empty one, so `.append` always
+has a list to work on. `get(key, 0) + 1` is the counting equivalent. Lesson 18's `defaultdict` and
+`Counter` package both patterns.
+
+### Nested dicts: JSON-shaped data
+
+```python title="nested.py"
+order = {
+    "id": 1042,
+    "customer": {"name": "Ada", "address": {"city": "London", "zip": "N1"}},
+    "items": [{"sku": "pen", "qty": 3, "price": 1.5}, {"sku": "pad", "qty": 1, "price": 4.0}],
+}
+
+print(order["customer"]["address"]["city"])
+print(order.get("shipping", {}).get("method", "standard"))   # safe chained lookup
+total = sum(item["qty"] * item["price"] for item in order["items"])
+print(f"total {total:.2f}")
+order["customer"]["address"]["city"] = "Leeds"               # update deep inside
+print(order["customer"])
+
+
+def deep_get(data, path: str, default=None):
+    for key in path.split("."):
+        if not isinstance(data, dict) or key not in data:
+            return default
+        data = data[key]
+    return data
+
+
+print(deep_get(order, "customer.address.zip"), deep_get(order, "customer.phone", "-"))
+```
+
+```text title="Output"
+London
+standard
+total 8.50
+{'name': 'Ada', 'address': {'city': 'Leeds', 'zip': 'N1'}}
+N1 -
+```
+
+`d.get(key, {})` returns an empty dict for a missing level, so the next `.get` still works. The
+`deep_get` helper generalises that walk to any dotted path.
+
+## Putting it together
+
+### Processing orders against an inventory
+
+```python title="inventory.py"
+inventory = {"pen": 10, "pad": 3, "ink": 0}
+prices = {"pen": 1.5, "pad": 4.0, "ink": 7.0}
+orders = [("ada", {"pen": 2, "pad": 1}), ("bob", {"ink": 1}), ("cy", {"pad": 3, "pen": 1})]
+
+revenue = 0.0
+for customer, wanted in orders:
+    missing = {sku: qty for sku, qty in wanted.items() if inventory.get(sku, 0) < qty}
+    if missing:
+        print(f"{customer}: rejected, short of {missing}")
+        continue
+    for sku, qty in wanted.items():
+        inventory[sku] -= qty
+    cost = sum(prices[sku] * qty for sku, qty in wanted.items())
+    revenue += cost
+    print(f"{customer}: ok, {cost:.2f}")
+
+print("revenue:", revenue)
+print("reorder:", sorted(sku for sku, qty in inventory.items() if qty <= 1))
+```
+
+```text title="Output"
+ada: ok, 7.00
+bob: rejected, short of {'ink': 1}
+cy: rejected, short of {'pad': 3}
+revenue: 7.0
+reorder: ['ink']
+```
+
+The order is checked **completely** before stock changes, so a rejected order never leaves the
+inventory half-updated: an important habit whenever data is modified.
+
+### A search index: word → line numbers
+
+```python title="search_index.py"
+TEXT = """\
+Python dicts map keys to values.
+Keys must be hashable.
+Lists are not hashable, tuples of hashables are.
+Dicts keep insertion order."""
+
+index: dict[str, set[int]] = {}
+for line_no, line in enumerate(TEXT.splitlines(), start=1):
+    for word in line.lower().replace(",", " ").replace(".", " ").split():
+        index.setdefault(word, set()).add(line_no)
+
+
+def search(*terms: str) -> list[int]:
+    sets = [index.get(t.lower(), set()) for t in terms]
+    return sorted(set.intersection(*sets)) if sets else []
+
+
+print(sorted(index["hashable"]), sorted(index["dicts"]))
+print(search("keys"), search("dicts", "order"), search("hashable", "tuples"), search("java"))
+```
+
+```text title="Output"
+[2, 3] [1, 4]
+[1, 2] [4] [3] []
+```
+
+An **inverted index** maps each word to the set of places it appears; it's the core idea behind
+search engines. Looking up a word is O(1), and a multi-word query intersects the sets.
+
 ## Common mistakes
 
 <Callout type="warning" title="Changing a dict while iterating it">
@@ -117,11 +377,32 @@ What to notice:
   Python randomizes string hashes per process (hash seed) to make such attacks impractical.
 </Reveal>
 
+<Reveal kind="hint" label="Quick check: what does `{'a': 1, 'a': 2}` evaluate to?">
+  `{'a': 2}`. Keys are unique; a repeated key in a literal keeps its position from the first
+  occurrence but takes the last value.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: how do you find the keys two dicts have in common?">
+  `d1.keys() & d2.keys()`. Key views behave like sets, so `&`, `|` and `-` work directly.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why is `if value in d.values()` slower than `if key in d`?">
+  Keys are found by hashing in O(1) on average. Values aren't indexed, so `in d.values()` checks
+  them one by one: O(n). If you search by value often, keep an inverted dict too.
+</Reveal>
+
 <KeyTakeaways>
 
 - A dict maps keys to values through `hash(key)`. Lookups, inserts and deletes are O(1) on average.
 - Keys must be hashable and must not change. Equal keys share one entry.
 - Use `get`, `setdefault`, `in`, `|` and comprehensions to keep dict code short and safe.
 - Dicts keep insertion order. Iterate with `.items()`.
+- Build dicts with literals, `dict(pairs)`, `zip` or comprehensions; avoid `fromkeys` with a
+  mutable value.
+- Views are live; key views support set operations; `max(d, key=d.get)` finds the top key.
+- Group with `setdefault(key, [])`, walk nested data with `.get(key, {})`, and validate before
+  mutating.
 
 </KeyTakeaways>
+
+{/* enriched */}

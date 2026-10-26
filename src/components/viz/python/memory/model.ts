@@ -50,8 +50,8 @@ const objectsScenario: MemScenario = {
     {
       code: "same = age",
       names: [
-        { name: "age", target: "i30", x: -3.2 },
-        { name: "same", target: "i30", x: -2.0 },
+        { name: "age", target: "i30", x: -3.3 },
+        { name: "same", target: "i30", x: -1.9 },
         { name: "name", target: "sAda", x: 0.4 },
       ],
       objects: [
@@ -75,16 +75,17 @@ const objectsScenario: MemScenario = {
     {
       code: "nothing = None",
       names: [
-        { name: "same", target: "i30", x: -2.6 },
-        { name: "name", target: "sAda", x: 0.4 },
-        { name: "age", target: "i31", x: 3.0 },
-        { name: "nothing", target: "none", x: 0.4 },
+        { name: "same", target: "i30", x: -3.2 },
+        { name: "name", target: "sAda", x: 0.6 },
+        { name: "age", target: "i31", x: 3.2 },
+        // Between the int and the str, so its arrow drops to None through the gap.
+        { name: "nothing", target: "none", x: -1.3 },
       ],
       objects: [
-        { id: "i30", type: "int", value: "30", x: -2.6, y: 0.6 },
-        { id: "sAda", type: "str", value: "'Ada'", x: 0.4, y: 0.6 },
-        { id: "i31", type: "int", value: "31", x: 3.0, y: 0.6 },
-        { id: "none", type: "NoneType", value: "None", x: 0.4, y: -1.2 },
+        { id: "i30", type: "int", value: "30", x: -3.2, y: 0.6 },
+        { id: "sAda", type: "str", value: "'Ada'", x: 0.6, y: 0.6 },
+        { id: "i31", type: "int", value: "31", x: 3.2, y: 0.6 },
+        { id: "none", type: "NoneType", value: "None", x: -1.3, y: -1.2 },
       ],
     },
   ],
@@ -172,8 +173,8 @@ const copiesScenario: MemScenario = {
     {
       code: "d = copy.deepcopy(a)",
       names: [
-        { name: "a", target: "A", x: -3.4 },
-        { name: "b", target: "A", x: -2.4 },
+        { name: "a", target: "A", x: -3.5 },
+        { name: "b", target: "A", x: -2.3 },
         { name: "c", target: "C", x: 0.6 },
         { name: "d", target: "D", x: 3.2 },
       ],
@@ -249,7 +250,7 @@ const instancesScenario: MemScenario = {
       code: 'rex = Dog("Rex")',
       names: [
         { name: "Dog", target: "cls", x: 1.6 },
-        { name: "rex", target: "r", x: -2.4 },
+        { name: "rex", target: "r", x: -3.0 },
       ],
       objects: [
         {
@@ -266,7 +267,7 @@ const instancesScenario: MemScenario = {
           classOf: "cls",
           cells: [{ text: "'Rex'" }],
           cellLabels: ["name"],
-          x: -2.4,
+          x: -3.0,
           y: 0.8,
         },
       ],
@@ -274,7 +275,7 @@ const instancesScenario: MemScenario = {
     {
       code: 'fido = Dog("Fido")',
       names: [
-        { name: "rex", target: "r", x: -2.4 },
+        { name: "rex", target: "r", x: -3.0 },
         { name: "fido", target: "f", x: 0.2 },
         { name: "Dog", target: "cls", x: 2.8 },
       ],
@@ -285,7 +286,7 @@ const instancesScenario: MemScenario = {
           classOf: "cls",
           cells: [{ text: "'Rex'" }],
           cellLabels: ["name"],
-          x: -2.4,
+          x: -3.0,
           y: 0.8,
         },
         {
@@ -310,7 +311,7 @@ const instancesScenario: MemScenario = {
     {
       code: "fido.sound = 'yap'",
       names: [
-        { name: "rex", target: "r", x: -2.4 },
+        { name: "rex", target: "r", x: -3.0 },
         { name: "fido", target: "f", x: 0.2 },
         { name: "Dog", target: "cls", x: 2.8 },
       ],
@@ -321,7 +322,7 @@ const instancesScenario: MemScenario = {
           classOf: "cls",
           cells: [{ text: "'Rex'" }],
           cellLabels: ["name"],
-          x: -2.4,
+          x: -3.0,
           y: 0.8,
         },
         {
