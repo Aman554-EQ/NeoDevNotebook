@@ -1,0 +1,357 @@
+{
+ "version": 1,
+ "python": "3.13",
+ "source": "import math\nimport re\nfrom datetime import date, timedelta\nfrom itertools import accumulate\n\ndue = date(2026, 10, 26) + timedelta(days=30)\nprint(due.isoformat(), due.strftime(\"%A\"))\ntotals = list(accumulate([5, 10, 20]))\nprint(totals, math.isqrt(totals[-1]))\nemails = re.findall(r\"[\\w.]+@[\\w.]+\", \"ada@x.io, bo@y.org\")\nprint(emails)\n",
+ "steps": [
+  {
+   "line": 1,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": []
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 2,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "math",
+       "module math"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 3,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "math",
+       "module math"
+      ],
+      [
+       "re",
+       "module re"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 4,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "math",
+       "module math"
+      ],
+      [
+       "re",
+       "module re"
+      ],
+      [
+       "date",
+       "class date"
+      ],
+      [
+       "timedelta",
+       "class timedelta"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 6,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "math",
+       "module math"
+      ],
+      [
+       "re",
+       "module re"
+      ],
+      [
+       "date",
+       "class date"
+      ],
+      [
+       "timedelta",
+       "class timedelta"
+      ],
+      [
+       "accumulate",
+       "class accumulate"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 7,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "math",
+       "module math"
+      ],
+      [
+       "re",
+       "module re"
+      ],
+      [
+       "date",
+       "class date"
+      ],
+      [
+       "timedelta",
+       "class timedelta"
+      ],
+      [
+       "accumulate",
+       "class accumulate"
+      ],
+      [
+       "due",
+       "datetime.date(2026, 11, 25)"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 8,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "math",
+       "module math"
+      ],
+      [
+       "re",
+       "module re"
+      ],
+      [
+       "date",
+       "class date"
+      ],
+      [
+       "timedelta",
+       "class timedelta"
+      ],
+      [
+       "accumulate",
+       "class accumulate"
+      ],
+      [
+       "due",
+       "datetime.date(2026, 11, 25)"
+      ]
+     ]
+    }
+   ],
+   "stdout": "2026-11-25 Wednesday\n"
+  },
+  {
+   "line": 9,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "math",
+       "module math"
+      ],
+      [
+       "re",
+       "module re"
+      ],
+      [
+       "date",
+       "class date"
+      ],
+      [
+       "timedelta",
+       "class timedelta"
+      ],
+      [
+       "accumulate",
+       "class accumulate"
+      ],
+      [
+       "due",
+       "datetime.date(2026, 11, 25)"
+      ],
+      [
+       "totals",
+       "[5, 15, 35]"
+      ]
+     ]
+    }
+   ],
+   "stdout": "2026-11-25 Wednesday\n"
+  },
+  {
+   "line": 10,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "math",
+       "module math"
+      ],
+      [
+       "re",
+       "module re"
+      ],
+      [
+       "date",
+       "class date"
+      ],
+      [
+       "timedelta",
+       "class timedelta"
+      ],
+      [
+       "accumulate",
+       "class accumulate"
+      ],
+      [
+       "due",
+       "datetime.date(2026, 11, 25)"
+      ],
+      [
+       "totals",
+       "[5, 15, 35]"
+      ]
+     ]
+    }
+   ],
+   "stdout": "2026-11-25 Wednesday\n[5, 15, 35] 5\n"
+  },
+  {
+   "line": 11,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "math",
+       "module math"
+      ],
+      [
+       "re",
+       "module re"
+      ],
+      [
+       "date",
+       "class date"
+      ],
+      [
+       "timedelta",
+       "class timedelta"
+      ],
+      [
+       "accumulate",
+       "class accumulate"
+      ],
+      [
+       "due",
+       "datetime.date(2026, 11, 25)"
+      ],
+      [
+       "totals",
+       "[5, 15, 35]"
+      ],
+      [
+       "emails",
+       "['ada@x.io', 'bo@y.org']"
+      ]
+     ]
+    }
+   ],
+   "stdout": "2026-11-25 Wednesday\n[5, 15, 35] 5\n"
+  },
+  {
+   "line": 11,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "math",
+       "module math"
+      ],
+      [
+       "re",
+       "module re"
+      ],
+      [
+       "date",
+       "class date"
+      ],
+      [
+       "timedelta",
+       "class timedelta"
+      ],
+      [
+       "accumulate",
+       "class accumulate"
+      ],
+      [
+       "due",
+       "datetime.date(2026, 11, 25)"
+      ],
+      [
+       "totals",
+       "[5, 15, 35]"
+      ],
+      [
+       "emails",
+       "['ada@x.io', 'bo@y.org']"
+      ]
+     ]
+    }
+   ],
+   "stdout": "2026-11-25 Wednesday\n[5, 15, 35] 5\n['ada@x.io', 'bo@y.org']\n",
+   "returnValue": "None"
+  }
+ ],
+ "stdout": "2026-11-25 Wednesday\n[5, 15, 35] 5\n['ada@x.io', 'bo@y.org']\n",
+ "truncated": false
+}

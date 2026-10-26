@@ -13,10 +13,13 @@ import { CompPipelineViz } from "./small/comp-pipeline-viz"
 import { ConcurrencyViz } from "./small/concurrency-viz"
 import { DecoratorViz } from "./small/decorator-viz"
 import { ExceptionUnwindViz } from "./small/exception-unwind-viz"
+import { ImportViz } from "./small/import-viz"
 import { MroViz } from "./small/mro-viz"
+import { TracebackViz } from "./small/traceback-viz"
 import { CounterViz } from "./small/counter-viz"
 import { UnpackViz } from "./small/unpack-viz"
 import { VennViz } from "./small/venn-viz"
+import { VenvViz } from "./small/venv-viz"
 
 export const viz = {
   BigOViz,
@@ -31,10 +34,13 @@ export const viz = {
   DictTableViz,
   FloatBitsViz,
   HeapViz,
+  ImportViz,
   ListArrayViz,
   MemoryViz,
   ScopeLegbViz,
   SliceRulerViz,
+  TracebackViz,
   UnpackViz,
   VennViz,
+  VenvViz,
 }

@@ -1,0 +1,137 @@
+---
+title: Essential commands and type hints
+summary: A reference page. The python command-line options and built-in helpers you'll use daily, then type hints, which document what functions expect and let tools like mypy find bugs before you run anything.
+estimatedMinutes: 15
+difficulty: simple
+section: Packages, Imports & Tooling
+objectives:
+  - Use the everyday python commands (-m, -c, -i, timeit, http.server, pdb, venv)
+  - Explore objects interactively with help, dir, type and vars
+  - Annotate functions with built-in generics, unions and Optional values
+  - Use Protocol and TypedDict, and know that hints are not enforced at runtime
+prerequisites:
+  - pip and virtual environments
+tags: [python, cli, typing, mypy]
+---
+
+## Intuition: labels on the parts box
+
+Command-line options are the switches on your tool. Type hints are labels on the parts box: "this
+slot takes a list of floats". Python doesn't check the labels while running. They're for you, your
+editor, and type checkers that read the labels and warn you before anything breaks.
+
+## Reference: commands you'll use
+
+```bash title="Terminal"
+python --version                      # which Python
+python script.py arg1                 # run a script (arguments in sys.argv)
+python -m module                      # run a module: venv, pip, pdb, timeit, http.server…
+python -c "print(2 ** 10)"            # run one line
+python -i script.py                   # run, then stay in the REPL with its variables
+python -m timeit "sum(range(1000))"   # micro-benchmark
+python -m http.server 8000            # serve the current folder at localhost:8000
+python -m pdb script.py               # start under the debugger (lesson 35)
+python -X importtime -c "import json" # see what an import costs
+python -m pip install mypy            # then: mypy your_file.py
+```
+
+In the REPL, `help(obj)` shows documentation, `dir(obj)` lists attributes, `type(obj)` shows the
+class, and `vars(obj)` shows an object's `__dict__`. Use `_` for the last result.
+
+## The precise rules for type hints
+
+- Annotate parameters and returns: `def f(xs: list[float], k: int = 2) -> float:`.
+- Built-in generics: `list[int]`, `dict[str, int]`, `tuple[int, str]`, `set[str]`.
+- Unions: `int | None` means "an int or None" (older code writes `Optional[int]`).
+- `Protocol` describes an interface by **shape** ("anything with `.area()`"). That's structural
+  typing, also called duck typing with checks.
+- `TypedDict` describes dicts with known keys, and `Literal["r", "w"]` restricts values.
+- Hints are stored in `__annotations__` but **not enforced**. Run `mypy` (or your editor's checker)
+  to catch mismatches.
+
+## Worked example
+
+```python title="typing_demo.py"
+from dataclasses import dataclass
+from typing import Literal, Protocol, TypedDict, get_type_hints
+
+
+def scale(values: list[float], factor: float = 2.0) -> list[float]:
+    return [v * factor for v in values]
+
+
+def find(users: dict[str, int], name: str) -> int | None:
+    return users.get(name)
+
+
+class Shape(Protocol):
+    def area(self) -> float: ...
+
+
+@dataclass
+class Square:
+    side: float
+
+    def area(self) -> float:
+        return self.side**2
+
+
+def total_area(shapes: list[Shape]) -> float:  # any object with .area() fits
+    return sum(s.area() for s in shapes)
+
+
+class Movie(TypedDict):
+    title: str
+    year: int
+
+
+Mode = Literal["r", "w"]
+
+print(scale([1.5, 2]), find({"ada": 36}, "bo"), total_area([Square(2), Square(3)]))
+print(get_type_hints(find))
+movie: Movie = {"title": "Up", "year": 2009}
+print(movie["year"], scale.__annotations__["return"])
+print(scale("ab", 2))  # hints are NOT enforced at runtime
+```
+
+```text title="Output"
+[3.0, 4.0] None 13
+{'users': dict[str, int], 'name': <class 'str'>, 'return': int | None}
+2009 list[float]
+['aa', 'bb']
+```
+
+What to notice:
+
+- `Square` never says it implements `Shape`. It has an `area()` method, so a type checker accepts it.
+- The last line "worked" even though `"ab"` isn't a `list[float]`, because hints are not runtime
+  checks. `mypy` would flag it:
+  `Argument 1 to "scale" has incompatible type "str"; expected "list[float]"`.
+- `find(...) -> int | None` forces callers to handle the `None` case, and a type checker reminds them.
+
+## Common mistakes
+
+<Callout type="warning" title="Believing hints validate data">
+  Hints don't stop bad input at runtime. Validate external data (user input, JSON) explicitly, or
+  use a validation library such as pydantic.
+</Callout>
+
+- **`list` vs `list[int]`.** A bare `list` tells the checker nothing about the items.
+- **Mutable default with a hint**, as in `def f(xs: list[int] = [])`. The hint doesn't fix the shared
+  default (lesson 10).
+- **Over-annotating locals.** Annotate function signatures, and let tools infer the local variables.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: annotate a function that takes a mapping of names to ages and returns the oldest name, or None if empty.">
+  `def oldest(ages: dict[str, int]) -> str | None:` (return `max(ages, key=ages.get) if ages else None`).
+</Reveal>
+
+<KeyTakeaways>
+
+- `python -m <module>` runs tools (pip, venv, pdb, timeit, http.server) with the right interpreter.
+- `help`, `dir`, `type` and `vars` are your interactive explorers.
+- Type hints document intent, and `mypy` and editors check them. Python doesn't enforce them.
+- Use `X | None`, built-in generics, `Protocol` for duck typing, and `TypedDict` for dict shapes.
+
+</KeyTakeaways>

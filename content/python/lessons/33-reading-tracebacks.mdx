@@ -1,0 +1,136 @@
+---
+title: Reading tracebacks
+summary: A traceback is a map from the error back to its cause. Learn to read it bottom-up, use Python 3.13's precise error markers, follow chained exceptions, and turn the trace into a fix.
+estimatedMinutes: 15
+difficulty: simple
+section: Debugging
+objectives:
+  - Read a traceback bottom-up (what, where, how we got there)
+  - Use the ~ and ^ markers to pinpoint the failing expression
+  - Interpret chained exceptions ("direct cause" vs "during handling")
+  - Extract traceback details in code with the traceback module
+prerequisites:
+  - Exceptions
+tags: [python, debugging, traceback]
+---
+
+## Intuition: footprints back to the scene
+
+When something breaks, Python leaves a trail of footprints from the program's start to the exact
+spot. Beginners read from the top and get lost. Detectives start **at the scene**, which is the
+**last line**, and follow the footprints backwards only as far as they need to.
+
+## See it
+
+<TracebackViz />
+
+## The precise rules
+
+```text title="Anatomy"
+Traceback (most recent call last):            ← oldest call first…
+  File "orders.py", line 10, in <module>      ← file, line, function
+    print(report(...))                        ← the source line
+          ~~~~~~^^^^^                         ← 3.11+: the exact expression
+  File "orders.py", line 2, in average        ← …newest call last: where it broke
+    return sum(prices) / len(prices)
+           ~~~~~~~~~~~~^~~~~~~~~~~~~
+ZeroDivisionError: division by zero           ← WHAT happened (read this first)
+```
+
+1. **Last line:** the exception type and message.
+2. **Last frame:** where it happened. Is it _your_ code or a library's? If it's a library, look
+   for the last frame in your own files. That's usually where the bad value came from.
+3. **Frames above:** how execution got there, and which caller passed the bad data.
+4. **Chained exceptions:** "The above exception was the direct cause of the following" means
+   someone used `raise … from err`. "During handling of the above exception, another exception
+   occurred" means the `except` block itself crashed.
+
+## Worked example: inspect and fix
+
+```python title="tracebacks.py"
+import traceback
+
+
+def average(prices):
+    return sum(prices) / len(prices)
+
+
+def report(orders):
+    return {name: average(prices) for name, prices in orders.items()}
+
+
+try:
+    report({"ada": [10, 20], "bo": []})
+except ZeroDivisionError as err:
+    print(type(err).__name__, "-", err)
+    for frame in traceback.extract_tb(err.__traceback__):
+        print(f"  line {frame.lineno} in {frame.name}: {frame.line}")
+
+
+def safe_average(prices):
+    return sum(prices) / len(prices) if prices else 0.0
+
+
+print({name: safe_average(p) for name, p in {"ada": [10, 20], "bo": []}.items()})
+
+try:
+    try:
+        {}["key"]
+    except KeyError as err:
+        raise LookupError("config is incomplete") from err
+except LookupError as err:
+    print(repr(err), "caused by", repr(err.__cause__))
+```
+
+```text title="Output"
+ZeroDivisionError - division by zero
+  line 13 in <module>: report({"ada": [10, 20], "bo": []})
+  line 9 in report: return {name: average(prices) for name, prices in orders.items()}
+  line 5 in average: return sum(prices) / len(prices)
+{'ada': 15.0, 'bo': 0.0}
+LookupError('config is incomplete') caused by KeyError('key')
+```
+
+What to notice:
+
+- `traceback.extract_tb` gives the same frames as the printed traceback, oldest first. It's handy
+  for logging or for tests that assert _where_ something failed.
+- The comprehension runs **inside** `report`'s frame (Python 3.12+ inlines comprehensions), so no
+  separate `<dictcomp>` frame appears.
+- The fix belongs where the decision belongs. `average` of nothing is undefined, so the caller
+  decides that an empty order counts as `0.0`.
+- `err.__cause__` holds the original error when you `raise … from err`.
+
+## Common mistakes
+
+<Callout type="warning" title="Fixing the line in the last frame by reflex">
+  The last frame shows where the error **surfaced**, not necessarily where the bug **is**. An empty
+  list created three calls earlier is the real cause, so walk up the frames to find who produced the
+  bad value.
+</Callout>
+
+- **Reading only the top line.** "Traceback (most recent call last)" tells you nothing. Start at
+  the bottom.
+- **Ignoring library frames entirely.** Read the last frame of _your_ code, then the library's
+  message. It often says exactly which argument was wrong.
+- **Swallowing tracebacks** with `except Exception: print("error")`. Log with `logger.exception(...)`
+  to keep the trace.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: a trace ends with KeyError: 'email' in a library frame. Where do you look first?"
+>
+  The last frame from **your** code above the library frames. That's where a dict without `'email'`
+  was passed in. Check what data that call received and where the data came from.
+</Reveal>
+
+<KeyTakeaways>
+
+- Read bottom-up: the error (what), the last frame (where), then upward (how).
+- The `~` and `^` markers point at the exact failing expression.
+- "Direct cause" means `raise … from`. "During handling" means a crash inside `except`.
+- The bug is often in an earlier frame that produced the bad value.
+
+</KeyTakeaways>

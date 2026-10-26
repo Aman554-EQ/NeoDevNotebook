@@ -1,0 +1,119 @@
+---
+title: pip and virtual environments
+summary: Give every project its own isolated set of packages. Create and activate virtual environments, install and pin dependencies with pip, and fix the classic "I installed it but Python can't find it" problem.
+estimatedMinutes: 15
+difficulty: simple
+section: Packages, Imports & Tooling
+objectives:
+  - Create, activate and delete a virtual environment
+  - Install, upgrade, list and uninstall packages with `python -m pip`
+  - Pin dependencies in requirements.txt and recreate an environment from it
+  - Diagnose which interpreter and environment your code is using
+prerequisites:
+  - Modules and the import system
+tags: [python, pip, venv, dependencies]
+---
+
+## Intuition: one toolbox per job
+
+If every project borrows tools from one shared toolbox, upgrading a tool for one job breaks another.
+A **virtual environment** is a separate toolbox per project. `pip` is the store you fill it from, and
+`requirements.txt` is the shopping list that lets anyone fill an identical toolbox.
+
+## See it
+
+<VenvViz />
+
+## The precise rules
+
+```bash title="Terminal"
+# create (once per project), in the project folder
+python -m venv .venv
+
+# activate (per terminal session)
+.venv\Scripts\activate          # Windows (PowerShell / cmd)
+source .venv/bin/activate       # macOS / Linux
+
+# use pip THROUGH the interpreter, so it installs where python runs
+python -m pip install requests==2.32.3
+python -m pip install --upgrade pip
+python -m pip list
+python -m pip show requests
+python -m pip uninstall requests
+
+# pin and reproduce
+python -m pip freeze > requirements.txt
+python -m pip install -r requirements.txt
+
+deactivate                      # leave the environment
+```
+
+- A venv is just a folder (`.venv/`) holding a link to a Python interpreter, its own
+  `site-packages`, and activation scripts. Delete the folder to delete the environment.
+- Activation only changes `PATH` for the current terminal. You can also skip it and call
+  `.venv\Scripts\python` (or `.venv/bin/python`) directly.
+- Add `.venv/` to `.gitignore`. Commit `requirements.txt` (or `pyproject.toml`), never the
+  environment itself.
+- **Version pins:** `==2.32.3` gives exact, reproducible installs. `>=2.32,<3` accepts compatible
+  updates. Applications usually pin exactly, and libraries declare ranges.
+
+## Worked example: which Python am I running?
+
+```python title="where_am_i.py"
+import sys
+import sysconfig
+
+in_venv = sys.prefix != sys.base_prefix  # True inside an active virtual environment
+print("interpreter is a file:", bool(sys.executable))
+print("Python 3.11 or newer:", sys.version_info >= (3, 11))
+print("site-packages lives under prefix:", sysconfig.get_paths()["purelib"].startswith(sys.prefix))
+print("in_venv is a", type(in_venv).__name__)
+```
+
+```text title="Output"
+interpreter is a file: True
+Python 3.11 or newer: True
+site-packages lives under prefix: True
+in_venv is a bool
+```
+
+Run it on your own machine and print the real values: `print(sys.executable)`, `print(sys.prefix)`
+and `print(in_venv)`. Compare `sys.executable` with the `pip` you used (`python -m pip --version`
+prints the path pip installs into). If they differ, you installed into a different environment.
+
+<Callout type="tip" title="Faster tools">
+  `uv` (a fast, Rust-based installer) and `pipx` (for command-line tools) are popular alternatives.
+  The concepts are identical: isolated environment, pinned dependencies, install from a list.
+</Callout>
+
+## Common mistakes
+
+<Callout type="warning" title="pip install with the wrong pip">
+  Plain `pip install x` may belong to a different Python than the `python` that runs your code.
+  `python -m pip install x` always installs into the interpreter you're about to use.
+</Callout>
+
+- **Committing `.venv/`.** It's large, machine-specific and full of binaries. Commit the
+  requirements instead.
+- **Forgetting to activate** in a new terminal, then installing globally. Check the prompt prefix
+  `(.venv)`, or run `python -c "import sys; print(sys.prefix)"`.
+- **`sudo pip install`** on Linux or macOS changes the system Python that the OS relies on. Use a venv.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: a teammate clones your repo. Which three commands give them your exact environment?"
+>
+  `python -m venv .venv`, then activate it, then `python -m pip install -r requirements.txt`. The
+  pinned versions in `requirements.txt` make it identical to yours.
+</Reveal>
+
+<KeyTakeaways>
+
+- One virtual environment per project: `python -m venv .venv`, then activate it.
+- Always use `python -m pip …`, so packages go where your `python` looks.
+- Pin with `pip freeze > requirements.txt`, and rebuild with `pip install -r`.
+- "Installed but not found" almost always means two different environments.
+
+</KeyTakeaways>

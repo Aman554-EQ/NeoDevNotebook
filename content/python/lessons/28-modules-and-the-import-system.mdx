@@ -1,0 +1,143 @@
+---
+title: Modules and the import system
+summary: What actually happens when you write import, why a module's code runs only once, how Python finds modules on sys.path, what if __name__ == "__main__" is for, and how to fix ModuleNotFoundError and circular imports.
+estimatedMinutes: 18
+difficulty: medium
+section: Packages, Imports & Tooling
+objectives:
+  - Describe the import steps (cache check, sys.path search, run once, bind)
+  - Use the import forms (`import x`, `from x import y`, `import x as z`) appropriately
+  - Use `if __name__ == "__main__":` to make files both importable and runnable
+  - Diagnose ModuleNotFoundError, shadowed names and circular imports
+prerequisites:
+  - Functions
+tags: [python, modules, imports]
+---
+
+## Intuition: a library with a front desk
+
+Asking for `import shop` is asking the front desk for a book. The desk first checks whether it's
+**already on the reading table** (`sys.modules`). If not, it searches the **shelves in a fixed
+order** (`sys.path`), brings the book out, and reads it once to prepare it. Everyone who asks later
+gets the same copy from the table.
+
+## See it
+
+<ImportViz />
+
+## The precise rules
+
+1. Look up the name in `sys.modules`. If it's found, reuse it.
+2. Otherwise search each folder in `sys.path` in order: the running script's folder, then
+   `PYTHONPATH`, the standard library and site-packages. The first match wins.
+3. Create a module object, **run the file top to bottom once**, and store it in `sys.modules`.
+4. Bind a name in the importing namespace: `import shop` binds `shop`, and `from shop import TAX`
+   binds `TAX`.
+
+Inside a module, `__name__` is the module's name (`"shop"`). In the file you run directly it is
+`"__main__"`. That's why `if __name__ == "__main__":` code runs only when the file is executed, not
+when it's imported.
+
+## Worked example
+
+The example creates a module in a temporary folder, so you can paste it anywhere and run it.
+
+```python title="imports.py"
+import importlib
+import sys
+import tempfile
+import textwrap
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as tmp:
+    Path(tmp, "shop.py").write_text(
+        textwrap.dedent(
+            """
+            print("shop module is running, __name__ =", __name__)
+            TAX = 0.2
+
+            def price_with_tax(p):
+                return round(p * (1 + TAX), 2)
+
+            if __name__ == "__main__":
+                print("only when run directly")
+            """
+        ),
+        encoding="utf-8",
+    )
+    sys.path.insert(0, tmp)  # make the folder importable
+
+    import shop  # runs the module once
+
+    import shop as again  # cached: nothing printed
+
+    print(shop is again, "shop" in sys.modules, shop.price_with_tax(10))
+
+    from shop import TAX, price_with_tax
+
+    print(TAX, price_with_tax(5))
+    print(__name__)
+
+    try:
+        import shopp
+    except ModuleNotFoundError as err:
+        print("ModuleNotFoundError:", err)
+
+    importlib.reload(shop)  # runs it again, deliberately
+    sys.path.remove(tmp)
+```
+
+```text title="Output"
+shop module is running, __name__ = shop
+True True 12.0
+0.2 6.0
+__main__
+ModuleNotFoundError: No module named 'shopp'
+shop module is running, __name__ = shop
+```
+
+What to notice:
+
+- "shop module is running" printed **once** for two imports, then again only for the explicit
+  `importlib.reload`.
+- Inside `shop.py`, `__name__` was `"shop"`, so the `__main__` block didn't run. In the script
+  itself, `__name__` is `"__main__"`.
+- `from shop import TAX` copies the **binding**. If `shop.TAX` were later reassigned, your `TAX`
+  wouldn't change. Prefer `import shop` + `shop.TAX` for settings that change.
+
+## Common mistakes
+
+<Callout type="warning" title="Naming your file like a library">
+  A file called `random.py`, `json.py` or `requests.py` in your project folder is found **first** on
+  `sys.path`, which shadows the real module. Then `random.randint` fails with `AttributeError:
+  module 'random' has no attribute 'randint'`. Rename the file, and delete its `__pycache__`.
+</Callout>
+
+- **ModuleNotFoundError for an installed package.** Usually it's installed into a _different_
+  environment. Compare `python -c "import sys; print(sys.executable)"` with where you ran `pip`
+  (lesson 30).
+- **Circular imports.** `a.py` imports `b.py`, which imports `a.py` while `a` is still half-run, so
+  you get `ImportError: cannot import name … (most likely due to a circular import)`. Fix it by
+  moving shared code into a third module, importing inside the function that needs it, or using
+  `import a` and `a.name` at call time.
+- **`from module import *`.** It pollutes your namespace and hides where names come from. Avoid it
+  outside interactive sessions.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: a module prints 'loading' at top level and is imported by 5 files. How many times does it print?"
+>
+  Once. The first import runs it and caches it in `sys.modules`, and the other four reuse the cached
+  module object.
+</Reveal>
+
+<KeyTakeaways>
+
+- `import` checks the `sys.modules` cache, searches `sys.path` in order, runs the module once, caches it, and binds a name.
+- `__name__` is `"__main__"` only in the file you run, so guard script-only code with it.
+- Don't name your files after libraries.
+- Fix circular imports by restructuring, or by importing late.
+
+</KeyTakeaways>

@@ -1,0 +1,144 @@
+---
+title: print, logging and assertions
+summary: Know when a quick print is fine, when to switch to logging (levels, loggers, formats), how assert documents assumptions, and how to shrink a bug to a minimal reproduction.
+estimatedMinutes: 15
+difficulty: simple
+section: Debugging
+objectives:
+  - Debug quickly with f-string `=` prints, and know their limits
+  - Configure logging with levels, named loggers and formats
+  - Use assert for internal assumptions, not for validating user input
+  - Build a minimal reproducible example of a bug
+prerequisites:
+  - Reading tracebacks
+tags: [python, debugging, logging, assert]
+---
+
+## Intuition: sticky notes vs a flight recorder
+
+`print` debugging is putting sticky notes on your code. It's fast and fine for a minute, but you have
+to remove them. **Logging** is a flight recorder: always installed, with a volume knob (levels) per
+part of the system, writing where you choose. **Assertions** are tripwires that go off the moment an
+assumption you believed is broken.
+
+## See it
+
+<CodeStepper
+  trace="logging-cart"
+  title="Logging inside a function"
+  caption="Each log call has a level. DEBUG and WARNING both appear here because basicConfig set the level to DEBUG; raise it to INFO and the DEBUG line disappears without touching the function."
+/>
+
+## The precise rules
+
+- **Levels:** `DEBUG` < `INFO` < `WARNING` < `ERROR` < `CRITICAL`. A logger emits messages at or
+  above its effective level. The default is `WARNING`.
+- `logging.getLogger("shop.cart")` creates **named, hierarchical** loggers. Setting the level of
+  `"shop"` affects `"shop.cart"` too.
+- Use lazy formatting, `log.info("total %.2f", total)`, so the string is built only if the message
+  is emitted. In an `except` block, `log.exception("msg")` adds the traceback.
+- `assert condition, "message"` raises `AssertionError` if the condition is false. **Assertions are
+  removed** when Python runs with `-O`, so never use them to check user input.
+
+## Worked example
+
+```python title="observability.py"
+import logging
+import sys
+
+logging.basicConfig(
+    stream=sys.stdout,  # default is stderr; stdout keeps this example's output in one place
+    level=logging.INFO,
+    format="%(levelname)-8s %(name)s: %(message)s",
+)
+log = logging.getLogger("shop.cart")
+
+
+def checkout(prices: list[float]) -> float:
+    log.debug("prices=%s", prices)  # below INFO: not shown
+    total = sum(prices)
+    if total > 100:
+        log.warning("large order: %.2f", total)
+    log.info("checkout total %.2f", total)
+    return total
+
+
+checkout([40, 70])
+logging.getLogger("shop").setLevel(logging.WARNING)  # quieten a whole subsystem
+checkout([5])
+try:
+    1 / 0
+except ZeroDivisionError:
+    log.error("payment failed", exc_info=False)
+
+
+def mean(values: list[float]) -> float:
+    assert values, "mean() needs at least one value"
+    return sum(values) / len(values)
+
+
+try:
+    mean([])
+except AssertionError as err:
+    print("AssertionError:", err)
+
+price, qty = 4.5, 3
+print(f"{price=} {qty=} {price * qty=}")
+```
+
+```text title="Output"
+WARNING  shop.cart: large order: 110.00
+INFO     shop.cart: checkout total 110.00
+ERROR    shop.cart: payment failed
+AssertionError: mean() needs at least one value
+price=4.5 qty=3 price * qty=13.5
+```
+
+What to notice:
+
+- The DEBUG message never appeared, and the second `checkout` was completely silent once `"shop"`
+  was raised to `WARNING`. Verbosity is configured in one place, not by editing functions.
+- `f"{expr=}"` prints both the expression and its value, which is the best kind of quick print.
+- In real code, prefer `log.exception("payment failed")` inside `except`. It records the traceback.
+
+### Minimal reproducible example
+
+When a bug hides in a big program, cut it down until it's tiny:
+
+1. Copy the failing input and the function into a new file.
+2. Delete code and data while the bug **still happens**.
+3. Stop when removing anything makes it disappear. The remaining lines point at the cause, and
+   they're exactly what you'd paste into a bug report or a question.
+
+## Common mistakes
+
+<Callout type="warning" title="assert for validation">
+  `assert user.age >= 18` silently disappears under `python -O`. For real checks, raise a proper
+  exception: `if user.age < 18: raise ValueError(...)`.
+</Callout>
+
+- **Leaving debugging prints in.** They leak into output and logs. Use `log.debug` instead, and turn
+  it on when needed.
+- **f-strings in log calls.** `log.debug(f"{big_object}")` builds the string even when DEBUG is off.
+  Use `%s` placeholders.
+- **Calling `basicConfig` in library code.** Only the application should configure logging.
+  Libraries just call `getLogger(__name__)`.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: production logs are flooded by one noisy module 'shop.sync'. How do you silence just it?"
+>
+  `logging.getLogger("shop.sync").setLevel(logging.ERROR)`. Loggers are hierarchical and named, so
+  you can quieten exactly one subsystem.
+</Reveal>
+
+<KeyTakeaways>
+
+- Quick prints are fine briefly, and `f"{x=}"` is the best kind.
+- Logging gives you levels, named hierarchical loggers, formats and destinations, all configured in one place.
+- `assert` documents internal assumptions, and it's stripped by `-O`, so it's not for input validation.
+- Shrink bugs to a minimal reproduction before fixing them.
+
+</KeyTakeaways>
