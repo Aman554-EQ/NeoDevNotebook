@@ -20,6 +20,7 @@ Where everything lives. Update this whenever a module, lesson, route, component 
 | `main`          | Releases (tag per part)                                                   | v0.1.0 = Part 0                    |
 | `develop`       | Integration                                                               | Part 0 merged                      |
 | `setup/part-0`  | Part 0                                                                    | ✅ merged                          |
+| `module/python` | Part 1: Python                                                            | plan written, ⏳ awaiting approval |
 | `module/<name>` | One per module (python, django, flask, fastapi, git, docker, pytorch, ml) | created when that part is approved |
 
 ## Modules → routes → files → tests
