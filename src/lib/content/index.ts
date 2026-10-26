@@ -53,7 +53,7 @@ export type ProblemSummary = Pick<Problem, "id" | "title" | "difficulty" | "tags
 }
 export type InterviewSummary = Pick<
   InterviewQuestion,
-  "id" | "question" | "difficulty" | "tags"
+  "id" | "question" | "difficulty" | "tags" | "shortAnswer"
 > & {
   module: string
 }
@@ -82,11 +82,12 @@ export async function getProblem(moduleSlug: string, id: string) {
 
 export async function getInterviewQuestions(moduleSlug: string): Promise<InterviewSummary[]> {
   const bundle = (await getContent()).find((b) => b.module.slug === moduleSlug)
-  return (bundle?.interview ?? []).map(({ id, question, difficulty, tags }) => ({
+  return (bundle?.interview ?? []).map(({ id, question, difficulty, tags, shortAnswer }) => ({
     id,
     question,
     difficulty,
     tags,
+    shortAnswer,
     module: moduleSlug,
   }))
 }

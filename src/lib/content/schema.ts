@@ -1,9 +1,9 @@
 import { z } from "zod"
 
-/** The four-step difficulty ladder used across lessons, problems and interview questions. */
-export const DIFFICULTIES = ["easy", "simple", "medium", "hard"] as const
+import { DIFFICULTIES, type Difficulty } from "./difficulty"
+
+export { DIFFICULTIES, type Difficulty }
 export const difficultySchema = z.enum(DIFFICULTIES)
-export type Difficulty = z.infer<typeof difficultySchema>
 
 const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "must be kebab-case")
 const nonEmpty = z.string().trim().min(1)

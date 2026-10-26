@@ -53,26 +53,30 @@ function parseWith<T>(schema: z.ZodType<T>, data: unknown, file: string): T {
 
 function readYaml(file: string): unknown {
   try {
-    return YAML.parse(fs.readFileSync(file, "utf8"))
+    return YAML.parse(fs.readFileSync(/*turbopackIgnore: true*/ file, "utf8"))
   } catch (err) {
     throw new ContentError(file, String(err))
   }
 }
 
 function listFiles(dir: string, ext: string): string[] {
-  if (!fs.existsSync(dir)) return []
+  if (!fs.existsSync(/*turbopackIgnore: true*/ dir)) return []
   return fs
-    .readdirSync(dir)
+    .readdirSync(/*turbopackIgnore: true*/ dir)
     .filter((f) => f.endsWith(ext))
     .sort()
 }
 
 /** Every folder in content/ that has a module.yaml is a module (auto-discovery). */
 export function loadModules(root = DEFAULT_CONTENT_DIR): ContentModule[] {
-  if (!fs.existsSync(root)) return []
+  if (!fs.existsSync(/*turbopackIgnore: true*/ root)) return []
   const modules = fs
-    .readdirSync(root, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && fs.existsSync(path.join(root, d.name, "module.yaml")))
+    .readdirSync(/*turbopackIgnore: true*/ root, { withFileTypes: true })
+    .filter(
+      (d) =>
+        d.isDirectory() &&
+        fs.existsSync(/*turbopackIgnore: true*/ path.join(root, d.name, "module.yaml")),
+    )
     .map((d) => {
       const file = path.join(root, d.name, "module.yaml")
       return { ...parseWith(moduleSchema, readYaml(file), file), slug: d.name }
@@ -86,7 +90,7 @@ export function loadLessons(moduleSlug: string, root = DEFAULT_CONTENT_DIR): Les
     const file = path.join(dir, name)
     const match = LESSON_FILE.exec(name)
     if (!match) throw new ContentError(file, "  - file name must look like 01-my-lesson.mdx")
-    const { data, content } = matter(fs.readFileSync(file, "utf8"))
+    const { data, content } = matter(fs.readFileSync(/*turbopackIgnore: true*/ file, "utf8"))
     return {
       ...parseWith(lessonFrontmatterSchema, data, file),
       module: moduleSlug,
