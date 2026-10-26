@@ -1,0 +1,147 @@
+---
+title: Scope and closures
+summary: How Python decides which variable a name refers to (the LEGB rule), why assigning inside a function creates a local, how global and nonlocal change that, and how closures remember variables.
+estimatedMinutes: 18
+difficulty: simple
+section: Basics
+objectives:
+  - Apply the LEGB rule to predict which variable a name refers to
+  - Explain and fix UnboundLocalError with `nonlocal` or `global`
+  - Build closures that remember state between calls
+  - Avoid the late-binding trap with lambdas created in a loop
+prerequisites:
+  - Functions
+tags: [python, scope, closures, lambda]
+---
+
+## Intuition: nested rooms
+
+Picture rooms inside rooms. Your function body is the innermost room (**Local**). Around it may be
+another function's room (**Enclosing**), around that the module (**Global**), and around everything
+Python's own room of built-ins (**Built-in**).
+
+To **read** a name, you look around your own room first, then each bigger room outward. To
+**create or change** a name with `=`, you only ever write in your own room, unless you explicitly
+say otherwise.
+
+## See it
+
+<ScopeLegbViz />
+
+## The precise rules
+
+1. **Lookup order (LEGB):** Local → Enclosing functions (innermost first) → Global → Built-in.
+   The first match wins. No match raises `NameError`.
+2. **Assignment makes a name local to the whole function.** Python decides this at **compile
+   time**. If a function assigns to `x` anywhere, every `x` in that function is local, even on
+   lines before the assignment. Reading it before it's assigned raises `UnboundLocalError`.
+3. `nonlocal x` makes `x` refer to the nearest enclosing function's variable. `global x` makes it
+   refer to the module-level variable.
+4. A **closure** is a function that remembers variables from the enclosing scope after that scope
+   has finished. Python looks up those variables **when the inner function runs**, not when it's
+   created (this is called late binding).
+
+## Worked example
+
+```python title="scope.py"
+x = "global"
+
+
+def outer() -> str:
+    x = "enclosing"
+
+    def inner() -> str:
+        return x  # read only: found in Enclosing
+
+    return inner()
+
+
+print(outer(), x)
+
+count = 0
+
+
+def bump() -> None:
+    count += 1  # assignment makes count local, so the read before it fails
+
+
+try:
+    bump()
+except UnboundLocalError as err:
+    print("UnboundLocalError:", err)
+
+
+def make_counter():
+    n = 0
+
+    def tick() -> int:
+        nonlocal n  # rebind the enclosing n instead of creating a local
+        n += 1
+        return n
+
+    return tick
+
+
+counter = make_counter()
+print(counter(), counter(), counter())
+print(counter.__closure__[0].cell_contents)  # the remembered n
+
+late = [lambda: i for i in range(3)]
+print([f() for f in late])  # all see the final i
+
+fixed = [lambda i=i: i for i in range(3)]
+print([f() for f in fixed])  # a default captures the value now
+```
+
+```text title="Output"
+enclosing global
+UnboundLocalError: cannot access local variable 'count' where it is not associated with a value
+1 2 3
+3
+[2, 2, 2]
+[0, 1, 2]
+```
+
+What to notice:
+
+- `inner` only **reads** `x`, so LEGB finds the enclosing one. The global `x` is untouched.
+- `count += 1` means `count = count + 1`. The assignment makes `count` local for the whole of
+  `bump`, so reading it on the right-hand side fails. Fix it with `global count`, or better, return
+  a new value instead of modifying a global.
+- Each `make_counter()` call creates a fresh `n`, and the returned `tick` keeps it alive. This is
+  private state without a class.
+- All three lambdas look up `i` when they're **called**, after the loop has finished with `i == 2`.
+  The default argument `i=i` is evaluated **when the lambda is created**, which freezes each value.
+
+## Common mistakes
+
+<Callout type="warning" title="Reaching for global">
+  `global` works, but it couples functions to module state and makes testing hard. Pass values in as
+  parameters and `return` results. Use a closure or a class when you need private state.
+</Callout>
+
+- **Shadowing by accident.** A local named like a global hides it in that function, and the
+  global silently keeps its old value.
+- **Assuming loops create a scope.** They don't. A loop variable still exists after the loop, with
+  its last value.
+- **Long lambdas.** A lambda is limited to a single expression. If you need statements or a name
+  for debugging, write a `def`.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: why does this print 10? total = 10; def f(): print(total); f()"
+>
+  `f` only **reads** `total` and never assigns it, so `total` isn't local. LEGB finds the global
+  `total = 10`. Add `total = 5` anywhere inside `f` and the same `print` raises `UnboundLocalError`.
+</Reveal>
+
+<KeyTakeaways>
+
+- Reading a name searches **Local → Enclosing → Global → Built-in**.
+- Assigning a name anywhere in a function makes it local everywhere in that function.
+- `nonlocal` rebinds an enclosing variable, and `global` rebinds a module variable. Use both sparingly.
+- Closures remember variables and look them up **at call time**. Freeze values with a default argument.
+
+</KeyTakeaways>

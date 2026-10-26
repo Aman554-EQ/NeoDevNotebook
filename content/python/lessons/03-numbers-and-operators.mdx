@@ -1,0 +1,129 @@
+---
+title: Numbers and operators
+summary: Python's int never overflows, its float is a binary approximation, and its division and modulo operators follow precise rules. Know these and you avoid a whole class of bugs.
+estimatedMinutes: 15
+difficulty: easy
+section: Basics
+objectives:
+  - Choose between int, float, Decimal and Fraction for a task
+  - Predict the results of `/`, `//`, `%`, `**` and `divmod`, including negative numbers
+  - Explain why `0.1 + 0.2 != 0.3` and compare floats safely
+  - Read operator precedence and use bitwise operators
+prerequisites:
+  - Variables, objects and types
+tags: [python, numbers, operators]
+---
+
+## Intuition: exact counters and rulers with marks
+
+- An **int** is an exact counter that grows as large as memory allows. `2 ** 100` is exact.
+- A **float** is a ruler with a fixed number of marks. Between two marks there's nothing, so most
+  decimals like `0.1` are rounded to the nearest mark. That makes floats fast and fine for
+  measurements, but wrong for exact amounts like money.
+
+## See it
+
+<FloatBitsViz />
+
+## The precise rules
+
+| Operator       | Meaning                                     | Example             | Result    |
+| -------------- | ------------------------------------------- | ------------------- | --------- |
+| `/`            | true division, always a float               | `7 / 2`             | `3.5`     |
+| `//`           | floor division, rounds **down** (toward −∞) | `7 // 2`, `-7 // 2` | `3`, `-4` |
+| `%`            | remainder with the **sign of the divisor**  | `7 % 3`, `-7 % 3`   | `1`, `2`  |
+| `**`           | power                                       | `2 ** 10`           | `1024`    |
+| `divmod(a, b)` | `(a // b, a % b)`                           | `divmod(17, 5)`     | `(3, 2)`  |
+
+The identity that ties them together is always:
+
+$$
+a = b \cdot (a \,/\!/\, b) + (a \bmod b)
+$$
+
+For $a = -7$, $b = 3$: `-7 // 3` is $\lfloor -2.33 \rfloor = -3$, so the remainder
+must be $2$, because $3 \cdot (-3) + 2 = -7$. That's why `-7 % 3` is `2`. In the same way,
+`-7 // 2` is `-4` (the floor of $-3.5$), while `int(-3.5)` **truncates** toward zero and gives `-3`.
+
+**Precedence**, highest first: `**` → unary `-` → `* / // %` → `+ -` → comparisons → `not` →
+`and` → `or`. Watch out: `**` binds tighter than unary minus, so `-2 ** 2` is `-4`.
+
+## Worked example
+
+```python title="numbers.py"
+import math
+from decimal import Decimal
+from fractions import Fraction
+
+print(2**100)  # ints never overflow
+print(7 / 2, 7 // 2, -7 // 2, int(-3.5))
+print(7 % 3, -7 % 3, divmod(17, 5))
+
+print(0.1 + 0.2, 0.1 + 0.2 == 0.3)
+print(math.isclose(0.1 + 0.2, 0.3))
+print(Decimal("0.1") + Decimal("0.2"))  # build Decimals from STRINGS
+print(Fraction(1, 3) + Fraction(1, 6))
+
+print(round(2.5), round(3.5))  # banker's rounding: ties go to the even number
+print(-2**2, (-2) ** 2)  # ** binds tighter than unary minus
+
+print(0b1010, 0xFF, bin(10))  # literals in other bases
+print(5 & 3, 5 | 3, 5 ^ 3, 1 << 4)
+
+print(f"{1234567.891:,.2f}", f"{0.256:.1%}")
+```
+
+```text title="Output"
+1267650600228229401496703205376
+3.5 3 -4 -3
+1 2 (3, 2)
+0.30000000000000004 False
+True
+0.3
+1/2
+2 4
+-4 4
+10 255 0b1010
+1 7 6 16
+1,234,567.89 25.6%
+```
+
+Notes on the trickier lines:
+
+- `Decimal("0.1")` is exact, but `Decimal(0.1)` would copy the float's rounding error. Always
+  pass a string.
+- `round()` uses **round half to even** ("banker's rounding"), so `2.5` becomes `2`. This avoids
+  bias when many values are rounded.
+- Bitwise: `5 & 3` is `0b101 & 0b011 = 0b001`, `1 << 4` shifts left 4 places, which multiplies by 16.
+- Format specs: `,` adds thousands separators, `.2f` gives 2 decimals, `%` multiplies by 100 and
+  adds a percent sign.
+
+## Common mistakes
+
+<Callout type="warning" title="Money in floats">
+  `0.1 + 0.2` already drifts. For prices, use `Decimal` (built from strings) or store whole cents as
+  `int`.
+</Callout>
+
+- **`==` on floats.** Use `math.isclose(a, b)`, or compare with a tolerance.
+- **Expecting `/` to give an int.** In Python 3, `6 / 3` is `2.0`. Use `//` when you need an int.
+- **`int()` vs `//` on negatives.** `int(-3.5)` is `-3` (truncate) but `-7 // 2` is `-4`
+  (floor).
+- **`ZeroDivisionError`.** `x / 0`, `x // 0` and `x % 0` all raise it, so guard divisors that
+  come from data.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: what are -9 // 4 and -9 % 4?">
+  `-9 // 4` is `-3` (floor of −2.25), and `-9 % 4` is `3`. Check with the identity: $4 \cdot (-3) +
+  3 = -9$.
+</Reveal>
+
+<KeyTakeaways>
+
+- **int** is exact and unbounded. **float** is a fast binary approximation.
+- `/` always returns a float. `//` floors toward −∞. `%` takes the divisor's sign.
+- Never compare floats with `==`. Use `math.isclose`, `Decimal` or `Fraction`.
+- `**` binds tighter than unary minus, and `round` rounds ties to even.
+
+</KeyTakeaways>

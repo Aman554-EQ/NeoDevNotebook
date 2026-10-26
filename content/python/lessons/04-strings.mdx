@@ -1,0 +1,130 @@
+---
+title: Strings
+summary: Strings are immutable sequences of Unicode characters. Master indexing, slicing, the methods you'll use every day, f-strings, and the difference between text (str) and bytes.
+estimatedMinutes: 18
+difficulty: easy
+section: Basics
+objectives:
+  - Index and slice strings, including negative indexes and steps
+  - Explain immutability and build new strings instead of changing old ones
+  - Use the common methods (strip, split, join, replace, find, startswith) and f-string formatting
+  - Convert between str and bytes with encode and decode
+prerequisites:
+  - Variables, objects and types
+tags: [python, strings, slicing, unicode]
+---
+
+## Intuition: a row of numbered tiles
+
+A string is a row of letter tiles glued in place. Each tile has two addresses: its position from the
+left (`0, 1, 2…`) and from the right (`-1, -2…`). You can **read** any tile or **photocopy** a run of
+tiles (a slice), but you can't swap a tile. To "change" a string you build a new one.
+
+## See it
+
+Step through the examples, then use **Try your own slice**. It follows exactly the same rules as
+Python.
+
+<SliceRulerViz />
+
+## The precise rules
+
+- `s[i]` returns one character. Out of range raises `IndexError`.
+- `s[start:stop:step]` returns a **new** string from `start` (included) up to `stop` (**excluded**),
+  moving `step` at a time. Omitted parts default to "the whole way". Out-of-range bounds are clipped,
+  so slices never raise.
+- `len(s[a:b]) == b - a` when `0 ≤ a ≤ b ≤ len(s)`. That's why `s[:3]` is exactly the first 3
+  characters and `s[3:]` is the rest.
+- Strings are **immutable**: `s[0] = "J"` is a `TypeError`. Methods like `upper()` return new strings.
+
+## Worked example
+
+```python title="strings.py"
+s = "PYTHONIC"
+print(s[0], s[-1], s[1:4], s[:3] + s[3:] == s)
+print(s[::-1], repr(s[100:]))
+
+try:
+    s[0] = "J"
+except TypeError as err:
+    print("TypeError:", err)
+
+name = "  Ada Lovelace  "
+clean = name.strip()
+print(repr(clean), clean.upper(), clean.split())
+print("-".join(["2026", "10", "26"]))
+print("banana".count("a"), "banana".find("n"), "banana".find("z"))
+print("banana".replace("a", "o", 1), clean.startswith("Ada"))
+
+price, qty = 4.5, 3
+print(f"{qty} x {price:.2f} = {qty * price:>7.2f}|")
+print(f"{qty=}", f"{255:#x}", f"{5:03d}", f"{'hi':*^8}")
+
+word = "héllo"
+data = word.encode("utf-8")
+print(len(word), len(data), data)
+print(data.decode("utf-8") == word)
+print(r"C:\new\table")
+```
+
+```text title="Output"
+P C YTH True
+CINOHTYP ''
+TypeError: 'str' object does not support item assignment
+'Ada Lovelace' ADA LOVELACE ['Ada', 'Lovelace']
+2026-10-26
+3 2 -1
+bonana True
+3 x 4.50 =   13.50|
+qty=3 0xff 005 ***hi***
+5 6 b'h\xc3\xa9llo'
+True
+C:\new\table
+```
+
+Line by line:
+
+- `s[:3] + s[3:] == s` is always true. Splitting at any index and joining gives the original back.
+- `s[100:]` is `''`: slices clip instead of raising.
+- `strip()` removes surrounding whitespace, `split()` with no argument splits on runs of whitespace,
+  and `"-".join(parts)` glues a list of strings with `-` between them.
+- `find` returns `-1` when the text is missing (`index` would raise `ValueError` instead).
+- f-string format specs go after `:`. `.2f` gives 2 decimals, `>7` right-aligns in 7 characters,
+  `03d` zero-pads, `*^8` centres in 8 characters padded with `*`, and `#x` is hex with a prefix.
+  `{qty=}` prints the expression and its value, which is great for debugging.
+- **Text vs bytes:** `str` holds Unicode characters, `bytes` holds raw bytes. `é` is 1 character
+  but 2 bytes in UTF-8, so `len(word)` is 5 and `len(data)` is 6.
+- `r"…"` is a **raw string**: backslashes are kept literally. It's handy for Windows paths and
+  regular expressions.
+
+## Common mistakes
+
+<Callout type="warning" title="Building strings in a loop with +=">
+  `result += piece` in a long loop can be slow, because each step may copy the whole string. Collect
+  the pieces in a list and call `"".join(pieces)` once at the end.
+</Callout>
+
+- **Expecting methods to change the string.** `name.strip()` alone does nothing useful. Write
+  `name = name.strip()`.
+- **Off-by-one with `stop`.** `s[1:4]` gives 3 characters, at indexes 1, 2 and 3.
+- **Mixing `str` and `bytes`.** `"a" + b"b"` raises `TypeError`. Decode bytes from files and
+  networks as soon as you receive them.
+- **`UnicodeDecodeError`.** The bytes weren't in the encoding you assumed. Pass the right
+  `encoding=`, and don't guess.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: what is 'abcdef'[-2::-2]?">
+  `'eca'`. Start at index -2 (`'e'`), then step backwards 2 at a time: `e`, `c`, `a`. With no stop,
+  it runs to the beginning.
+</Reveal>
+
+<KeyTakeaways>
+
+- Indexes run `0…n-1` from the left and `-1…-n` from the right.
+- Slices include `start`, exclude `stop`, never raise, and return new strings.
+- Strings are immutable, so every method returns a new string.
+- Use f-strings for formatting and `"".join` to build strings from many pieces.
+- `str` is text and `bytes` is raw data. Convert with `encode` and `decode`.
+
+</KeyTakeaways>

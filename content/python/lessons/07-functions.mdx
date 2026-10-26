@@ -1,0 +1,152 @@
+---
+title: Functions
+summary: Package logic into reusable, named steps. Learn every way to pass arguments (positional, keyword, defaults, *args, **kwargs, keyword-only, positional-only) and what happens on the call stack when a function runs.
+estimatedMinutes: 20
+difficulty: simple
+section: Basics
+objectives:
+  - Define functions with defaults, type hints and a docstring
+  - Pass arguments positionally, by keyword, and by unpacking with `*` and `**`
+  - Use `*args`, `**kwargs`, keyword-only and positional-only parameters
+  - Describe what a call does to the call stack
+prerequisites:
+  - Loops
+tags: [python, functions, arguments, call-stack]
+---
+
+## Intuition: a recipe card and a fresh bench
+
+A function definition is a **recipe card** filed under a name. Calling it gives the recipe a **fresh
+work bench**, a new frame, holding its own ingredients (parameters and local variables). When the
+recipe finishes, it hands back one result (`return`) and the bench is cleared away. Benches stack up
+when one recipe calls another. That pile is the **call stack**.
+
+## See it
+
+A recorded run: `total()` calls `tax()`. Watch a frame for each call being pushed, then popped when
+it returns its value.
+
+<CallStack
+  trace="functions-call"
+  title="The call stack during total(10, 3)"
+  caption="Each call gets its own frame with its own variables. tax() finishes and returns 6.0 before total() can finish; frames are removed in the reverse order they were added (last in, first out)."
+/>
+
+## The precise rules
+
+A parameter list can contain, in this order:
+
+```python title="signature_shape.py" norun
+def f(pos_only, /, normal, default=1, *args, kw_only, kw_default=2, **kwargs): ...
+```
+
+| Part                  | Meaning                                                |
+| --------------------- | ------------------------------------------------------ |
+| before `/`            | **positional-only**: can't be passed by name           |
+| `normal`, `default=1` | positional **or** keyword; a default makes it optional |
+| `*args`               | collects extra positional arguments into a **tuple**   |
+| after `*` or `*args`  | **keyword-only**: must be passed by name               |
+| `**kwargs`            | collects extra keyword arguments into a **dict**       |
+
+- A function without a `return` (or with a bare `return`) returns `None`.
+- Default values are evaluated **once**, when `def` runs, not on each call. Lesson 10 shows why
+  that matters for mutable defaults.
+- At a call site, `*seq` spreads a sequence into positional arguments and `**mapping` spreads a dict
+  into keyword arguments.
+
+## Worked example
+
+```python title="functions.py"
+def greet(name: str, greeting: str = "Hello", *, punctuation: str = "!") -> str:
+    """Return a greeting such as 'Hello, Ada!'."""
+    return f"{greeting}, {name}{punctuation}"
+
+
+print(greet("Ada"), greet("Ada", "Hi"), greet(name="Alan", punctuation="?"))
+
+try:
+    greet("Ada", "Hi", ".")  # punctuation is keyword-only
+except TypeError as err:
+    print("TypeError:", err)
+
+
+def stats(*numbers: float, **options: int) -> tuple:
+    return len(numbers), sum(numbers), options
+
+
+print(stats(1, 2, 3, round_to=2))
+
+
+def power(base: int, exp: int, /) -> int:
+    return base**exp
+
+
+args = [3, 4]
+print(power(2, 5), power(*args), greet("Bo", **{"greeting": "Hey"}))
+
+try:
+    power(base=2, exp=5)
+except TypeError as err:
+    print("TypeError:", err)
+
+
+def min_max(values: list[int]) -> tuple[int, int]:
+    return min(values), max(values)  # "multiple returns" = one tuple
+
+
+low, high = min_max([4, 1, 9])
+print(low, high, greet.__doc__)
+```
+
+```text title="Output"
+Hello, Ada! Hi, Ada! Hello, Alan?
+TypeError: greet() takes from 1 to 2 positional arguments but 3 were given
+(3, 6, {'round_to': 2})
+32 81 Hey, Bo!
+TypeError: power() got some positional-only arguments passed as keyword arguments: 'base, exp'
+1 9 Return a greeting such as 'Hello, Ada!'.
+```
+
+What to notice:
+
+- The bare `*` makes `punctuation` keyword-only, so a third positional argument is rejected. That
+  protects callers from mixing up arguments.
+- `*numbers` is a tuple `(1, 2, 3)` and `**options` is a dict `{'round_to': 2}`.
+- `/` makes `base` and `exp` positional-only, so you can rename them later without breaking callers.
+- `return min(values), max(values)` returns **one tuple**, and the caller unpacks it.
+- Type hints such as `-> str` are documentation for people and tools. Python doesn't enforce them
+  at runtime.
+
+## Common mistakes
+
+<Callout type="warning" title="Forgetting return">
+  A function that computes a value but doesn't `return` it gives back `None`. Then `total = add(2,
+  3)` silently becomes `None`, and a later line fails with `TypeError: unsupported operand
+  type(s)…`.
+</Callout>
+
+- **`TypeError: … missing 1 required positional argument`.** The call passed too few arguments.
+  The message names the missing one.
+- **Calling without parentheses.** `print(greet)` shows `<function greet at …>`. To call it, write
+  `greet("Ada")`.
+- **Too many responsibilities.** If a function needs "and" to describe it, split it. Small
+  functions are easier to test and reuse.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: with def f(a, b=2, *rest, c), what does f(1, 3, 4, 5, c=6) bind?"
+>
+  `a=1`, `b=3`, `rest=(4, 5)`, `c=6`. Leftover positionals go into `rest`, and `c` must be passed by
+  name because it comes after `*rest`.
+</Reveal>
+
+<KeyTakeaways>
+
+- A call creates a new **frame** on the **call stack**, and `return` pops it and hands back a value.
+- Parameters: positional-only `/`, normal, defaults, `*args` (tuple), keyword-only, `**kwargs` (dict).
+- `*` and `**` at a call site unpack sequences and dicts into arguments.
+- No `return` means the function returns `None`.
+
+</KeyTakeaways>

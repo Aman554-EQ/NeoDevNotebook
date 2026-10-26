@@ -135,7 +135,7 @@ def record(path: Path) -> dict:
 def record_isolated(path: Path) -> dict:
     """Record in a fresh interpreter so programs can't affect each other."""
     result = subprocess.run(
-        [sys.executable, "-I", str(Path(__file__).resolve()), "--one", str(path)],
+        [sys.executable, "-I", "-X", "utf8", str(Path(__file__).resolve()), "--one", str(path)],
         capture_output=True,
         text=True,
         encoding="utf-8",

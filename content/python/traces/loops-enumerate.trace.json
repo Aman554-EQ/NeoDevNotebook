@@ -1,0 +1,251 @@
+{
+  "version": 1,
+  "python": "3.13",
+  "source": "names = [\"ada\", \"alan\"]\nfor i, name in enumerate(names, start=1):\n    print(i, name.title())\n\nn = 3\nwhile n > 0:\n    n -= 1\nelse:\n    print(\"done, n =\", n)\n",
+  "steps": [
+    {
+      "line": 1,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": []
+        }
+      ],
+      "stdout": ""
+    },
+    {
+      "line": 2,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [["names", "['ada', 'alan']"]]
+        }
+      ],
+      "stdout": ""
+    },
+    {
+      "line": 3,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "1"],
+            ["name", "'ada'"]
+          ]
+        }
+      ],
+      "stdout": ""
+    },
+    {
+      "line": 2,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "1"],
+            ["name", "'ada'"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n"
+    },
+    {
+      "line": 3,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "2"],
+            ["name", "'alan'"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n"
+    },
+    {
+      "line": 2,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "2"],
+            ["name", "'alan'"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n2 Alan\n"
+    },
+    {
+      "line": 5,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "2"],
+            ["name", "'alan'"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n2 Alan\n"
+    },
+    {
+      "line": 6,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "2"],
+            ["name", "'alan'"],
+            ["n", "3"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n2 Alan\n"
+    },
+    {
+      "line": 7,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "2"],
+            ["name", "'alan'"],
+            ["n", "3"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n2 Alan\n"
+    },
+    {
+      "line": 6,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "2"],
+            ["name", "'alan'"],
+            ["n", "2"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n2 Alan\n"
+    },
+    {
+      "line": 7,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "2"],
+            ["name", "'alan'"],
+            ["n", "2"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n2 Alan\n"
+    },
+    {
+      "line": 6,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "2"],
+            ["name", "'alan'"],
+            ["n", "1"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n2 Alan\n"
+    },
+    {
+      "line": 7,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "2"],
+            ["name", "'alan'"],
+            ["n", "1"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n2 Alan\n"
+    },
+    {
+      "line": 6,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "2"],
+            ["name", "'alan'"],
+            ["n", "0"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n2 Alan\n"
+    },
+    {
+      "line": 9,
+      "event": "line",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "2"],
+            ["name", "'alan'"],
+            ["n", "0"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n2 Alan\n"
+    },
+    {
+      "line": 9,
+      "event": "return",
+      "frames": [
+        {
+          "name": "<module>",
+          "locals": [
+            ["names", "['ada', 'alan']"],
+            ["i", "2"],
+            ["name", "'alan'"],
+            ["n", "0"]
+          ]
+        }
+      ],
+      "stdout": "1 Ada\n2 Alan\ndone, n = 0\n",
+      "returnValue": "None"
+    }
+  ],
+  "stdout": "1 Ada\n2 Alan\ndone, n = 0\n",
+  "truncated": false
+}

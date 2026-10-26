@@ -9,6 +9,7 @@ import { KeyTakeaways } from "@/components/lesson/key-takeaways"
 import { LessonHeader } from "@/components/lesson/lesson-header"
 import { Reveal } from "@/components/lesson/reveal"
 import { BookmarkButton, DoneToggle } from "@/components/progress/progress-buttons"
+import { CallStack } from "@/components/viz/_shared/call-stack/call-stack"
 import { CodeStepper } from "@/components/viz/_shared/code-stepper"
 import { vizComponents } from "@/components/viz/__generated__/registry"
 import { allLessonParams, getLesson } from "@/lib/content"
@@ -38,9 +39,12 @@ export default async function LessonPage({ params }: PageProps<"/learn/[module]/
       Callout,
       Reveal,
       KeyTakeaways,
-      // Traces live in the lesson's own module folder.
+      // Trace-driven visuals read content/<module>/traces/ of the lesson's own module.
       CodeStepper: (props: Omit<React.ComponentProps<typeof CodeStepper>, "module">) => (
         <CodeStepper module={module} {...props} />
+      ),
+      CallStack: (props: Omit<React.ComponentProps<typeof CallStack>, "module">) => (
+        <CallStack module={module} {...props} />
       ),
       ...vizComponents,
     },

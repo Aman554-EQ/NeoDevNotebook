@@ -43,7 +43,7 @@ export default async function ModulePage({ params }: PageProps<"/learn/[module]"
               >
                 {g.section}
                 <span className="text-muted ml-2 font-sans text-sm font-normal">
-                  {g.items.length} lessons
+                  {g.items.length} {g.items.length === 1 ? "lesson" : "lessons"}
                 </span>
               </h2>
             )}
