@@ -17,6 +17,18 @@ export const moduleSchema = z.object({
   icon: z.enum(["compass", "code", "server", "git", "container", "flame", "brain", "sparkles"]),
   /** Prefix for problem/interview IDs in this module, e.g. "py" → py-p-001, py-i-001 */
   idPrefix: z.string().regex(/^[a-z]{2,4}$/),
+  /** Minimum content counts promised by the part plan, checked by `pnpm verify:content`. */
+  targets: z
+    .object({
+      lessons: z.number().int().positive().optional(),
+      problems: z.number().int().positive().optional(),
+      interview: z.number().int().positive().optional(),
+      /** Minimum per difficulty tier (easy, simple, medium, hard). */
+      problemsPerDifficulty: z.number().int().positive().optional(),
+      interviewPerDifficulty: z.number().int().positive().optional(),
+    })
+    .strict()
+    .optional(),
 })
 export type ModuleMeta = z.infer<typeof moduleSchema>
 
