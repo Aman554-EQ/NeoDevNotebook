@@ -1,0 +1,119 @@
+---
+title: How this notebook works
+summary: A guided tour of a lesson, using one idea every Python developer must get right — variables are names that point at objects.
+estimatedMinutes: 10
+difficulty: easy
+objectives:
+  - Recognise the sections every lesson follows and what each is for
+  - Explain why `b = a` does not copy a list
+  - Predict what happens when two names share one mutable object
+  - Use the visualization controls (play, step, reset)
+prerequisites: []
+tags: [python, references]
+---
+
+## How every lesson is laid out
+
+Every lesson in this notebook follows the same path, so you always know where you are:
+
+1. **Objectives and prerequisites**: the box above tells you what you will be able to do.
+2. **Intuition**: a plain-language explanation with one analogy.
+3. **Visualization**: an animated or 3D picture you can play, pause and step through.
+4. **The precise rule**: the formal definition or equation.
+5. **Worked example**: copy-ready code, with a line-by-line explanation _below_ it.
+6. **Common mistakes**: real bugs and how to recognise them.
+7. **Practice**: a quick check, plus links to full problems with hints and solutions.
+8. **Key takeaways**: what to remember.
+
+Let's walk through all of them with a real idea.
+
+## Intuition: names are labels, not boxes
+
+Many people picture a variable as a **box** that holds a value. In Python a better picture is a
+**luggage tag on a string**. The object (a list, a number, a dict) lives somewhere in memory, and a
+name is a tag tied to it. One object can have many tags. Moving a tag never touches the object.
+
+<Callout type="intuition">
+  `b = a` does not pack a second suitcase. It ties a second tag to the **same** suitcase.
+</Callout>
+
+## See it
+
+Press **Play**, or use **Next step** to go one step at a time. The text under the picture describes
+each step, so the visualization also works with a screen reader. Drag to rotate the 3D view.
+
+<NamesViz />
+
+## The precise rule
+
+An assignment `name = expression` does two things, in order:
+
+1. Evaluate the right-hand side to an object.
+2. Bind the name to that object. **Nothing is copied.**
+
+Two names refer to the same object exactly when `a is b` is `True` (same identity, `id(a) == id(b)`).
+Whether a change made through one name is visible through another depends on whether the change
+**mutates** the shared object (like `.append`) or **rebinds** a name (like `b = [9]`).
+
+## Worked example
+
+```python title="aliasing.py" {2,3}
+a = [1, 2]
+b = a  # a second name for the SAME list
+b.append(3)  # mutates the shared list
+print(a)
+print(a is b)
+
+b = [9]  # rebinds b only; a is untouched
+print(a, b)
+print(a is b)
+```
+
+```text title="Output"
+[1, 2, 3]
+True
+[1, 2, 3] [9]
+False
+```
+
+Line by line:
+
+- **Line 1** creates a list object `[1, 2]` and ties the name `a` to it.
+- **Line 2** ties `b` to the same object. No new list exists.
+- **Line 3** mutates that one object, so `a` shows `[1, 2, 3]` and `a is b` is `True`.
+- **Line 7** creates a _new_ list `[9]` and moves only the `b` tag. `a` still points at the
+  original, so `a is b` becomes `False`.
+
+## Common mistakes
+
+<Callout type="warning" title="Accidental sharing">
+  `grid = [[0] * 3] * 3` makes **three names for one row**. Setting `grid[0][0] = 1` changes every
+  row. Build independent rows with `[[0] * 3 for _ in range(3)]`.
+</Callout>
+
+The same trap appears with a mutable default argument such as `def add(item, bucket=[])`. The
+default list is created **once**, when the function is defined, and then shared by every call. The
+practice problem for this lesson asks you to fix exactly that.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: what does this print?  x = [0]; y = x; x = x + [1]; print(y)"
+>
+  `x + [1]` builds a **new** list, and `x = …` rebinds only `x`. `y` still points at the original
+  `[0]`, so it prints `[0]`. Compare this with `x += [1]`, which mutates the list in place and would
+  make `y` print `[0, 1]`.
+</Reveal>
+
+When you're ready, try [Fix the shared default list](/practice/start-here/sh-p-001). It has hints and
+a full solution with an explanation.
+
+<KeyTakeaways>
+
+- A variable is a **name bound to an object**. Assignment never copies.
+- Mutating an object is visible through **every** name bound to it.
+- Rebinding a name (`b = …`) never changes the object it used to point at.
+- Use `is` to ask "same object?" and `==` to ask "equal value?".
+
+</KeyTakeaways>

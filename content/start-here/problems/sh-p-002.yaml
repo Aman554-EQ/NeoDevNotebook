@@ -1,0 +1,80 @@
+id: sh-p-002
+title: Count the list resizes
+difficulty: simple
+tags: [lists, simulation, complexity]
+statement: |
+  CPython grows a list's capacity with this rule. When an append makes the length `n` larger than
+  the current capacity, the new capacity is:
+
+  ```text
+  (n + n // 8 + 6) rounded down to a multiple of 4
+  ```
+
+  A new list starts with capacity 0. Write `resize_stats(n)` that simulates `n` appends to an empty
+  list and returns a tuple `(resizes, final_capacity)`.
+constraints:
+  - "`0 <= n <= 10**6`"
+  - Simulate the rule. Do not create a list of `n` elements.
+examples:
+  - input: resize_stats(0)
+    output: (0, 0)
+  - input: resize_stats(5)
+    output: (2, 8)
+    explanation: "Length 1 needs a resize to capacity 4. Length 5 needs another resize, to (5 + 0 + 6) & ~3 = 8."
+  - input: resize_stats(100)
+    output: (11, 108)
+hints:
+  - Keep two counters, `capacity` and `resizes`, and loop `length` from 1 to `n`.
+  - '"Round down to a multiple of 4" is the same as clearing the two lowest bits: `x & ~3`.'
+solution:
+  language: python
+  code: |
+    def resize_stats(n: int) -> tuple[int, int]:
+        capacity = 0
+        resizes = 0
+        for length in range(1, n + 1):
+            if length > capacity:  # no free slot: grow the block
+                capacity = (length + (length >> 3) + 6) & ~3
+                resizes += 1
+        return resizes, capacity
+
+
+    print(resize_stats(0))
+    print(resize_stats(5))
+    print(resize_stats(100))
+  explanation: |
+    We never build the list. We only track the two numbers that matter: how many slots exist
+    (`capacity`) and how many times we had to grow (`resizes`).
+
+    For each new length from 1 to `n`, an append needs a resize only when the length is larger than
+    the capacity. Then we apply CPython's rule: `length >> 3` is `length // 8` written as a bit
+    shift, and `& ~3` clears the two lowest bits, which rounds down to a multiple of 4.
+
+    Because each resize adds about 12.5% plus a constant, resizes get further and further apart.
+    Only 11 of the first 100 appends trigger one. This is the amortized O(1) result from the lesson,
+    seen in numbers.
+complexity:
+  time: O(n)
+  space: O(1)
+variations:
+  - Return the list of lengths at which resizes happened, and compare it with the `sys.getsizeof` experiment from the lesson.
+  - Change the rule to doubling (`capacity * 2`, starting at 1) and compare the number of resizes for `n = 10**6`.
+verify: |
+  assert resize_stats(0) == (0, 0)
+  assert resize_stats(1) == (1, 4)
+  assert resize_stats(4) == (1, 4)
+  assert resize_stats(5) == (2, 8)
+  assert resize_stats(100) == (11, 108)
+
+  # Cross-check the simulation against the real interpreter: count getsizeof changes.
+  import sys
+  def real_resizes(n):
+      xs, last, count = [], sys.getsizeof([]), 0
+      for i in range(n):
+          xs.append(i)
+          s = sys.getsizeof(xs)
+          if s != last:
+              count, last = count + 1, s
+      return count
+  for n in (1, 5, 9, 17, 64, 200, 1000):
+      assert resize_stats(n)[0] == real_resizes(n), n

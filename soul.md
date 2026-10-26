@@ -16,7 +16,8 @@ PyTorch → ML → LLMs.
 Assume curiosity, not prior expertise. Respect their time.
 
 **The three promises:**
-1. **Understand it.** Every concept comes with an intuition, a visual and the reason *why* it works.
+
+1. **Understand it.** Every concept comes with an intuition, a visual and the reason _why_ it works.
 2. **Remember it.** Animations and 3D build visual memory of the data structure or mechanism.
 3. **Use it.** Copy-ready code, practice problems and interview answers.
 
@@ -25,7 +26,7 @@ Assume curiosity, not prior expertise. Respect their time.
 ## 2. Workflow Rules (non-negotiable)
 
 1. **Part by part, gated.** For each part: write `plan/<part>/plan.md`, then **stop**, then wait for the owner's
-   `proceed` / `approved` for *that* part, then build, test and document, then report. Approval for one part never covers the next.
+   `proceed` / `approved` for _that_ part, then build, test and document, then report. Approval for one part never covers the next.
 2. **Step by step.** Each part is broken into small ordered steps, each with acceptance criteria.
 3. **Ask, don't guess.** If something is ambiguous, ask using the format in §13. Confusing work goes into a separate step.
 4. **No scope creep.** Build only what the approved plan says. Put extra ideas under `## Suggestions`.
@@ -65,24 +66,24 @@ main      ← releases only (always green, deployable)
 ## 4. Teaching Philosophy
 
 **Concept → Visual → Example → Explanation → Practice.**
-Move from intuition, to a picture, to the math (when there is math), to the code. Always explain *why* before *how*.
+Move from intuition, to a picture, to the math (when there is math), to the code. Always explain _why_ before _how_.
 Use one analogy per concept, and make sure it's accurate. Prefer short paragraphs and concrete numbers over abstract prose.
 
 ---
 
 ## 5. Lesson Template (every lesson follows it)
 
-| # | Section | Notes |
-|---|---|---|
-| 1 | **Learning objectives** · **Prerequisites** · est. minutes | 3 to 5 objectives |
-| 2 | **Intuition** | Plain language plus one analogy |
-| 3 | **Visualization** | Interactive or animated when it helps (see §8) |
-| 4 | **Formal definition / equation** | KaTeX, every symbol defined |
-| 5 | **Worked example** | Copyable code plus a line-by-line explanation **below** the code |
-| 6 | **Common mistakes & debugging tips** | Real error messages and how to fix them |
-| 7 | **Practice** | 1 to 3 problems; hint and solution hidden by default |
-| 8 | **Key takeaways** | 3 to 5 bullets |
-| 9 | **Next lesson** | prev / next links |
+| #   | Section                                                    | Notes                                                            |
+| --- | ---------------------------------------------------------- | ---------------------------------------------------------------- |
+| 1   | **Learning objectives** · **Prerequisites** · est. minutes | 3 to 5 objectives                                                |
+| 2   | **Intuition**                                              | Plain language plus one analogy                                  |
+| 3   | **Visualization**                                          | Interactive or animated when it helps (see §8)                   |
+| 4   | **Formal definition / equation**                           | KaTeX, every symbol defined                                      |
+| 5   | **Worked example**                                         | Copyable code plus a line-by-line explanation **below** the code |
+| 6   | **Common mistakes & debugging tips**                       | Real error messages and how to fix them                          |
+| 7   | **Practice**                                               | 1 to 3 problems; hint and solution hidden by default             |
+| 8   | **Key takeaways**                                          | 3 to 5 bullets                                                   |
+| 9   | **Next lesson**                                            | prev / next links                                                |
 
 ---
 
@@ -158,6 +159,7 @@ data-structure choice) → `hard` (several steps, optimisation, edge cases).
 **Gate:** `lint` + `typecheck` + `unit` + `content verification` + `e2e` must **all pass** before a part is reported as done.
 
 A part is **Done** when:
+
 - [ ] Its plan was approved
 - [ ] Every deliverable in the plan is built, with nothing extra
 - [ ] Content counts are met, entries are unique, and difficulty is tiered

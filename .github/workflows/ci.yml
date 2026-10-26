@@ -1,0 +1,57 @@
+name: CI
+
+# Same gate as soul.md §12: lint + typecheck + unit + content/code verification + build + E2E.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: neo
+          POSTGRES_PASSWORD: neo_local_dev
+          POSTGRES_DB: neodevnotebook
+        ports: ["5434:5432"]
+        options: >-
+          --health-cmd "pg_isready -U neo -d neodevnotebook"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://neo:neo_local_dev@localhost:5434/neodevnotebook
+      TEST_DATABASE_URL: postgres://neo:neo_local_dev@localhost:5434/neodevnotebook_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pnpm install --frozen-lockfile
+      - name: Create test database
+        run: PGPASSWORD=neo_local_dev psql -h localhost -p 5434 -U neo -d neodevnotebook -c "CREATE DATABASE neodevnotebook_test"
+      - run: cp .env.example .env.local
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm verify:code
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

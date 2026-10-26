@@ -1,0 +1,72 @@
+id: sh-p-001
+title: Fix the shared default list
+difficulty: easy
+tags: [functions, references]
+statement: |
+  This function is supposed to add an item to a fresh list unless you pass in your own list:
+
+  ```python
+  def add_item(item, bucket=[]):
+      bucket.append(item)
+      return bucket
+  ```
+
+  But calling `add_item("a")` and then `add_item("b")` returns `['a', 'b']` the second time,
+  so the calls are leaking into each other. Rewrite `add_item(item, bucket=None)` so that:
+
+  - without `bucket`, every call starts from a **new** empty list
+  - with `bucket`, the item is appended to **that** list and the same list is returned
+constraints:
+  - Keep the signature `add_item(item, bucket=None)`.
+  - Do not copy a list the caller passed in. The caller expects it to be mutated.
+examples:
+  - input: add_item("a"); add_item("b")
+    output: "['a'] then ['b']"
+    explanation: Each call without a bucket gets its own list.
+  - input: mine = ["x"]; add_item("y", mine)
+    output: "['x', 'y'] and mine is the same object"
+hints:
+  - Default values are evaluated **once**, when `def` runs, not on every call.
+  - Use `None` as a sentinel that means "no list was given", and create the list inside the function.
+solution:
+  language: python
+  code: |
+    def add_item(item, bucket=None):
+        if bucket is None:  # no list given: start a fresh one for THIS call
+            bucket = []
+        bucket.append(item)
+        return bucket
+
+
+    print(add_item("a"))
+    print(add_item("b"))
+    mine = ["x"]
+    print(add_item("y", mine), mine)
+  explanation: |
+    The bug comes from **when** the default is created. `def add_item(item, bucket=[])` evaluates
+    `[]` once, when Python runs the `def` statement, and stores that single list on the function
+    object (you can see it in `add_item.__defaults__`). Every call that leaves out `bucket` binds
+    the name `bucket` to that same list, so items pile up across calls.
+
+    The fix uses `None` as a **sentinel**. `None` is immutable, so sharing it is harmless. Inside
+    the function, `if bucket is None` asks whether the caller passed a list, and if not, `bucket = []`
+    creates a brand-new list **for this call only**.
+
+    When the caller does pass a list, the function appends to that exact object and returns it. The
+    caller's variable sees the change, which is the documented behaviour. We use `is None` rather
+    than `if not bucket` because an empty list the caller passed in is falsy, and treating it as
+    missing would silently replace their list.
+complexity:
+  time: O(1) per call
+  space: O(1) extra
+variations:
+  - Do the same for a dict-based cache argument, e.g. `def remember(key, value, store=None)`.
+  - "Why is `def f(x, n=0)` safe even though the default is also created once? (Hint: ints are immutable.)"
+verify: |
+  assert add_item("a") == ["a"]
+  assert add_item("b") == ["b"]
+  mine = ["x"]
+  out = add_item("y", mine)
+  assert out is mine and mine == ["x", "y"]
+  empty = []
+  assert add_item(1, empty) is empty
