@@ -1,0 +1,24 @@
+# Local Postgres for development and tests.
+# Neon (or any Postgres) works by changing DATABASE_URL only.
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: neodevnotebook-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: neo
+      POSTGRES_PASSWORD: neo_local_dev
+      POSTGRES_DB: neodevnotebook
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neo -d neodevnotebook"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:

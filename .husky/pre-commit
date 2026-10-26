@@ -1,0 +1,2 @@
+# Calls node directly so the hook works in Git Bash, PowerShell and CI alike.
+node node_modules/lint-staged/bin/lint-staged.js
