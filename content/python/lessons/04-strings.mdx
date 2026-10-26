@@ -1,7 +1,7 @@
 ---
 title: Strings
 summary: Strings are immutable sequences of Unicode characters. Master indexing, slicing, the methods you'll use every day, f-strings, and the difference between text (str) and bytes.
-estimatedMinutes: 18
+estimatedMinutes: 24
 difficulty: easy
 section: Basics
 objectives:
@@ -99,6 +99,254 @@ Line by line:
 - `r"…"` is a **raw string**: backslashes are kept literally. It's handy for Windows paths and
   regular expressions.
 
+## Variations
+
+### More ways to slice
+
+```python title="slicing_more.py"
+s = "abcdefghij"
+print(s[::2], s[1::2])        # every second character, from 0 and from 1
+print(s[-3:], s[:-3])         # last 3, everything except the last 3
+print(s[7:2:-1], s[-1:-4:-1]) # negative step walks backwards; start > stop
+print(s[2:8][::-1])           # slice, then reverse the slice
+
+word = "Racecar"
+print(word.lower() == word.lower()[::-1])   # palindrome check
+```
+
+```text title="Output"
+acegi bdfhj
+hij abcdefg
+hgfed jih
+hgfedc
+True
+```
+
+- With a negative step the defaults flip: start defaults to the **end** and stop to "before the
+  beginning", which is why `s[::-1]` reverses.
+- `s[7:2:-1]` starts at index 7 and stops **before** index 2, giving `h g f e d`.
+- Combine slices freely: each one returns a new string.
+
+### Asking questions about a string
+
+```python title="tests.py"
+print("py" in "python", "Py" in "python")
+print("report.pdf".endswith((".pdf", ".doc")))        # a tuple tests several endings
+for text in ["123", "12.5", "abc", "abc123", "   ", "½"]:
+    print(repr(text).ljust(8), text.isdigit(), text.isalpha(), text.isalnum(), text.isspace())
+print("Straße".casefold() == "STRASSE".casefold())  # robust case-insensitive compare
+```
+
+```text title="Output"
+True False
+True
+'123'    True False True False
+'12.5'   False False False False
+'abc'    False True True False
+'abc123' False False True False
+'   '    False False False True
+'½'      False False True False
+True
+```
+
+- `in` checks for a **substring** and is case-sensitive.
+- `"12.5".isdigit()` is `False`: the dot isn't a digit. To accept decimals, try `float(text)` in
+  a `try` block instead.
+- `"½".isdigit()` is `False` but `"½".isnumeric()` is `True`; these methods follow Unicode rules,
+  which is why `int()` with `try`/`except` is the reliable way to validate numbers.
+- `casefold()` is a stronger `lower()` for comparisons: it maps `ß` to `ss`.
+
+### Splitting, partitioning and trimming
+
+```python title="split_more.py"
+csv_line = "ada,36,London,,engineer"
+print(csv_line.split(","))                  # empty field kept as ''
+print(csv_line.split(",", 2))               # at most 2 splits
+print("a b  c".split(" "), "a b  c".split())  # one space vs any whitespace
+
+key, sep, value = "timeout=30=s".partition("=")
+print(key, sep, value)
+print("path/to/file.txt".rpartition("/")[2])
+
+print("--==title==--".strip("-="), "xxhixx".lstrip("x"), "xxhixx".rstrip("x"))
+print("v2.1.0".removeprefix("v"), "photo.jpeg".removesuffix(".jpeg"))
+print("one\ntwo\r\nthree".splitlines())
+```
+
+```text title="Output"
+['ada', '36', 'London', '', 'engineer']
+['ada', '36', 'London,,engineer']
+['a', 'b', '', 'c'] ['a', 'b', 'c']
+timeout = 30=s
+file.txt
+title hixx xxhi
+2.1.0 photo
+['one', 'two', 'three']
+```
+
+- `split(",")` keeps empty fields; `split()` with no argument collapses runs of whitespace and
+  drops empty pieces. They answer different questions.
+- `partition` always returns 3 parts and never raises, so it's ideal for `key=value` text.
+  `rpartition` splits at the **last** separator.
+- `strip("-=")` removes any of those **characters** from both ends, not the string `"-="`. To remove
+  an exact prefix or suffix, use `removeprefix` / `removesuffix`.
+
+### Case, padding and alignment
+
+```python title="align.py"
+print("hello world".title(), "hello world".capitalize(), "Hello".swapcase())
+print("7".zfill(3), "42".rjust(5, "."), "42".ljust(5, ".") + "|", "hi".center(6, "-"))
+
+rows = [("apple", 1.5, 12), ("kiwi", 0.25, 140), ("watermelon", 3.0, 2)]
+print(f"{'item':<11}{'price':>7}{'qty':>5}")
+for name, price, qty in rows:
+    print(f"{name:<11}{price:>7.2f}{qty:>5}")
+```
+
+```text title="Output"
+Hello World Hello world hELLO
+007 ...42 42...| --hi--
+item         price  qty
+apple         1.50   12
+kiwi          0.25  140
+watermelon    3.00    2
+```
+
+`<` left-aligns, `>` right-aligns and `^` centres inside the given width. Aligning text left and
+numbers right is what makes a table readable.
+
+### Characters are numbers underneath
+
+```python title="ord_chr.py"
+print(ord("A"), ord("a"), chr(97), chr(0x1F40D))
+
+
+def caesar(text: str, shift: int) -> str:
+    out = []
+    for ch in text:
+        if ch.isascii() and ch.isalpha():
+            base = ord("A") if ch.isupper() else ord("a")
+            out.append(chr((ord(ch) - base + shift) % 26 + base))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+secret = caesar("Hello, World!", 3)
+print(secret, caesar(secret, -3))
+```
+
+```text title="Output"
+65 97 a 🐍
+Khoor, Zruog! Hello, World!
+```
+
+- `ord` gives a character's Unicode code point and `chr` turns a code point back into a character.
+- `% 26` wraps `z` around to `a` (the modulo pattern from lesson 03).
+- The function collects characters in a list and joins once, the fast way to build a string.
+
+### Multi-line strings and escapes
+
+```python title="multiline.py"
+import textwrap
+
+poem = """\
+    Roses are red,
+    tabs are wide."""
+print(textwrap.dedent(poem))
+print("tab:\t|", "quote: \"hi\"", 'it\'s', "back\\slash", sep="\n")
+long_text = ("Adjacent string literals "
+             "are joined at compile time.")
+print(long_text)
+```
+
+```text title="Output"
+Roses are red,
+tabs are wide.
+tab:	|
+quote: "hi"
+it's
+back\slash
+Adjacent string literals are joined at compile time.
+```
+
+- A backslash right after the opening `"""` stops the string starting with a newline.
+- `textwrap.dedent` removes the common indentation, so a multi-line string can be indented with
+  your code.
+- Two string literals next to each other are joined automatically, which is a clean way to split a
+  long string across lines inside parentheses.
+
+## Putting it together
+
+### Cleaning and validating user input
+
+```python title="signup.py"
+def normalise_username(raw: str) -> str:
+    name = raw.strip().casefold()
+    name = "_".join(name.split())          # inner whitespace -> single underscores
+    if not 3 <= len(name) <= 15:
+        raise ValueError(f"{name!r}: must be 3-15 characters")
+    if not name.replace("_", "").isalnum():
+        raise ValueError(f"{name!r}: only letters, digits and _")
+    if name[0].isdigit():
+        raise ValueError(f"{name!r}: can't start with a digit")
+    return name
+
+
+for raw in ["  Ada   Lovelace ", "x", "grace!", "9lives", "Linus_T"]:
+    try:
+        print(f"{raw!r:20} -> {normalise_username(raw)}")
+    except ValueError as err:
+        print(f"{raw!r:20} -> rejected: {err}")
+```
+
+```text title="Output"
+'  Ada   Lovelace '  -> ada_lovelace
+'x'                  -> rejected: 'x': must be 3-15 characters
+'grace!'             -> rejected: 'grace!': only letters, digits and _
+'9lives'             -> rejected: '9lives': can't start with a digit
+'Linus_T'            -> linus_t
+```
+
+Normalise first (trim, fold case, collapse spaces), **then** validate, so every check sees the
+same canonical form.
+
+### Text statistics in a few lines
+
+```python title="text_stats.py"
+text = """It was the best of times, it was the worst of times,
+it was the age of wisdom, it was the age of foolishness."""
+
+words = [w.strip(".,").lower() for w in text.split()]
+counts = {}
+for w in words:
+    counts[w] = counts.get(w, 0) + 1
+
+print("lines:", len(text.splitlines()), "words:", len(words), "unique:", len(counts))
+top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:6]
+for word, n in top:
+    print(f"{word:>6} {'#' * n} {n}")
+longest = max(words, key=len)
+print("longest word:", longest, len(longest))
+```
+
+```text title="Output"
+lines: 2 words: 24 unique: 10
+    it #### 4
+    of #### 4
+   the #### 4
+   was #### 4
+   age ## 2
+ times ## 2
+longest word: foolishness 11
+```
+
+- `strip(".,")` removes punctuation stuck to a word's ends; `lower()` makes `It` and `it` the
+  same word.
+- `counts.get(w, 0) + 1` is the classic counting pattern (lesson 18 shows `Counter`, which does
+  this for you).
+- Sorting by `(-count, word)` gives the most frequent words first and breaks ties alphabetically.
+
 ## Common mistakes
 
 <Callout type="warning" title="Building strings in a loop with +=">
@@ -121,6 +369,25 @@ Line by line:
   it runs to the beginning.
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: what's the difference between `'a,,b'.split(',')` and `'a  b'.split()`?"
+>
+  `['a', '', 'b']` and `['a', 'b']`. An explicit separator keeps empty fields; the no-argument form
+  splits on runs of whitespace and never returns empty strings.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why is `'www.site.com'.strip('w.')` equal to `'site.com'`?">
+  `strip` treats its argument as a **set of characters** and removes any of them from both ends, so
+  it eats `w`, `w`, `w`, `.` from the left and stops at `s`. For an exact prefix use
+  `removeprefix('www.')`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: reverse the words (not the letters) of 'one two three'.">
+  `" ".join("one two three".split()[::-1])` gives `'three two one'`: split into a list, reverse the
+  list with a slice, join back.
+</Reveal>
+
 <KeyTakeaways>
 
 - Indexes run `0…n-1` from the left and `-1…-n` from the right.
@@ -128,5 +395,10 @@ Line by line:
 - Strings are immutable, so every method returns a new string.
 - Use f-strings for formatting and `"".join` to build strings from many pieces.
 - `str` is text and `bytes` is raw data. Convert with `encode` and `decode`.
+- `split(sep)` keeps empty fields, `split()` doesn't; `partition` splits once and never raises.
+- `strip(chars)` removes a set of characters; `removeprefix`/`removesuffix` remove exact text.
+- Align text in f-strings with `<`, `>` and `^`; build long strings with `"".join(parts)`.
 
 </KeyTakeaways>
+
+{/* enriched */}

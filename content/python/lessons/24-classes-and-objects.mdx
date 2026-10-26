@@ -1,7 +1,7 @@
 ---
 title: Classes and objects
 summary: A class bundles data and the functions that work on it. See where instance and class attributes actually live, what self is, and how Python looks attributes up, then write small, clear classes.
-estimatedMinutes: 18
+estimatedMinutes: 30
 difficulty: simple
 section: Core Language
 objectives:
@@ -101,6 +101,358 @@ What to notice:
   list. That's the class version of the mutable default argument bug. Create mutable state in
   `__init__`.
 
+## Variations
+
+### Three kinds of methods
+
+```python title="method_kinds.py"
+class Temperature:
+    created = 0                               # class attribute: a counter for all instances
+
+    def __init__(self, celsius: float):
+        self.celsius = celsius
+        Temperature.created += 1              # update the CLASS, not self
+
+    def to_fahrenheit(self) -> float:         # instance method: needs self
+        return self.celsius * 9 / 5 + 32
+
+    @classmethod
+    def from_fahrenheit(cls, f: float) -> "Temperature":   # alternative constructor
+        return cls((f - 32) * 5 / 9)
+
+    @staticmethod
+    def is_freezing(celsius: float) -> bool:  # utility: needs neither self nor cls
+        return celsius <= 0
+
+
+a = Temperature(100)
+b = Temperature.from_fahrenheit(212)
+print(a.to_fahrenheit(), b.celsius, Temperature.is_freezing(-3), Temperature.created)
+```
+
+```text title="Output"
+212.0 100.0 True 2
+```
+
+- An **instance method** receives the object (`self`).
+- A **classmethod** receives the class (`cls`); calling `cls(...)` makes it work for subclasses
+  too. Named constructors like `from_fahrenheit`, `dict.fromkeys` and `datetime.fromisoformat` are
+  classmethods.
+- A **staticmethod** is a plain function that lives in the class's namespace because it belongs
+  with it conceptually.
+- `Temperature.created += 1` updates the shared counter; `self.created += 1` would create a
+  separate instance attribute on each object instead.
+
+### Properties: attributes with logic
+
+```python title="properties.py"
+class Rectangle:
+    def __init__(self, width: float, height: float):
+        self.width = width            # goes through the setter below
+        self.height = height
+
+    @property
+    def width(self) -> float:
+        return self._width
+
+    @width.setter
+    def width(self, value: float) -> None:
+        if value <= 0:
+            raise ValueError("width must be positive")
+        self._width = value
+
+    @property
+    def area(self) -> float:          # computed, read-only
+        return self.width * self.height
+
+
+r = Rectangle(3, 4)
+print(r.area)
+r.width = 5                           # looks like an attribute, runs the setter
+print(r.width, r.area)
+try:
+    r.width = -1                      # rejected by the setter
+except ValueError as err:
+    print("ValueError:", err)
+try:
+    r.area = 10                       # no setter: read-only
+except AttributeError as err:
+    print("AttributeError:", err)
+```
+
+```text title="Output"
+12
+5 20
+ValueError: width must be positive
+AttributeError: property 'area' of 'Rectangle' object has no setter
+```
+
+- `@property` lets callers write `r.area` instead of `r.area()`, and the value is always up to
+  date because it's computed on access.
+- A setter validates every assignment, including the one in `__init__`. Start with plain attributes
+  and switch to a property later without changing any calling code.
+- A property without a setter is read-only.
+
+### Private by convention, and name mangling
+
+```python title="privacy.py"
+class Account:
+    def __init__(self, owner):
+        self.owner = owner            # public
+        self._pin = "1234"            # "internal": please don't touch (not enforced)
+        self.__secret = "s3cr3t"      # name-mangled to _Account__secret
+
+
+acc = Account("ada")
+print(acc.owner, acc._pin)
+try:
+    print(acc.__secret)
+except AttributeError as err:
+    print("AttributeError:", err)
+print(acc._Account__secret)           # still reachable: mangling isn't security
+print(sorted(vars(acc)))
+```
+
+```text title="Output"
+ada 1234
+AttributeError: 'Account' object has no attribute '__secret'
+s3cr3t
+['_Account__secret', '_pin', 'owner']
+```
+
+Python has no private keyword. A single underscore means "internal, use at your own risk". Two
+underscores trigger **name mangling**, which renames the attribute to avoid accidental clashes in
+subclasses; it isn't a security feature.
+
+### Attributes by name, and `__slots__`
+
+```python title="dynamic_attrs.py"
+class Config:
+    pass
+
+
+cfg = Config()
+for key, value in {"host": "localhost", "port": 8080}.items():
+    setattr(cfg, key, value)               # attribute names from data
+print(cfg.port, getattr(cfg, "host"), getattr(cfg, "debug", False), hasattr(cfg, "port"))
+print(vars(cfg))
+
+
+class Point:
+    __slots__ = ("x", "y")                 # only these attributes, no per-instance __dict__
+
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+
+
+p = Point(1, 2)
+try:
+    p.z = 3
+except AttributeError as err:
+    print("AttributeError:", err)
+print(hasattr(p, "__dict__"))
+```
+
+```text title="Output"
+8080 localhost False True
+{'host': 'localhost', 'port': 8080}
+AttributeError: 'Point' object has no attribute 'z' and no __dict__ for setting new attributes
+False
+```
+
+- `getattr(obj, name, default)`, `setattr` and `hasattr` work with attribute names held in strings:
+  handy for configuration, serialisation and plug-ins.
+- `__slots__` fixes the set of attributes. Instances then use less memory and typos like `p.z = 3`
+  fail loudly, which helps when you create millions of small objects.
+
+### Objects made of objects: composition
+
+```python title="composition.py"
+class Engine:
+    def __init__(self, hp: int):
+        self.hp = hp
+        self.running = False
+
+    def start(self) -> str:
+        self.running = True
+        return f"{self.hp}hp engine started"
+
+
+class Car:
+    def __init__(self, model: str, hp: int):
+        self.model = model
+        self.engine = Engine(hp)          # a Car HAS an Engine
+
+    def drive(self) -> str:
+        if not self.engine.running:
+            print(" ", self.engine.start())
+        return f"{self.model} is driving"
+
+
+car = Car("Model 3", 283)
+print(car.drive())
+print(car.drive(), car.engine.running)
+```
+
+```text title="Output"
+  283hp engine started
+Model 3 is driving
+Model 3 is driving True
+```
+
+Most designs combine small objects ("has a") rather than building deep inheritance trees ("is
+a", lesson 25). `Car` delegates engine work to its `Engine` instead of knowing how engines start.
+
+## Putting it together
+
+### A bank account that protects its balance
+
+```python title="bank_account.py"
+class InsufficientFunds(Exception):
+    pass
+
+
+class BankAccount:
+    interest_rate = 0.02                     # shared by all accounts
+
+    def __init__(self, owner: str, balance: float = 0.0):
+        self.owner = owner
+        self._balance = 0.0
+        self.history: list[tuple[str, float]] = []
+        if balance:
+            self.deposit(balance)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "BankAccount":
+        return cls(data["owner"], data.get("balance", 0.0))
+
+    @property
+    def balance(self) -> float:              # read-only from outside
+        return self._balance
+
+    def deposit(self, amount: float) -> None:
+        if amount <= 0:
+            raise ValueError("deposit must be positive")
+        self._balance += amount
+        self.history.append(("deposit", amount))
+
+    def withdraw(self, amount: float) -> None:
+        if amount > self._balance:
+            raise InsufficientFunds(f"{self.owner} has only {self._balance:.2f}")
+        self._balance -= amount
+        self.history.append(("withdraw", amount))
+
+    def transfer_to(self, other: "BankAccount", amount: float) -> None:
+        self.withdraw(amount)                # fails before anything changes
+        other.deposit(amount)
+
+    def add_interest(self) -> None:
+        self.deposit(round(self._balance * self.interest_rate, 2))
+
+    def __repr__(self) -> str:
+        return f"BankAccount({self.owner!r}, balance={self._balance:.2f})"
+
+
+ada = BankAccount("ada", 100)
+bob = BankAccount.from_dict({"owner": "bob"})
+ada.transfer_to(bob, 40)
+bob.add_interest()
+try:
+    bob.transfer_to(ada, 100)
+except InsufficientFunds as err:
+    print("declined:", err)
+print(ada, bob)
+print(bob.history)
+try:
+    ada.balance = 1_000_000
+except AttributeError as err:
+    print("AttributeError:", err)
+```
+
+```text title="Output"
+declined: bob has only 40.80
+BankAccount('ada', balance=60.00) BankAccount('bob', balance=40.80)
+[('deposit', 40), ('deposit', 0.8)]
+AttributeError: property 'balance' of 'BankAccount' object has no setter
+```
+
+- Every change goes through `deposit` / `withdraw`, so validation and history can't be bypassed;
+  the `balance` property has no setter.
+- `transfer_to` withdraws **first**, so a failed transfer changes nothing.
+- `from_dict` is a classmethod constructor, a common way to build objects from JSON or database
+  rows.
+
+### A small library system
+
+```python title="library.py"
+class Book:
+    def __init__(self, isbn: str, title: str):
+        self.isbn, self.title = isbn, title
+        self.borrower: "Member | None" = None
+
+
+class Member:
+    LIMIT = 2
+
+    def __init__(self, name: str):
+        self.name = name
+        self.books: list[Book] = []
+
+
+class Library:
+    def __init__(self):
+        self.catalogue: dict[str, Book] = {}
+
+    def add(self, book: Book) -> None:
+        self.catalogue[book.isbn] = book
+
+    def lend(self, isbn: str, member: Member) -> str:
+        book = self.catalogue.get(isbn)
+        if book is None:
+            return f"no book {isbn}"
+        if book.borrower is not None:
+            return f"{book.title!r} is out (with {book.borrower.name})"
+        if len(member.books) >= member.LIMIT:
+            return f"{member.name} has reached the limit of {member.LIMIT}"
+        book.borrower = member
+        member.books.append(book)
+        return f"{member.name} borrowed {book.title!r}"
+
+    def give_back(self, isbn: str) -> str:
+        book = self.catalogue[isbn]
+        member = book.borrower
+        member.books.remove(book)
+        book.borrower = None
+        return f"{member.name} returned {book.title!r}"
+
+    def available(self) -> list[str]:
+        return sorted(b.title for b in self.catalogue.values() if b.borrower is None)
+
+
+lib = Library()
+for isbn, title in [("1", "Dune"), ("2", "Emma"), ("3", "Ulysses")]:
+    lib.add(Book(isbn, title))
+ada, bob = Member("ada"), Member("bob")
+for isbn, who in [("1", ada), ("1", bob), ("2", ada), ("3", ada), ("9", bob)]:
+    print(lib.lend(isbn, who))
+print(lib.give_back("1"), "|", lib.lend("1", bob))
+print("available:", lib.available())
+```
+
+```text title="Output"
+ada borrowed 'Dune'
+'Dune' is out (with ada)
+ada borrowed 'Emma'
+ada has reached the limit of 2
+no book 9
+ada returned 'Dune' | bob borrowed 'Dune'
+available: ['Ulysses']
+```
+
+Each class owns its own data and rules: a `Book` knows its borrower, a `Member` knows its books
+and limit, and the `Library` coordinates them and keeps both sides consistent in `lend` and
+`give_back`.
+
 ## Common mistakes
 
 <Callout type="warning" title="Mutable class attributes">
@@ -125,11 +477,38 @@ What to notice:
   value. Fido's instance attribute still shadows it.
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: when should a method be a classmethod rather than a staticmethod?"
+>
+  When it needs the class itself, usually to construct an instance (`cls(...)`) so that subclasses
+  get instances of the subclass. A staticmethod gets neither the instance nor the class.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why use a property instead of a `get_area()` method?">
+  It reads like data (`r.area`), stays up to date, and lets you start with a plain attribute and add
+  validation or computation later without changing callers.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what does `self.count += 1` do if `count` is a class attribute?"
+>
+  It reads the class value, then **creates an instance attribute** with the new value. The class
+  counter is unchanged. Write `type(self).count += 1` or `ClassName.count += 1`.
+</Reveal>
+
 <KeyTakeaways>
 
 - A class is an object holding shared attributes and methods, and instances hold their own data.
 - `self` is the instance, so `obj.method()` is `Class.method(obj)`.
 - Lookup checks the instance first, then the class. Assignment always writes to the instance.
 - Create mutable state in `__init__`, never as a class attribute.
+- Instance methods use `self`, classmethods use `cls` (great for alternative constructors),
+  staticmethods use neither.
+- Properties add validation and computed values behind plain attribute syntax.
+- Keep state private by convention (`_name`), change it through methods, and compose small classes.
 
 </KeyTakeaways>
+
+{/* enriched */}

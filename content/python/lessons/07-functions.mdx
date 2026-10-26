@@ -1,7 +1,7 @@
 ---
 title: Functions
 summary: Package logic into reusable, named steps. Learn every way to pass arguments (positional, keyword, defaults, *args, **kwargs, keyword-only, positional-only) and what happens on the call stack when a function runs.
-estimatedMinutes: 20
+estimatedMinutes: 28
 difficulty: simple
 section: Basics
 objectives:
@@ -119,6 +119,307 @@ What to notice:
 - Type hints such as `-> str` are documentation for people and tools. Python doesn't enforce them
   at runtime.
 
+## Variations
+
+### Functions are values
+
+A `def` creates a function **object** and binds it to a name. Like any object, it can be stored,
+passed to another function, or returned.
+
+```python title="first_class.py"
+def shout(text: str) -> str:
+    return text.upper() + "!"
+
+
+def whisper(text: str) -> str:
+    return text.lower() + "..."
+
+
+speak = shout                     # another name for the same function object
+print(speak("hi"), speak is shout, shout.__name__)
+
+for style in [shout, whisper]:    # functions in a list
+    print(style("Hello"))
+
+STYLES = {"loud": shout, "quiet": whisper}
+print(STYLES["quiet"]("Good night"))
+
+
+def apply_twice(func, value):     # a function that takes a function
+    return func(func(value))
+
+
+print(apply_twice(shout, "go"), apply_twice(lambda n: n * 3, 2))
+```
+
+```text title="Output"
+HI! True shout
+HELLO!
+hello...
+good night...
+GO!! 18
+```
+
+- `speak = shout` copies no code; both names point at one function object.
+- Passing functions around is how `sorted(key=...)`, `map`, callbacks and decorators work.
+- `apply_twice(shout, "go")` calls `shout(shout("go"))`, so the `!` is added twice.
+
+### `lambda` and `key=` functions
+
+```python title="lambdas.py"
+people = [("Ada", 36), ("Alan", 41), ("grace", 85), ("Bob", 41)]
+
+print(sorted(people, key=lambda p: p[1]))                  # by age
+print(sorted(people, key=lambda p: (-p[1], p[0].lower()))) # age desc, then name
+print(max(people, key=lambda p: len(p[0])))                 # longest name
+print(list(map(lambda p: p[0].title(), people)))
+print(list(filter(lambda p: p[1] > 40, people)))
+
+square = lambda x: x * x       # works, but a def is clearer for named functions
+print(square(7), square.__name__)
+```
+
+```text title="Output"
+[('Ada', 36), ('Alan', 41), ('Bob', 41), ('grace', 85)]
+[('grace', 85), ('Alan', 41), ('Bob', 41), ('Ada', 36)]
+('grace', 85)
+['Ada', 'Alan', 'Grace', 'Bob']
+[('Alan', 41), ('grace', 85), ('Bob', 41)]
+49 <lambda>
+```
+
+- A `lambda` is a small **anonymous** function made of one expression. Its natural home is a
+  `key=` argument or a short callback.
+- A tuple key such as `(-age, name)` sorts by several criteria: the minus sign reverses the
+  numeric part only.
+- A lambda assigned to a name shows up as `<lambda>` in tracebacks, so give real functions a
+  `def`.
+
+### Defaults: evaluated once, so use `None` for "fresh each time"
+
+```python title="defaults.py"
+calls = 0
+
+
+def make_default():
+    global calls
+    calls += 1
+    return calls
+
+
+def show(value=make_default()):      # make_default() runs ONCE, when def runs
+    return value
+
+
+print(show(), show(), show(99), "make_default ran", calls, "time(s)")
+
+
+def add_item(item, basket=None):     # None means "no basket given"
+    if basket is None:
+        basket = []                  # a NEW list on every call
+    basket.append(item)
+    return basket
+
+
+print(add_item("apple"), add_item("pear"))
+shared = ["milk"]
+print(add_item("eggs", shared), shared)
+```
+
+```text title="Output"
+1 1 99 make_default ran 1 time(s)
+['apple'] ['pear']
+['milk', 'eggs'] ['milk', 'eggs']
+```
+
+- The default expression ran a single time, so every call that omits `value` sees the same `1`.
+- For a list, dict or set default, use `None` and create the object inside the function. Lesson 10
+  shows what goes wrong with `basket=[]`.
+
+### Forwarding arguments with `*args` and `**kwargs`
+
+```python title="forwarding.py"
+def connect(host: str, port: int = 5432, *, timeout: float = 5.0, ssl: bool = False) -> str:
+    return f"{host}:{port} timeout={timeout} ssl={ssl}"
+
+
+def connect_logged(*args, **kwargs):
+    print("calling connect with", args, kwargs)
+    return connect(*args, **kwargs)          # pass everything through unchanged
+
+
+print(connect_logged("db.local", ssl=True))
+
+defaults = {"timeout": 2.0, "ssl": True}
+overrides = {"timeout": 10.0}
+print(connect("db.local", 6543, **{**defaults, **overrides}))   # later keys win
+```
+
+```text title="Output"
+calling connect with ('db.local',) {'ssl': True}
+db.local:5432 timeout=5.0 ssl=True
+db.local:6543 timeout=10.0 ssl=True
+```
+
+- A wrapper that accepts `*args, **kwargs` and calls `f(*args, **kwargs)` passes any combination
+  of arguments through, which is exactly what decorators do (lesson 23).
+- `{**defaults, **overrides}` merges dicts; when a key appears twice, the later one wins.
+
+### Changing an argument vs returning a new value
+
+```python title="side_effects.py"
+def add_tax_in_place(prices: list[float], rate: float) -> None:
+    for i in range(len(prices)):
+        prices[i] = round(prices[i] * (1 + rate), 2)     # mutates the caller's list
+
+
+def with_tax(prices: list[float], rate: float) -> list[float]:
+    return [round(p * (1 + rate), 2) for p in prices]    # leaves the input alone
+
+
+original = [10.0, 20.0]
+taxed = with_tax(original, 0.2)
+print(original, taxed)
+
+add_tax_in_place(original, 0.2)
+print(original, add_tax_in_place([1.0], 0.5))
+```
+
+```text title="Output"
+[10.0, 20.0] [12.0, 24.0]
+[12.0, 24.0] None
+```
+
+- The function receives a reference to the **same** list, so changing its items is visible to the
+  caller.
+- Functions that mutate their input conventionally return `None` (like `list.sort()`), which
+  signals "I changed your object". Functions that return a new value (like `sorted()`) leave the
+  input untouched. Pick one style per function and make the name say which.
+
+### Documentation and annotations
+
+```python title="docs.py"
+def bmi(weight_kg: float, height_m: float) -> float:
+    """Body-mass index: weight divided by height squared.
+
+    Raises ValueError if height_m is not positive.
+    """
+    if height_m <= 0:
+        raise ValueError("height must be positive")
+    return weight_kg / height_m**2
+
+
+print(bmi.__doc__.splitlines()[0])
+print(bmi.__annotations__)
+print(round(bmi(70, 1.75), 1), bmi(72, 2))  # ints are accepted: hints aren't enforced
+```
+
+```text title="Output"
+Body-mass index: weight divided by height squared.
+{'weight_kg': <class 'float'>, 'height_m': <class 'float'>, 'return': <class 'float'>}
+22.9 18.0
+```
+
+- The first docstring line is a one-sentence summary; editors show it when you hover a call.
+- `__annotations__` stores the type hints, which type checkers and frameworks (FastAPI, dataclasses)
+  read.
+- Passing ints where the hints say `float` works at runtime. A type checker such as mypy reads the
+  hints and reports real mismatches (like passing a `str`) before the code runs.
+- A docstring can also contain `>>>` examples; the standard `doctest` module runs them and checks
+  the printed results, which keeps examples in documentation honest.
+
+## Putting it together
+
+### A reusable `retry` helper
+
+```python title="retry.py"
+def retry(func, attempts: int = 3, *, retry_on: tuple = (ConnectionError,)):
+    """Call func() until it succeeds or attempts run out; re-raise the last error."""
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            result = func()
+        except retry_on as err:
+            print(f"  attempt {attempt} failed: {err}")
+            last_error = err
+        else:
+            print(f"  attempt {attempt} succeeded")
+            return result
+    raise last_error
+
+
+def flaky_factory(failures: int):
+    state = {"left": failures}
+
+    def fetch():
+        if state["left"] > 0:
+            state["left"] -= 1
+            raise ConnectionError("server busy")
+        return {"status": "ok"}
+
+    return fetch
+
+
+print(retry(flaky_factory(2)))
+try:
+    retry(flaky_factory(5), attempts=2)
+except ConnectionError as err:
+    print("gave up:", err)
+```
+
+```text title="Output"
+  attempt 1 failed: server busy
+  attempt 2 failed: server busy
+  attempt 3 succeeded
+{'status': 'ok'}
+  attempt 1 failed: server busy
+  attempt 2 failed: server busy
+gave up: server busy
+```
+
+- `retry` takes **a function** to call, not a result, so it can call it again after a failure.
+- The keyword-only `retry_on` makes calls self-documenting (`retry(f, retry_on=(TimeoutError,))`).
+- `flaky_factory` returns a new function each time, with its own counter: a preview of closures
+  (lesson 08).
+
+### Small functions composed into a pipeline
+
+```python title="pipeline.py"
+def strip_all(lines):
+    return [line.strip() for line in lines]
+
+
+def drop_blank(lines):
+    return [line for line in lines if line]
+
+
+def drop_comments(lines):
+    return [line for line in lines if not line.startswith("#")]
+
+
+def to_pairs(lines):
+    return dict(line.split("=", 1) for line in lines)
+
+
+def pipeline(data, *steps):
+    for step in steps:
+        data = step(data)
+    return data
+
+
+raw = ["  # settings", "host=db.local ", "", "  port=5432", "# end"]
+print(pipeline(raw, strip_all, drop_blank, drop_comments, to_pairs))
+print(pipeline(raw, strip_all, drop_blank))
+```
+
+```text title="Output"
+{'host': 'db.local', 'port': '5432'}
+['# settings', 'host=db.local', 'port=5432', '# end']
+```
+
+Each step does one thing and can be tested alone. `pipeline(data, *steps)` takes any number of
+functions, so the same steps can be combined differently for a different task.
+
 ## Common mistakes
 
 <Callout type="warning" title="Forgetting return">
@@ -144,11 +445,38 @@ What to notice:
   name because it comes after `*rest`.
 </Reveal>
 
+<Reveal kind="hint" label="Quick check: what does `f = print; result = f('hi')` leave in `result`?">
+  `None`. `f` is just another name for `print`, which prints `hi` and returns `None`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: write a call to `def area(w, h, /, *, unit='cm')` that works."
+>
+  `area(3, 4)` or `area(3, 4, unit="m")`. `w` and `h` must be positional, and `unit` must be passed
+  by keyword.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: sort `words` by length, longest first, ties alphabetically."
+>
+  `sorted(words, key=lambda w: (-len(w), w))`. The tuple key sorts by the first item, then uses the
+  second to break ties.
+</Reveal>
+
 <KeyTakeaways>
 
 - A call creates a new **frame** on the **call stack**, and `return` pops it and hands back a value.
 - Parameters: positional-only `/`, normal, defaults, `*args` (tuple), keyword-only, `**kwargs` (dict).
 - `*` and `**` at a call site unpack sequences and dicts into arguments.
 - No `return` means the function returns `None`.
+- Functions are objects: pass them as arguments (`key=`, callbacks), store them in dicts, return
+  them.
+- Default values are computed once; use `None` and create mutable defaults inside the function.
+- `*args, **kwargs` forward any arguments; decide whether a function mutates its input or returns a
+  new value, and name it accordingly.
 
 </KeyTakeaways>
+
+{/* enriched */}

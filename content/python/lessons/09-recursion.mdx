@@ -1,7 +1,7 @@
 ---
 title: Recursion
 summary: A function that calls itself on a smaller version of the problem. See every frame pile up on the call stack, learn the two rules that make recursion terminate, and know when a loop is the better tool.
-estimatedMinutes: 15
+estimatedMinutes: 30
 difficulty: simple
 section: Basics
 objectives:
@@ -118,6 +118,304 @@ What to notice:
 - The naive `slow_fib(20)` makes **21,891 calls**, because it recomputes the same values again
   and again. With `@lru_cache`, `fib(80)` computes each `n` once: 81 misses and 78 cache hits.
 
+## Variations
+
+### Head and tail: recursion on sequences
+
+```python title="sequences.py"
+def reverse(s: str) -> str:
+    if len(s) <= 1:
+        return s
+    return reverse(s[1:]) + s[0]          # reverse the tail, then put the head last
+
+
+def is_palindrome(s: str) -> bool:
+    if len(s) <= 1:
+        return True
+    return s[0] == s[-1] and is_palindrome(s[1:-1])
+
+
+def total(items: list, i: int = 0) -> int:
+    if i == len(items):                    # an index avoids copying with slices
+        return 0
+    return items[i] + total(items, i + 1)
+
+
+print(reverse("recursion"), is_palindrome("level"), is_palindrome("levels"))
+print(total([4, 8, 15, 16, 23, 42]))
+```
+
+```text title="Output"
+noisrucer True False
+108
+```
+
+- "Do something with the first item, recurse on the rest" is the basic shape of sequence recursion.
+- Each `s[1:]` copies the rest of the string, so `reverse` is O(n²) overall. Passing an **index**
+  (as `total` does) avoids the copies. In real code, `s[::-1]` and `sum()` are the right tools;
+  these versions are for learning the pattern.
+
+### Divide and conquer
+
+Split the problem in **halves** instead of peeling one item off, and the depth drops from n to
+log n.
+
+```python title="divide_conquer.py"
+def binary_search(items, target, lo=0, hi=None):
+    if hi is None:
+        hi = len(items) - 1
+    if lo > hi:
+        return -1                          # base case: empty range
+    mid = (lo + hi) // 2
+    if items[mid] == target:
+        return mid
+    if items[mid] < target:
+        return binary_search(items, target, mid + 1, hi)
+    return binary_search(items, target, lo, mid - 1)
+
+
+def merge_sort(items):
+    if len(items) <= 1:
+        return items
+    mid = len(items) // 2
+    left, right = merge_sort(items[:mid]), merge_sort(items[mid:])
+    merged, i, j = [], 0, 0
+    while i < len(left) and j < len(right):  # merge two sorted halves
+        if left[i] <= right[j]:
+            merged.append(left[i])
+            i += 1
+        else:
+            merged.append(right[j])
+            j += 1
+    return merged + left[i:] + right[j:]
+
+
+def fast_pow(base, exp):
+    if exp == 0:
+        return 1
+    half = fast_pow(base, exp // 2)        # one recursive call, reused twice
+    return half * half * (base if exp % 2 else 1)
+
+
+data = [3, 9, 12, 20, 31, 47, 58]
+print(binary_search(data, 31), binary_search(data, 5))
+print(merge_sort([38, 27, 43, 3, 9, 82, 10]))
+print(fast_pow(3, 13), 3**13, fast_pow(2, 100) == 2**100)
+```
+
+```text title="Output"
+4 -1
+[3, 9, 10, 27, 38, 43, 82]
+1594323 1594323 True
+```
+
+- `binary_search` discards half the range per call: at most about log₂ n calls.
+- `merge_sort` splits until single items, then merges back up: O(n log n) time.
+- `fast_pow` computes `base**exp` with about log₂(exp) multiplications by squaring the half
+  result, instead of multiplying `exp` times.
+
+### Walking a tree
+
+Nested dicts are trees: a folder contains files and more folders.
+
+```python title="tree_walk.py"
+tree = {
+    "src": {"main.py": 120, "utils": {"text.py": 40, "math.py": 65}},
+    "README.md": 10,
+    "tests": {"test_main.py": 55},
+}
+
+
+def size(node) -> int:
+    if isinstance(node, int):            # base case: a file
+        return node
+    return sum(size(child) for child in node.values())
+
+
+def show(node, name=".", depth=0):
+    label = f"{name}/" if isinstance(node, dict) else name
+    print("    " * depth + f"{label} ({size(node)})")
+    if isinstance(node, dict):
+        for child_name, child in sorted(node.items()):
+            show(child, child_name, depth + 1)
+
+
+def depth(node) -> int:
+    if isinstance(node, int):
+        return 0
+    return 1 + max((depth(c) for c in node.values()), default=0)
+
+
+show(tree)
+print("total:", size(tree), "max depth:", depth(tree))
+```
+
+```text title="Output"
+./ (290)
+    README.md (10)
+    src/ (225)
+        main.py (120)
+        utils/ (105)
+            math.py (65)
+            text.py (40)
+    tests/ (55)
+        test_main.py (55)
+total: 290 max depth: 3
+```
+
+Each function asks the same two questions: "is this a leaf?" (base case) and "how do I combine
+my children's answers?" (sum, print, max). Almost every tree algorithm follows this template.
+
+### Backtracking: build every possibility
+
+```python title="backtracking.py"
+def subsets(items):
+    if not items:
+        return [[]]
+    rest = subsets(items[1:])
+    return rest + [[items[0]] + s for s in rest]     # without the first item, then with it
+
+
+def permutations(s: str):
+    if len(s) <= 1:
+        return [s]
+    out = []
+    for i, ch in enumerate(s):
+        for p in permutations(s[:i] + s[i + 1:]):     # fix ch, permute the rest
+            out.append(ch + p)
+    return out
+
+
+def combination_sums(candidates, target, start=0, path=()):
+    if target == 0:
+        return [list(path)]
+    found = []
+    for i in range(start, len(candidates)):
+        c = candidates[i]
+        if c <= target:                                # prune: too big, skip
+            found += combination_sums(candidates, target - c, i, path + (c,))
+    return found
+
+
+print(subsets([1, 2, 3]))
+print(permutations("abc"))
+print(combination_sums([2, 3, 5], 8))
+```
+
+```text title="Output"
+[[], [3], [2], [2, 3], [1], [1, 3], [1, 2], [1, 2, 3]]
+['abc', 'acb', 'bac', 'bca', 'cab', 'cba']
+[[2, 2, 2, 2], [2, 3, 3], [3, 5]]
+```
+
+- `subsets` doubles the answer at every level, which is why there are 2ⁿ subsets.
+- Backtracking tries a choice, recurses, and the next loop iteration tries another choice. The
+  `if c <= target` check **prunes** branches that can't succeed, which is what keeps backtracking
+  practical.
+- Passing `start=i` lets a number be reused but stops `[3, 5]` and `[5, 3]` both appearing.
+
+### From recursion to a loop with an explicit stack
+
+```python title="explicit_stack.py"
+def nested_sum_iter(items) -> int:
+    total, stack = 0, [items]
+    while stack:
+        current = stack.pop()
+        for x in current:
+            if isinstance(x, list):
+                stack.append(x)          # "recurse later" = push onto our own stack
+            else:
+                total += x
+    return total
+
+
+deep = [1]
+for _ in range(5000):                    # 5000 levels: too deep for real recursion
+    deep = [deep, 1]
+
+print(nested_sum_iter([1, [2, [3, 4]], 5]), nested_sum_iter(deep))
+```
+
+```text title="Output"
+15 5001
+```
+
+The call stack is just a stack. Replacing it with a Python list removes the depth limit: the
+iterative version sums 5,000 levels of nesting where the recursive one would hit `RecursionError`.
+
+## Putting it together
+
+### Tower of Hanoi
+
+```python title="hanoi.py"
+def hanoi(n: int, source="A", target="C", spare="B", moves=None):
+    if moves is None:
+        moves = []
+    if n == 0:
+        return moves
+    hanoi(n - 1, source, spare, target, moves)     # move n-1 disks out of the way
+    moves.append(f"disk {n}: {source} -> {target}")  # move the biggest disk
+    hanoi(n - 1, spare, target, source, moves)     # move n-1 disks on top of it
+    return moves
+
+
+for line in hanoi(3):
+    print(line)
+print([len(hanoi(n)) for n in range(1, 11)])
+```
+
+```text title="Output"
+disk 1: A -> C
+disk 2: A -> B
+disk 1: C -> B
+disk 3: A -> C
+disk 1: B -> A
+disk 2: B -> C
+disk 1: A -> C
+[1, 3, 7, 15, 31, 63, 127, 255, 511, 1023]
+```
+
+The solution is three lines once you trust the recursion: move the smaller stack aside, move the
+big disk, move the smaller stack back. The move counts `1, 3, 7, 15, …` are `2ⁿ − 1`: the
+number of moves doubles with each extra disk.
+
+### Counting islands on a map
+
+```python title="islands.py"
+MAP = """\
+11000
+11010
+00011
+00000
+10001"""
+
+grid = [list(row) for row in MAP.splitlines()]
+
+
+def sink(r: int, c: int) -> int:
+    """Flood-fill one island from (r, c); return its size."""
+    if not (0 <= r < len(grid) and 0 <= c < len(grid[0])) or grid[r][c] != "1":
+        return 0
+    grid[r][c] = "0"                       # mark as visited
+    return 1 + sink(r + 1, c) + sink(r - 1, c) + sink(r, c + 1) + sink(r, c - 1)
+
+
+sizes = []
+for r in range(len(grid)):
+    for c in range(len(grid[0])):
+        if grid[r][c] == "1":
+            sizes.append(sink(r, c))
+print("islands:", len(sizes), "sizes:", sizes)
+```
+
+```text title="Output"
+islands: 4 sizes: [4, 3, 1, 1]
+```
+
+Depth-first flood fill is recursion on a grid: the base case rejects cells off the map, water,
+or already-visited land, and each land cell asks its four neighbours. Marking cells as visited is
+what stops it from looping forever.
+
 ## Common mistakes
 
 <Callout type="warning" title="Raising the recursion limit as a fix">
@@ -142,6 +440,27 @@ What to notice:
   Step to the base case in the visual above to see them.
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: how deep does `binary_search` recurse on a list of 1,000,000 items?"
+>
+  About 20 calls, because 2²⁰ ≈ 1,000,000 and each call halves the range. Divide-and-conquer
+  recursion rarely gets near the depth limit.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: write `count_down(n)` that prints n … 1 recursively.">
+  `def count_down(n): if n == 0: return` / `print(n)` / `count_down(n - 1)`. Base case first, then
+  the work, then the smaller call. Swap the last two lines and it prints 1 … n instead.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why does `subsets` of 20 items take noticeably longer than of 10?"
+>
+  There are 2²⁰ ≈ 1 million subsets versus 2¹⁰ = 1,024: about 1,000 times more output to build.
+  Exponential problems can't be made fast by tuning, only by pruning or a better algorithm.
+</Reveal>
+
 <KeyTakeaways>
 
 - Recursion needs a **base case** and **progress** toward it.
@@ -149,5 +468,11 @@ What to notice:
   tail-call optimisation.
 - Use `@lru_cache` when the same sub-problems repeat.
 - Prefer a loop for long, linear processes. Prefer recursion for tree-shaped data.
+- Two templates cover most recursion: "head + rest" for sequences and "combine the children" for
+  trees.
+- Halving the problem (binary search, merge sort, fast power) keeps the depth at log n.
+- Backtracking explores choices and prunes dead ends; an explicit stack removes the depth limit.
 
 </KeyTakeaways>
+
+{/* enriched */}

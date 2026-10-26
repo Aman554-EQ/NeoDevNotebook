@@ -1,7 +1,7 @@
 ---
 title: Loops
 summary: Iterate over anything with for, repeat until a condition changes with while, and use range, enumerate and zip to write loops that are short and correct.
-estimatedMinutes: 15
+estimatedMinutes: 28
 difficulty: easy
 section: Basics
 objectives:
@@ -100,6 +100,342 @@ What to notice:
   flag variable needed.
 - `1 + 2 + 4 + 5 = 12`, because `continue` skipped the 3.
 
+## Variations
+
+### One `for`, many kinds of iterables
+
+```python title="iterables.py"
+for ch in "hey":
+    print(ch)
+
+prices = {"tea": 2.5, "cake": 4.0}
+for item in prices:                     # a dict iterates over its KEYS
+    print("key:", item)
+for item, price in prices.items():      # .items() gives (key, value) pairs
+    print(f"{item} costs {price}")
+
+print([n for n in reversed(range(1, 4))])              # reversed() walks backwards
+print([w for w in sorted(["pear", "Apple", "fig"], key=str.lower)])
+```
+
+```text title="Output"
+h
+e
+y
+key: tea
+key: cake
+tea costs 2.5
+cake costs 4.0
+[3, 2, 1]
+['Apple', 'fig', 'pear']
+```
+
+- Anything iterable works: strings yield characters, dicts yield keys, `range` yields numbers.
+- `reversed()` and `sorted()` give you a different **order** without changing the original.
+
+### Accumulator patterns
+
+Most loops build something up: a total, a count, a best-so-far, or a new collection.
+
+```python title="accumulate.py"
+temps = [18.5, 21.0, 19.2, 25.4, 23.1, 17.8]
+
+total = 0.0
+hot_days = 0
+warmest, warmest_day = temps[0], 0
+running = []
+for day, t in enumerate(temps):
+    total += t                           # sum
+    if t > 20:
+        hot_days += 1                    # count
+    if t > warmest:
+        warmest, warmest_day = t, day    # best so far, with its position
+    running.append(round(total, 1))      # running total
+
+print("average:", round(total / len(temps), 2))
+print("hot days:", hot_days, "warmest:", warmest, "on day", warmest_day)
+print("running totals:", running)
+print("same with built-ins:", round(sum(temps) / len(temps), 2),
+      sum(t > 20 for t in temps), max(temps), temps.index(max(temps)))
+```
+
+```text title="Output"
+average: 20.83
+hot days: 3 warmest: 25.4 on day 3
+running totals: [18.5, 39.5, 58.7, 84.1, 107.2, 125.0]
+same with built-ins: 20.83 3 25.4 3
+```
+
+Writing the loop once by hand shows what `sum`, `max` and friends do internally. In real code,
+reach for the built-ins first and write the loop when you need several results in one pass.
+
+### Nested loops
+
+```python title="nested.py"
+for row in range(1, 4):
+    for col in range(1, 5):
+        print(f"{row * col:3}", end="")
+    print()                               # newline after each row
+
+names = ["ann", "bob", "cy"]
+pairs = []
+for i in range(len(names)):
+    for j in range(i + 1, len(names)):    # j starts after i: each pair once
+        pairs.append((names[i], names[j]))
+print(pairs)
+
+for size in range(1, 4):
+    print(" " * (3 - size) + "*" * (2 * size - 1))
+```
+
+```text title="Output"
+  1  2  3  4
+  2  4  6  8
+  3  6  9 12
+[('ann', 'bob'), ('ann', 'cy'), ('bob', 'cy')]
+  *
+ ***
+*****
+```
+
+- The inner loop runs **completely** for every pass of the outer loop: 3 rows × 4 columns = 12
+  products.
+- Starting `j` at `i + 1` produces each unordered pair exactly once, which is the pattern behind
+  many "compare every pair" problems (it does about n²/2 comparisons).
+- Printing shapes is a good way to practise how the counters of nested loops relate.
+
+### Leaving nested loops early
+
+`break` only exits the **innermost** loop. Three clean ways out of two loops:
+
+```python title="break_nested.py"
+grid = [[1, 3, 5], [7, 8, 9], [11, 12, 13]]
+
+
+def find_first_even(rows):
+    for r, row in enumerate(rows):
+        for c, value in enumerate(row):
+            if value % 2 == 0:
+                return r, c, value        # 1. return leaves every loop at once
+    return None
+
+
+print(find_first_even(grid))
+
+found = None
+for r, row in enumerate(grid):           # 2. break + for/else
+    for c, value in enumerate(row):
+        if value % 2 == 0:
+            found = (r, c, value)
+            break
+    else:
+        continue                          # inner loop finished without break: keep going
+    break                                 # inner loop broke: stop the outer one too
+print(found)
+
+pos = next(((r, c) for r, row in enumerate(grid)        # 3. next() over a generator
+            for c, v in enumerate(row) if v > 10), None)
+print(pos)
+```
+
+```text title="Output"
+(1, 1, 8)
+(1, 1, 8)
+(2, 0)
+```
+
+Moving the loops into a function and using `return` is the clearest option. `next(generator,
+default)` is a compact "first match or default" for simple searches.
+
+### `while` loop patterns
+
+```python title="while_patterns.py"
+queue = ["job1", "job2", "STOP", "job3"]
+while queue:                             # run until the list is empty
+    job = queue.pop(0)
+    if job == "STOP":                    # sentinel value ends the loop
+        break
+    print("processing", job)
+print("left in queue:", queue)
+
+n, steps = 1000, 0
+while n > 1:                             # halve until we reach 1
+    n //= 2
+    steps += 1
+print("halvings to reach 1:", steps)
+
+attempt = 0
+while True:                              # "do ... while": body runs at least once
+    attempt += 1
+    succeeded = attempt == 3             # pretend the 3rd try works
+    print("attempt", attempt, "ok" if succeeded else "failed")
+    if succeeded:
+        break
+```
+
+```text title="Output"
+processing job1
+processing job2
+left in queue: ['job3']
+halvings to reach 1: 9
+attempt 1 failed
+attempt 2 failed
+attempt 3 ok
+```
+
+- `while queue:` uses truthiness: an empty list stops the loop.
+- Halving 1000 down to 1 takes 9 steps because 2⁹ = 512 ≤ 1000 < 1024. That's why halving loops
+  (like binary search) are **O(log n)**.
+- `while True` + `break` runs the body before checking, which Python uses instead of a
+  `do … while` statement.
+
+### Walking several sequences together
+
+```python title="zip_more.py"
+names = ["ada", "alan", "grace"]
+scores = [92, 85, 97]
+cities = ["London", "Wilmslow", "New York"]
+for name, score, city in zip(names, scores, cities):
+    print(f"{name:6} {score} {city}")
+
+ranking = sorted(zip(scores, names), reverse=True)   # pair up, then sort by score
+print(ranking)
+
+matrix = [[1, 2, 3], [4, 5, 6]]
+print(list(zip(*matrix)))                            # transpose rows <-> columns
+
+for (x, y), label in zip([(0, 0), (1, 2)], ["start", "end"]):
+    print(label, x, y)                               # unpack nested structures
+```
+
+```text title="Output"
+ada    92 London
+alan   85 Wilmslow
+grace  97 New York
+[(97, 'grace'), (92, 'ada'), (85, 'alan')]
+[(1, 4), (2, 5), (3, 6)]
+start 0 0
+end 1 2
+```
+
+- `zip` accepts any number of iterables.
+- `sorted(zip(scores, names))` sorts the pairs by their **first** element; it's the quickest way
+  to rank one list by another.
+- `zip(*matrix)` passes each row as a separate argument, so `zip` pairs up the columns.
+
+### The `itertools` loop helpers
+
+```python title="itertools_loops.py"
+from itertools import accumulate, chain, count, islice, pairwise, product
+
+print(list(accumulate([3, 1, 4, 1, 5])))             # running sums
+print(list(chain([1, 2], "ab", (9,))))               # one loop over several iterables
+print(list(pairwise([10, 13, 19, 20])))              # neighbours: (a, b), (b, c), ...
+print([b - a for a, b in pairwise([10, 13, 19, 20])])
+print(list(product("AB", [1, 2])))                   # every combination = nested loops
+print(list(islice(count(start=5, step=5), 4)))       # first 4 of an endless counter
+```
+
+```text title="Output"
+[3, 4, 8, 9, 14]
+[1, 2, 'a', 'b', 9]
+[(10, 13), (13, 19), (19, 20)]
+[3, 6, 1]
+[('A', 1), ('A', 2), ('B', 1), ('B', 2)]
+[5, 10, 15, 20]
+```
+
+Each helper replaces a small hand-written loop. `product("AB", [1, 2])` is the same as two nested
+`for` loops, and `pairwise` is the clean way to compare each item with the next one.
+
+## Putting it together
+
+### Analysing a web server log
+
+```python title="log_report.py"
+LOG = """\
+2026-10-27 10:00:01 GET /home 200 120ms
+2026-10-27 10:00:02 GET /api/items 200 340ms
+2026-10-27 10:00:04 POST /api/items 500 1200ms
+2026-10-27 10:00:05 GET /home 304 15ms
+2026-10-27 10:00:09 GET /missing 404 8ms
+2026-10-27 10:00:11 GET /api/items 200 280ms"""
+
+status_counts = {}
+times = []
+first_error = None
+for line_no, line in enumerate(LOG.splitlines(), start=1):
+    date, time, method, path, status, duration = line.split()
+    status_counts[status] = status_counts.get(status, 0) + 1
+    times.append(int(duration.removesuffix("ms")))
+    if first_error is None and status.startswith("5"):
+        first_error = (line_no, method, path)
+
+print("requests:", len(times))
+for status in sorted(status_counts):
+    print(f"  {status}: {status_counts[status]}")
+print("average ms:", round(sum(times) / len(times)), "slowest ms:", max(times))
+print("first server error:", first_error)
+slow = [ms for ms in times if ms > 250]
+print(f"{len(slow)} slow requests ({len(slow) / len(times):.0%})")
+```
+
+```text title="Output"
+requests: 6
+  200: 3
+  304: 1
+  404: 1
+  500: 1
+average ms: 327 slowest ms: 1200
+first server error: (3, 'POST', '/api/items')
+3 slow requests (50%)
+```
+
+One pass over the lines collects four results at once: counts per status, all durations, the
+first 5xx error and (afterwards) the slow ones. Unpacking `line.split()` into six names doubles
+as validation: a malformed line would raise `ValueError` immediately.
+
+### Guessing a number with halving
+
+```python title="guess.py"
+def guess_number(secret: int, low: int = 1, high: int = 100, verbose: bool = True) -> int:
+    tries = 0
+    while low <= high:
+        tries += 1
+        mid = (low + high) // 2
+        if mid == secret:
+            verdict = "got it"
+        elif mid < secret:
+            verdict, low = "too low", mid + 1
+        else:
+            verdict, high = "too high", mid - 1
+        if verbose:
+            print(f"  try {tries}: {mid} - {verdict}")
+        if verdict == "got it":
+            return tries
+    raise ValueError("secret was outside the range")
+
+
+print("found in", guess_number(73), "tries")
+worst = max(guess_number(s, verbose=False) for s in range(1, 101))
+print("worst case for 1..100:", worst, "tries")
+```
+
+```text title="Output"
+  try 1: 50 - too low
+  try 2: 75 - too high
+  try 3: 62 - too low
+  try 4: 68 - too low
+  try 5: 71 - too low
+  try 6: 73 - got it
+found in 6 tries
+worst case for 1..100: 7 tries
+```
+
+Each guess halves the remaining range, so even the worst secret takes only 7 tries for 100
+numbers (2⁷ = 128 ≥ 100). Checking **every** possible secret in one line is a cheap, convincing
+test of a loop like this.
+
 ## Common mistakes
 
 <Callout type="warning" title="Changing a list while looping over it">
@@ -125,11 +461,34 @@ What to notice:
   and that's exactly when `else` runs.
 </Reveal>
 
+<Reveal
+  kind="hint"
+  label="Quick check: how many times does the inner body run in `for i in range(4): for j in range(i):`?"
+>
+  `0 + 1 + 2 + 3 = 6` times. The inner range grows with `i`, so the total is a triangle number,
+  `n(n-1)/2` for `n = 4`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: print the numbers 10, 8, 6, 4, 2 with a single range.">
+  `for n in range(10, 0, -2): print(n)`. The stop value `0` is excluded, so the last number is `2`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: what's wrong with `while i < 10: print(i)`?">
+  Nothing changes `i`, so the condition never becomes false and the loop runs forever. Every `while`
+  loop needs a statement in its body that moves it towards the end, such as `i += 1`.
+</Reveal>
+
 <KeyTakeaways>
 
 - `for` loops over **any iterable**. Prefer `enumerate` and `zip` to manual indexes.
 - `range` excludes its stop value, like slices do.
 - `break` exits, `continue` skips ahead, and a loop's `else` means "finished without `break`".
 - Never add or remove items from a list while looping over that same list.
+- Loops usually accumulate: a total, a count, a best-so-far, or a new list or dict.
+- To leave nested loops, return from a function (clearest), use `for … else`, or `next(gen, None)`.
+- `while` fits "until something happens" (sentinels, queues, halving); `itertools` replaces many
+  hand-written loops.
 
 </KeyTakeaways>
+
+{/* enriched */}

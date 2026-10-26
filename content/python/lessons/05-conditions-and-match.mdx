@@ -1,7 +1,7 @@
 ---
 title: Conditions and match
 summary: Make decisions with if, elif and else, understand truthiness and short-circuiting, and use structural pattern matching (match/case) to branch on the shape of data.
-estimatedMinutes: 15
+estimatedMinutes: 26
 difficulty: easy
 section: Basics
 objectives:
@@ -114,6 +114,379 @@ What to notice:
   lengths. For simple value checks, an `if/elif` chain or a dict lookup is often clearer.
 </Callout>
 
+## Variations
+
+### An `if / elif / else` ladder, checked boundary by boundary
+
+```python title="grades.py"
+def grade(score: int) -> str:
+    if not 0 <= score <= 100:
+        raise ValueError(f"score out of range: {score}")
+    if score >= 90:
+        return "A"
+    elif score >= 80:
+        return "B"
+    elif score >= 70:
+        return "C"
+    elif score >= 60:
+        return "D"
+    else:
+        return "F"
+
+
+for s in [100, 90, 89, 80, 79, 60, 59, 0]:
+    print(s, grade(s), end="  ")
+print()
+```
+
+```text title="Output"
+100 A  90 A  89 B  80 B  79 C  60 D  59 F  0 F
+```
+
+- Each `elif` is reached only when every condition above it was false, so `score >= 80` really
+  means "80 to 89" here.
+- Test the **boundaries** (90 and 89, 60 and 59): off-by-one mistakes hide exactly there.
+- Validate the input first and raise, so the ladder only ever sees sensible values.
+
+### Guard clauses instead of deep nesting
+
+```python title="guards.py"
+def can_checkout_nested(user, cart):
+    if user is not None:
+        if user["verified"]:
+            if cart:
+                return "ok"
+            else:
+                return "cart is empty"
+        else:
+            return "verify your email"
+    else:
+        return "please log in"
+
+
+def can_checkout(user, cart):
+    if user is None:
+        return "please log in"
+    if not user["verified"]:
+        return "verify your email"
+    if not cart:
+        return "cart is empty"
+    return "ok"
+
+
+cases = [(None, ["pen"]), ({"verified": False}, ["pen"]), ({"verified": True}, []),
+         ({"verified": True}, ["pen"])]
+for user, cart in cases:
+    assert can_checkout(user, cart) == can_checkout_nested(user, cart)
+    print(can_checkout(user, cart))
+```
+
+```text title="Output"
+please log in
+verify your email
+cart is empty
+ok
+```
+
+Both functions behave identically (the `assert` proves it for every case), but the second reads
+top to bottom: each failure is handled and returned immediately, and the happy path sits at the
+end without indentation.
+
+### `in`, `is`, `not` and friends
+
+```python title="membership.py"
+VOWELS = set("aeiou")
+print("e" in VOWELS, "y" not in VOWELS)
+
+status = 404
+print(status in (200, 201, 204), 400 <= status < 500)
+
+value = None
+print(value is None, value is not None, not value)
+
+role = "editor"
+print(role == "admin" or role == "editor", role in {"admin", "editor"})
+```
+
+```text title="Output"
+True True
+False True
+True False True
+True True
+```
+
+- `x in {...}` replaces a chain of `==` / `or` tests and is O(1) for sets.
+- `is` / `is not` are for `None` (and other singletons). `not value` is also true for `0` and
+  `""`, so it answers a different question than `value is None`.
+
+### `any()` and `all()`: conditions over many items
+
+```python title="any_all.py"
+password = "Tr0ub4dor&3"
+checks = {
+    "long enough": len(password) >= 10,
+    "has digit": any(ch.isdigit() for ch in password),
+    "has upper": any(ch.isupper() for ch in password),
+    "has symbol": any(not ch.isalnum() for ch in password),
+}
+for name, ok in checks.items():
+    print(f"{name:12} {'yes' if ok else 'no'}")
+print("strong:", all(checks.values()))
+
+print(any([]), all([]))   # empty: nothing is true / nothing is false
+```
+
+```text title="Output"
+long enough  yes
+has digit    yes
+has upper    yes
+has symbol   yes
+strong: True
+False True
+```
+
+- `any` stops at the first truthy item and `all` stops at the first falsy one, so they
+  short-circuit like `or` and `and`.
+- `all([])` is `True` ("no counterexample") and `any([])` is `False`. Remember this when the list
+  might be empty.
+
+### Assign inside a condition with `:=`
+
+```python title="walrus.py"
+import re
+
+lines = ["user=ada", "noise", "user=grace", "user="]
+for line in lines:
+    if (m := re.fullmatch(r"user=(\w+)", line)) is not None:
+        print("found", m.group(1))
+
+data = [3, 8, 1, 9]
+if (n := len(data)) > 3:
+    print(f"list is too long ({n} items)")
+```
+
+```text title="Output"
+found ada
+found grace
+list is too long (4 items)
+```
+
+The "walrus" operator `:=` assigns **and** returns the value, so you can test a result and keep
+it without calling the function twice. Use it when it removes duplication, not everywhere.
+
+### Replace a long `elif` chain with a dict
+
+```python title="dispatch.py"
+def add(a, b):
+    return a + b
+
+
+def sub(a, b):
+    return a - b
+
+
+OPERATIONS = {"+": add, "-": sub, "*": lambda a, b: a * b, "/": lambda a, b: a / b}
+
+
+def calculate(a: float, op: str, b: float) -> float:
+    try:
+        func = OPERATIONS[op]
+    except KeyError:
+        raise ValueError(f"unknown operator {op!r}") from None
+    return func(a, b)
+
+
+print(calculate(6, "*", 7), calculate(10, "/", 4), calculate(1, "-", 3))
+try:
+    calculate(2, "^", 3)
+except ValueError as err:
+    print(err)
+```
+
+```text title="Output"
+42 2.5 -2
+unknown operator '^'
+```
+
+When each branch only picks **which** function or value to use, a dict lookup is shorter, faster
+for many options, and easy to extend: adding an operator is one new line.
+
+### More `match` patterns
+
+```python title="match_more.py"
+from dataclasses import dataclass
+
+
+@dataclass
+class Point:
+    x: int
+    y: int
+
+
+def where(p: Point) -> str:
+    match p:
+        case Point(x=0, y=0):
+            return "origin"
+        case Point(x=0, y=y):
+            return f"on the y axis at {y}"
+        case Point(x=x, y=0):
+            return f"on the x axis at {x}"
+        case Point(x=x, y=y) if x == y:
+            return f"on the diagonal at {x}"
+        case _:
+            return "somewhere else"
+
+
+for p in [Point(0, 0), Point(0, 5), Point(3, 0), Point(2, 2), Point(1, 4)]:
+    print(where(p))
+
+
+def kind(value) -> str:
+    match value:
+        case bool():
+            return "bool"
+        case int() | float() as number if number < 0:
+            return "negative number"
+        case int() | float():
+            return "number"
+        case [first, *rest]:
+            return f"sequence starting with {first!r} (+{len(rest)} more)"
+        case str():
+            return "text"
+        case _:
+            return type(value).__name__
+
+
+for v in [True, -2.5, 7, [1, 2, 3], "hi", {"a": 1}]:
+    print(repr(v), "->", kind(v))
+```
+
+```text title="Output"
+origin
+on the y axis at 5
+on the x axis at 3
+on the diagonal at 2
+somewhere else
+True -> bool
+-2.5 -> negative number
+7 -> number
+[1, 2, 3] -> sequence starting with 1 (+2 more)
+'hi' -> text
+{'a': 1} -> dict
+```
+
+- **Class patterns** like `Point(x=0, y=y)` check the type and its attributes in one go.
+- `int() | float() as number` matches either type and binds the value to `number`.
+- `[first, *rest]` matches any sequence with at least one item. A plain `str` is **not** treated
+  as a sequence by `match`, which is why `"hi"` falls through to `case str()`.
+- `bool()` comes first because `True` is also an `int`.
+
+## Putting it together
+
+### Shipping cost rules
+
+```python title="shipping.py"
+def shipping_cost(weight_kg: float, country: str, express: bool = False,
+                  member: bool = False) -> float:
+    if weight_kg <= 0:
+        raise ValueError("weight must be positive")
+    if country == "US":
+        base = 5.0 if weight_kg <= 1 else 5.0 + (weight_kg - 1) * 2.0
+    elif country in {"CA", "MX"}:
+        base = 12.0 + weight_kg * 3.0
+    else:
+        base = 25.0 + weight_kg * 5.0
+    if express:
+        base *= 1.5
+    if member and country == "US" and not express:
+        return 0.0                      # free standard shipping for members
+    return round(base, 2)
+
+
+orders = [(0.5, "US", False, False), (3, "US", True, False), (3, "US", False, True),
+          (2, "CA", False, False), (1.2, "DE", True, False)]
+for w, c, e, m in orders:
+    print(f"{w:>4} kg to {c} express={e!s:5} member={m!s:5} -> ${shipping_cost(w, c, e, m):.2f}")
+```
+
+```text title="Output"
+ 0.5 kg to US express=False member=False -> $5.00
+   3 kg to US express=True  member=False -> $13.50
+   3 kg to US express=False member=True  -> $0.00
+   2 kg to CA express=False member=False -> $18.00
+ 1.2 kg to DE express=True  member=False -> $46.50
+```
+
+Real rules mix ranges (`<= 1`), membership (`in {"CA", "MX"}`), flags and an exception for one
+group. Keeping them in one function with early returns makes each rule easy to find and test.
+
+### Routing events by their shape
+
+```python title="events.py"
+events = [
+    {"type": "click", "x": 10, "y": 20},
+    {"type": "key", "key": "Enter"},
+    {"type": "key", "key": "q", "ctrl": True},
+    {"type": "scroll", "delta": -3},
+    {"type": "resize", "size": [800, 600]},
+    {"type": "unknown"},
+]
+
+for event in events:
+    match event:
+        case {"type": "click", "x": x, "y": y}:
+            print(f"click at ({x}, {y})")
+        case {"type": "key", "key": "q", "ctrl": True}:
+            print("quit shortcut")
+        case {"type": "key", "key": key}:
+            print(f"key {key}")
+        case {"type": "scroll", "delta": d} if d < 0:
+            print(f"scroll up {-d}")
+        case {"type": "resize", "size": [w, h]}:
+            print(f"resize to {w}x{h}")
+        case {"type": other}:
+            print(f"ignored event {other!r}")
+```
+
+```text title="Output"
+click at (10, 20)
+key Enter
+quit shortcut
+scroll up 3
+resize to 800x600
+ignored event 'unknown'
+```
+
+The more specific `ctrl` case comes **before** the general key case; otherwise `"q"` would be
+handled as a plain key. The last case catches every remaining event and names its type.
+
+### Leap years: a condition with exceptions to the exception
+
+```python title="leap.py"
+import calendar
+
+
+def is_leap(year: int) -> bool:
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+
+
+for y in [2024, 2023, 1900, 2000, 2100]:
+    assert is_leap(y) == calendar.isleap(y)
+    print(y, is_leap(y))
+```
+
+```text title="Output"
+2024 True
+2023 False
+1900 False
+2000 True
+2100 False
+```
+
+"Divisible by 4, except centuries, except every 400 years." Writing it as one boolean expression
+with parentheses, then checking it against the standard library's `calendar.isleap`, is a quick
+way to gain confidence in tricky logic.
+
 ## Common mistakes
 
 <Callout type="warning" title="A bare name in a case captures, it doesn't compare">
@@ -136,11 +509,34 @@ What to notice:
   non-empty list), so `and` returns `'yes'`. `[]` is falsy, so `or` returns its right side.
 </Reveal>
 
+<Reveal kind="hint" label="Quick check: what does `print(0 or None or [] or 'x' or 'y')` show?">
+  `x`. `or` returns the first truthy operand: `0`, `None` and `[]` are all falsy, so `'x'` wins and
+  `'y'` is never evaluated.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: rewrite `if x > 0: sign = 1` / `elif x < 0: sign = -1` / `else: sign = 0` in one line.">
+  `sign = (x > 0) - (x < 0)` uses the fact that booleans are 1 and 0. A more readable option is
+  `sign = 1 if x > 0 else -1 if x < 0 else 0`, though nested conditional expressions get hard to
+  read quickly.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: which case matches `match (1, 2, 3):` with `case (a, b):` then `case (a, *_):`?"
+>
+  The second. `(a, b)` needs exactly two items; `(a, *_)` accepts one or more and binds `a = 1`.
+</Reveal>
+
 <KeyTakeaways>
 
 - Python runs the **first** branch whose condition is truthy, and skips the rest.
 - `and` / `or` return one of their **operands** (not always `True` / `False`) and short-circuit.
 - Empty containers, zero and `None` are falsy. Almost everything else is truthy.
 - `match` branches on the **shape** of data and can bind its parts. A bare name in a `case` captures.
+- Prefer guard clauses (handle the bad cases, return early) over deeply nested `if`s.
+- `any()` / `all()` test a condition over many items; a dict can replace a long `elif` chain.
+- `match` shines for data **shapes**: class patterns, `[first, *rest]`, `as` bindings and guards.
 
 </KeyTakeaways>
+
+{/* enriched */}
