@@ -1,0 +1,30 @@
+# deps
+node_modules/
+.pnpm-store/
+# next / build
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+# env
+.env
+.env.*
+!.env.example
+# tests
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.lighthouseci/
+# python
+__pycache__/
+*.pyc
+.venv/
+# os / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+*.log
