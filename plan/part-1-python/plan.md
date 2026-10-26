@@ -343,16 +343,16 @@ a problem page. Lab budgets from soul.md §11.
 
 ## 9. Risks & Open Questions
 
-| #   | Item                                                                                                                         | My default if you don't say otherwise                                   |
-| --- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| R1  | **Volume:** 36 lessons + 116 practice items is a lot of original writing                                                     | Build in milestones A–F, with every item verified before moving on      |
-| R2  | Python 3.13-specific output (`dis`, error wording) may differ on other versions                                              | Label version-specific output; verify on 3.13                           |
-| R3  | Many 3D scenes could slow pages                                                                                              | One 3D scene per lesson at most, lazy-loaded; perf checked in 1.14      |
-| R4  | Problem browser with 60 items on mobile                                                                                      | Already list-based with filters; perf-tested                            |
-| Q1  | **Counts:** 60 problems (15 per tier) and 56 interview questions. Is that right, or do you want more?                        | 60 / 56                                                                 |
-| Q2  | **Extra topics** not in your brief but common in interviews: concurrency (27), type hints (32), stdlib tour (31). Keep them? | Keep                                                                    |
-| Q3  | **Check-ins:** a progress note after each milestone without waiting, or stop for approval after each?                        | Note and continue                                                       |
-| Q4  | **Push:** push `module/python` to GitHub after each milestone as a backup?                                                   | Push the branch after each milestone; merge to `main` only with your OK |
+| #   | Item                                                                                                                         | My default if you don't say otherwise                              |
+| --- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| R1  | **Volume:** 36 lessons + 116 practice items is a lot of original writing                                                     | Build in milestones A–F, with every item verified before moving on |
+| R2  | Python 3.13-specific output (`dis`, error wording) may differ on other versions                                              | Label version-specific output; verify on 3.13                      |
+| R3  | Many 3D scenes could slow pages                                                                                              | One 3D scene per lesson at most, lazy-loaded; perf checked in 1.14 |
+| R4  | Problem browser with 60 items on mobile                                                                                      | Already list-based with filters; perf-tested                       |
+| Q1  | **Counts:** 60 problems (15 per tier) and 56 interview questions. Is that right, or do you want more?                        | ✅ Owner: 60 / 56                                                  |
+| Q2  | **Extra topics** not in your brief but common in interviews: concurrency (27), type hints (32), stdlib tour (31). Keep them? | ✅ Owner: keep                                                     |
+| Q3  | **Check-ins:** a progress note after each milestone without waiting, or stop for approval after each?                        | ✅ Owner: note and continue                                        |
+| Q4  | **Push:** push `module/python` to GitHub after each milestone as a backup?                                                   | ✅ Owner: OK (push branch per milestone; `main` only with OK)      |
 
 ---
 
