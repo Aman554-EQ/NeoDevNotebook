@@ -1,6 +1,6 @@
 # Part 1: Python: Plan
 
-**Branch:** `module/python` (from `develop`) · **Status:** ⏳ Awaiting approval
+**Branch:** `module/python` (from `develop`) · **Status:** 🔨 In progress (✅ Approved 2026-10-26)
 **Module:** `content/python/` · idPrefix `py` · route `/learn/python`
 
 ---
@@ -364,4 +364,4 @@ a problem page. Lab budgets from soul.md §11.
 
 ---
 
-**Approval:** `Status: ⏳ Awaiting approval`. Reply **`proceed`**, together with any answers to Q1–Q4, to start step 1.1.
+**Approval:** ✅ Approved by owner on 2026-10-26 ("proceed").

@@ -3,6 +3,7 @@ import path from "node:path"
 import matter from "gray-matter"
 import YAML from "yaml"
 import type { z } from "zod"
+import { splitSections } from "./sections"
 import {
   interviewSchema,
   lessonFrontmatterSchema,
@@ -165,6 +166,9 @@ export function findIntegrityIssues(bundles: ContentBundle[]): string[] {
     if (owner) issues.push(`idPrefix "${module.idPrefix}" used by both ${owner} and ${module.slug}`)
     prefixes.set(module.idPrefix, module.slug)
 
+    for (const s of splitSections(lessons)) {
+      issues.push(`${module.slug}: section "${s}" is split; its lessons must be consecutive`)
+    }
     const lessonSlugs = new Set<string>()
     for (const l of lessons) {
       if (lessonSlugs.has(l.slug)) issues.push(`${module.slug}: duplicate lesson slug "${l.slug}"`)

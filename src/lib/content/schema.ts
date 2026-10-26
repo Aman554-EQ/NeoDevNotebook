@@ -29,6 +29,8 @@ export const lessonFrontmatterSchema = z.object({
   objectives: z.array(nonEmpty).min(1).max(6),
   prerequisites: z.array(nonEmpty).default([]),
   tags: z.array(slug).default([]),
+  /** Optional group heading in the sidebar and module page; lessons of a section must be contiguous. */
+  section: nonEmpty.max(40).optional(),
 })
 export type LessonFrontmatter = z.infer<typeof lessonFrontmatterSchema>
 

@@ -5,6 +5,7 @@ import { ListChecks, MessageSquareText } from "lucide-react"
 import { DifficultyBadge, MinutesBadge } from "@/components/lesson/badges"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
 import { getModule, getNavTree } from "@/lib/content"
+import { groupBySection, sectionId } from "@/lib/content/sections"
 
 export const ensureStatic = "navigation"
 
@@ -29,30 +30,50 @@ export default async function ModulePage({ params }: PageProps<"/learn/[module]"
       <h1 className="font-display mt-1 text-3xl font-semibold sm:text-4xl">{m.title}</h1>
       <p className="text-muted mt-3 max-w-2xl text-lg">{m.description}</p>
 
-      <ol className="mt-8 space-y-3">
-        {m.lessons.map((l) => (
-          <li key={l.slug}>
-            <Link
-              href={`/learn/${m.slug}/${l.slug}`}
-              className="group border-rule bg-surface hover:border-accent flex gap-4 rounded-[var(--radius-card)] border p-4"
-            >
-              <span className="text-muted font-mono text-2xl tabular-nums">
-                {String(l.order).padStart(2, "0")}
-              </span>
-              <span className="min-w-0">
-                <span className="font-display group-hover:text-accent block text-lg font-semibold">
-                  {l.title}
+      <div className="mt-8 space-y-10">
+        {groupBySection(m.lessons).map((g, i) => (
+          <section
+            key={g.section ?? `group-${i}`}
+            aria-labelledby={g.section ? sectionId(m.slug, g.section) : undefined}
+          >
+            {g.section && (
+              <h2
+                id={sectionId(m.slug, g.section)}
+                className="font-display mb-3 text-xl font-semibold"
+              >
+                {g.section}
+                <span className="text-muted ml-2 font-sans text-sm font-normal">
+                  {g.items.length} lessons
                 </span>
-                <span className="text-muted mt-1 block text-[0.95rem]">{l.summary}</span>
-                <span className="mt-2 flex items-center gap-3">
-                  <DifficultyBadge level={l.difficulty} />
-                  <MinutesBadge minutes={l.estimatedMinutes} />
-                </span>
-              </span>
-            </Link>
-          </li>
+              </h2>
+            )}
+            <ol className="space-y-3">
+              {g.items.map((l) => (
+                <li key={l.slug}>
+                  <Link
+                    href={`/learn/${m.slug}/${l.slug}`}
+                    className="group border-rule bg-surface hover:border-accent flex gap-4 rounded-[var(--radius-card)] border p-4"
+                  >
+                    <span className="text-muted font-mono text-2xl tabular-nums">
+                      {String(l.order).padStart(2, "0")}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="font-display group-hover:text-accent block text-lg font-semibold">
+                        {l.title}
+                      </span>
+                      <span className="text-muted mt-1 block text-[0.95rem]">{l.summary}</span>
+                      <span className="mt-2 flex items-center gap-3">
+                        <DifficultyBadge level={l.difficulty} />
+                        <MinutesBadge minutes={l.estimatedMinutes} />
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ol>
+          </section>
         ))}
-      </ol>
+      </div>
 
       <div className="mt-8 flex flex-wrap gap-3">
         {m.problemCount > 0 && (
