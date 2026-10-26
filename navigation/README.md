@@ -4,14 +4,14 @@ Where everything lives. Update this whenever a module, lesson, route, component 
 
 ## Project control files
 
-| What                  | Path                                                     |
-| --------------------- | -------------------------------------------------------- |
-| Rulebook (read first) | [../soul.md](../soul.md)                                 |
-| Original brief        | [../initial-prompt.md](../initial-prompt.md)             |
-| Roadmap & plan status | [../plan/README.md](../plan/README.md)                   |
-| Documentation index   | [../documentation/README.md](../documentation/README.md) |
-| Changelog             | [../changelog/](../changelog/)                           |
-| Per-part maps         | [part-0-setup.md](part-0-setup.md)                       |
+| What                  | Path                                                                      |
+| --------------------- | ------------------------------------------------------------------------- |
+| Rulebook (read first) | [../soul.md](../soul.md)                                                  |
+| Original brief        | [../initial-prompt.md](../initial-prompt.md)                              |
+| Roadmap & plan status | [../plan/README.md](../plan/README.md)                                    |
+| Documentation index   | [../documentation/README.md](../documentation/README.md)                  |
+| Changelog             | [../changelog/](../changelog/)                                            |
+| Per-part maps         | [part-0-setup.md](part-0-setup.md) · [part-1-python.md](part-1-python.md) |
 
 ## Branches
 
@@ -25,9 +25,10 @@ Where everything lives. Update this whenever a module, lesson, route, component 
 
 ## Modules → routes → files → tests
 
-| Part | Module     | Route               | Content               | Visuals                          | E2E               |
-| ---- | ---------- | ------------------- | --------------------- | -------------------------------- | ----------------- |
-| 0    | Start Here | `/learn/start-here` | `content/start-here/` | `src/components/viz/start-here/` | `tests/e2e/core/` |
+| Part | Module     | Route                                                      | Content               | Visuals                                                                      | E2E                 |
+| ---- | ---------- | ---------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------- | ------------------- |
+| 0    | Start Here | `/learn/start-here`                                        | `content/start-here/` | `src/components/viz/start-here/`                                             | `tests/e2e/core/`   |
+| 1    | Python     | `/learn/python` · `/practice/python` · `/interview/python` | `content/python/`     | `src/components/viz/python/`, `_shared/code-stepper*`, `_shared/call-stack/` | `tests/e2e/python/` |
 
 ## Code map
 

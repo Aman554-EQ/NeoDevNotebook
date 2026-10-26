@@ -1,6 +1,6 @@
 # Part 1: Python: Plan
 
-**Branch:** `module/python` (from `develop`) · **Status:** 🔨 In progress (✅ Approved 2026-10-26)
+**Branch:** `module/python` (from `develop`) · **Status:** ✅ Done (approved 2026-10-26, built and tested 2026-10-27). Details: [documentation](../../documentation/part-1-python.md)
 **Module:** `content/python/` · idPrefix `py` · route `/learn/python`
 
 ---
@@ -28,16 +28,16 @@ between versions (for example `dis` output or error-message wording), the lesson
 
 ## 2. Deliverables Checklist
 
-- [ ] Platform: lesson **sections** in the sidebar and module page (§6.1)
-- [ ] Platform: **Code Stepper** with traces recorded from real execution (§6.2)
-- [ ] Platform: **content targets** in `module.yaml`, enforced by tests (§6.3)
-- [ ] 36 lessons (§3), each with a visual, worked example, common mistakes, practice links and takeaways
-- [ ] 6 3D scenes + 16 2D visuals (§4), each with controls, a caption, narration and a static fallback
-- [ ] 60 problems (§5.1), each with solution code, explanation **below** the code, complexity and hidden test asserts
-- [ ] 56 interview questions (§5.2)
-- [ ] Every code sample, solution and trace verified on Python 3.13
-- [ ] Unit + E2E tests (§8), all green at 4 viewports
-- [ ] Docs: `documentation/part-1-python.md`, `navigation/part-1-python.md`, changelog, plan status
+- [x] Platform: lesson **sections** in the sidebar and module page (§6.1)
+- [x] Platform: **Code Stepper** with traces recorded from real execution (§6.2)
+- [x] Platform: **content targets** in `module.yaml`, enforced by tests (§6.3)
+- [x] 36 lessons (§3), each with a visual, worked example, common mistakes, practice links and takeaways
+- [x] 6 3D scenes + 16 2D visuals (§4), each with controls, a caption, narration and a static fallback
+- [x] 60 problems (§5.1), each with solution code, explanation **below** the code, complexity and hidden test asserts
+- [x] 56 interview questions (§5.2)
+- [x] Every code sample, solution and trace verified on Python 3.13
+- [x] Unit + E2E tests (§8), all green at 4 viewports
+- [x] Docs: `documentation/part-1-python.md`, `navigation/part-1-python.md`, changelog, plan status
 
 ---
 
