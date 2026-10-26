@@ -1,0 +1,93 @@
+id: py-p-051
+title: Autocomplete with a trie
+difficulty: hard
+tags:
+  - trie
+  - classes
+  - strings
+statement: |
+  Build a `Trie` class with `insert(word)`, `contains(word)` and `complete(prefix, limit=5)`.
+  `complete` returns up to `limit` stored words starting with `prefix`, in alphabetical order.
+constraints:
+  - Up to 10**5 words.
+  - "`complete` should not scan words that don't start with the prefix."
+examples:
+  - input: t.complete("ca")
+    output: "['car', 'card', 'care', 'cat']"
+    explanation: after inserting car, card, care, cat, dog
+hints:
+  - Each node is a dict of child letters plus an 'end of word' flag.
+  - Walk down the prefix, then do a depth-first search visiting children in sorted order.
+solution:
+  language: python
+  code: |
+    class Trie:
+        def __init__(self) -> None:
+            self.children: dict[str, "Trie"] = {}
+            self.is_word = False
+
+        def insert(self, word: str) -> None:
+            node = self
+            for ch in word:
+                node = node.children.setdefault(ch, Trie())
+            node.is_word = True
+
+        def _find(self, prefix: str) -> "Trie | None":
+            node = self
+            for ch in prefix:
+                node = node.children.get(ch)
+                if node is None:
+                    return None
+            return node
+
+        def contains(self, word: str) -> bool:
+            node = self._find(word)
+            return node is not None and node.is_word
+
+        def complete(self, prefix: str, limit: int = 5) -> list[str]:
+            start = self._find(prefix)
+            results: list[str] = []
+
+            def walk(node: "Trie", path: str) -> None:
+                if len(results) >= limit:
+                    return
+                if node.is_word:
+                    results.append(path)
+                for ch in sorted(node.children):
+                    walk(node.children[ch], path + ch)
+
+            if start is not None:
+                walk(start, prefix)
+            return results
+
+
+    t = Trie()
+    for w in ["car", "card", "care", "cat", "dog"]:
+        t.insert(w)
+    print(t.complete("ca"), t.complete("ca", limit=2), t.contains("ca"), t.complete("x"))
+  explanation: |
+    A trie stores words letter by letter along a tree path, so all words sharing a prefix
+    share the same branch. Finding the prefix node costs O(len(prefix)), however many
+    words are stored, and only that branch is explored afterwards.
+
+    `is_word` marks nodes where a complete word ends, which is why `"ca"` isn't "contained"
+    even though it's a prefix. Visiting children in sorted order makes the depth-first
+    search produce alphabetical results, and the `limit` check stops early, which is what
+    an autocomplete box needs.
+complexity:
+  time: O(L) insert/contains; O(P + output) complete
+  space: O(total letters)
+variations:
+  - Rank completions by how often each word was inserted.
+verify: |
+  import random, string
+  random.seed(4)
+  words = {"".join(random.choice("abc") for _ in range(random.randint(1, 5))) for _ in range(200)}
+  t = Trie()
+  for w in words:
+      t.insert(w)
+  for prefix in ["", "a", "ab", "cab", "zz"]:
+      expected = sorted(w for w in words if w.startswith(prefix))[:5]
+      assert t.complete(prefix) == expected, prefix
+  assert all(t.contains(w) for w in words)
+  assert not t.contains("zzz")

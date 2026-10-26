@@ -1,0 +1,49 @@
+id: py-p-032
+title: Group anagrams
+difficulty: medium
+tags:
+  - dicts
+  - defaultdict
+  - hashing
+statement: |
+  Write `group_anagrams(words)` that groups words that are anagrams of each other. Return the
+  groups sorted, each group sorted alphabetically.
+constraints:
+  - Words are lower-case ASCII.
+  - "`0 <= len(words) <= 10**5`"
+examples:
+  - input: group_anagrams(["eat", "tea", "tan", "ate", "nat", "bat"])
+    output: "[['ate', 'eat', 'tea'], ['bat'], ['nat', 'tan']]"
+hints:
+  - Anagrams have the same letters, so they have the same SORTED letters.
+  - Use that canonical form as a dict key.
+solution:
+  language: python
+  code: |
+    from collections import defaultdict
+
+
+    def group_anagrams(words: list[str]) -> list[list[str]]:
+        groups: defaultdict[str, list[str]] = defaultdict(list)
+        for word in words:
+            groups["".join(sorted(word))].append(word)
+        return sorted(sorted(group) for group in groups.values())
+
+
+    print(group_anagrams(["eat", "tea", "tan", "ate", "nat", "bat"]))
+  explanation: |
+    The trick is a **canonical key**: sorting a word's letters gives the same string for all
+    its anagrams (`"eat"`, `"tea"` and `"ate"` all become `"aet"`). A `defaultdict(list)`
+    collects the words under that key in one pass, with no "is the key there yet?" code.
+
+    Comparing every pair of words would be O(n²). With the key, each word costs
+    O(k log k) for its length k. The final sorts just make the output deterministic.
+complexity:
+  time: O(n · k log k)
+  space: O(n · k)
+variations:
+  - Use a 26-count tuple as the key to get O(n · k) instead.
+verify: |
+  assert group_anagrams(["eat", "tea", "tan", "ate", "nat", "bat"]) == [["ate", "eat", "tea"], ["bat"], ["nat", "tan"]]
+  assert group_anagrams([]) == []
+  assert group_anagrams(["a"]) == [["a"]]

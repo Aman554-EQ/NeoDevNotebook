@@ -1,0 +1,91 @@
+id: py-p-046
+title: Shortest route in a weighted graph
+difficulty: hard
+tags:
+  - graphs
+  - dijkstra
+  - heapq
+statement: |
+  Roads are given as `{city: [(neighbour, minutes), ...]}` with non-negative minutes. Write
+  `shortest_route(graph, start, goal)` that returns `(total_minutes, [cities on the path])`,
+  or `None` if the goal is unreachable.
+constraints:
+  - Up to 10**4 cities and 10**5 roads.
+  - Weights are >= 0.
+examples:
+  - input: 'shortest_route({"A": [("B", 5), ("C", 1)], "C": [("B", 2)], "B": [("D", 1)]}, "A", "D")'
+    output: (4, ['A', 'C', 'B', 'D'])
+hints:
+  - "Always expand the closest unfinished city next: a min-heap of (distance, city)."
+  - Store each city's predecessor to rebuild the path at the end.
+solution:
+  language: python
+  code: |
+    import heapq
+
+
+    def shortest_route(graph: dict, start: str, goal: str):
+        best = {start: 0}
+        previous: dict[str, str] = {}
+        heap = [(0, start)]
+        while heap:
+            dist, city = heapq.heappop(heap)
+            if city == goal:
+                path = [city]
+                while city in previous:
+                    city = previous[city]
+                    path.append(city)
+                return dist, path[::-1]
+            if dist > best.get(city, float("inf")):
+                continue  # a stale heap entry: a shorter route was found already
+            for neighbour, minutes in graph.get(city, []):
+                new = dist + minutes
+                if new < best.get(neighbour, float("inf")):
+                    best[neighbour] = new
+                    previous[neighbour] = city
+                    heapq.heappush(heap, (new, neighbour))
+        return None
+
+
+    roads = {"A": [("B", 5), ("C", 1)], "C": [("B", 2)], "B": [("D", 1)]}
+    print(shortest_route(roads, "A", "D"), shortest_route(roads, "D", "A"))
+  explanation: |
+    Dijkstra's algorithm always settles the closest city not yet finished. With
+    non-negative weights, no later route can make it any shorter. The min-heap hands us
+    that city in O(log n).
+
+    Instead of a decrease-key operation, we push a new entry whenever we find a shorter
+    distance, and skip outdated entries when they're popped (`dist > best[city]`). The
+    `previous` map records how we reached each city. Walking it backwards from the goal
+    rebuilds the route. Overall: O((V + E) log V).
+complexity:
+  time: O((V + E) log V)
+  space: O(V + E)
+variations:
+  - Why does Dijkstra fail with negative weights? Look up Bellman–Ford.
+verify: |
+  roads = {"A": [("B", 5), ("C", 1)], "C": [("B", 2)], "B": [("D", 1)]}
+  assert shortest_route(roads, "A", "D") == (4, ["A", "C", "B", "D"])
+  assert shortest_route(roads, "D", "A") is None
+  assert shortest_route(roads, "A", "A") == (0, ["A"])
+  import random, itertools
+  random.seed(11)
+  nodes = list("PQRSTU")
+  g = {n: [(m, random.randint(0, 9)) for m in nodes if m != n and random.random() < 0.5] for n in nodes}
+  def brute(s, t):
+      best = None
+      for k in range(len(nodes)):
+          for mid in itertools.permutations([n for n in nodes if n not in (s, t)], k):
+              path = [s, *mid, t]
+              cost = 0
+              for a, b in zip(path, path[1:]):
+                  w = dict(g[a]).get(b)
+                  if w is None:
+                      break
+                  cost += w
+              else:
+                  best = cost if best is None else min(best, cost)
+      return best
+  for s, t in itertools.permutations(nodes, 2):
+      r = shortest_route(g, s, t)
+      assert (r[0] if r else None) == brute(s, t), (s, t)

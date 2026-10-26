@@ -1,0 +1,47 @@
+id: py-p-038
+title: Flatten any nested list
+difficulty: medium
+tags:
+  - recursion
+  - generators
+statement: |
+  Write a generator `flatten(items)` that yields every non-list value from arbitrarily nested
+  lists, in order. Strings are values, not lists to split.
+constraints:
+  - Nesting depth is below the recursion limit.
+examples:
+  - input: list(flatten([1, [2, [3, ["four"]], 5], []]))
+    output: "[1, 2, 3, 'four', 5]"
+hints:
+  - If an item is a list, delegate to a recursive call with `yield from`.
+solution:
+  language: python
+  code: |
+    def flatten(items):
+        for item in items:
+            if isinstance(item, list):
+                yield from flatten(item)  # delegate the sub-list
+            else:
+                yield item
+
+
+    print(list(flatten([1, [2, [3, ["four"]], 5], []])))
+  explanation: |
+    The data is recursive (lists inside lists), so the code is too. A list item is handed to
+    a recursive `flatten`, and `yield from` passes every value it produces straight through.
+    Anything else is yielded as-is.
+
+    Checking `isinstance(item, list)` (rather than "is it iterable?") keeps strings whole.
+    Otherwise `"four"` would be split into characters, and each character is itself an
+    iterable string, which would recurse forever. Being a generator, it works lazily on
+    huge structures.
+complexity:
+  time: O(total items)
+  space: O(depth)
+variations:
+  - Rewrite without recursion using an explicit stack of iterators.
+verify: |
+  assert list(flatten([1, [2, [3, ["four"]], 5], []])) == [1, 2, 3, "four", 5]
+  assert list(flatten([])) == []
+  assert list(flatten([[[[]]]])) == []
+  assert list(flatten(["ab", ["cd"]])) == ["ab", "cd"]

@@ -1,0 +1,77 @@
+id: py-p-059
+title: 🐞 Tree walk hits RecursionError
+difficulty: hard
+tags:
+  - debugging
+  - recursion
+  - stack
+statement: |
+  `depth_sum` works on small trees but crashes with `RecursionError` on a deep, chain-like
+  tree (50,000 levels). Rewrite it **without recursion** so it handles any depth, with the
+  same results.
+
+  ```python
+  def depth_sum(node, depth=1):
+      # node = {"value": int, "children": [nodes]}
+      return node["value"] * depth + sum(
+          depth_sum(child, depth + 1) for child in node["children"]
+      )
+  ```
+constraints:
+  - Don't raise the recursion limit.
+  - Trees can have up to 10**6 nodes.
+examples:
+  - input: '{"value": 1, "children": [{"value": 2, "children": []}, {"value": 3, "children": []}]}'
+    output: "11"
+    explanation: 1×1 + 2×2 + 3×2
+hints:
+  - Recursion uses the call stack; use your own list as a stack instead.
+  - Push (node, depth) pairs.
+solution:
+  language: python
+  code: |
+    def depth_sum(root: dict) -> int:
+        total = 0
+        stack = [(root, 1)]  # our own stack instead of the call stack
+        while stack:
+            node, depth = stack.pop()
+            total += node["value"] * depth
+            for child in node["children"]:
+                stack.append((child, depth + 1))
+        return total
+
+
+    small = {"value": 1, "children": [{"value": 2, "children": []}, {"value": 3, "children": []}]}
+
+    deep = {"value": 1, "children": []}
+    tip = deep
+    for _ in range(50_000):  # a 50,001-level chain
+        child = {"value": 1, "children": []}
+        tip["children"].append(child)
+        tip = child
+
+    print(depth_sum(small), depth_sum(deep))
+  explanation: |
+    Each recursive call adds a frame to Python's call stack, which is limited to about 1000
+    frames, so a 50,000-level chain overflows it. The fix is to manage the pending work
+    ourselves: a list of `(node, depth)` pairs. A Python list can hold millions of items.
+
+    The order we visit nodes doesn't matter for a sum, so a stack (depth-first) is fine.
+    Use a `deque` for breadth-first if order matters. The answer for the chain is
+    1 + 2 + … + 50001 = 1,250,075,001, which the recursive version can't reach.
+complexity:
+  time: O(n)
+  space: O(n) worst case for the explicit stack
+variations:
+  - Return the maximum depth and the deepest node's value, iteratively.
+verify: |
+  def recursive(node, depth=1):
+      return node["value"] * depth + sum(recursive(c, depth + 1) for c in node["children"])
+  import random
+  random.seed(12)
+  def tree(d):
+      return {"value": random.randint(-5, 5), "children": [tree(d + 1) for _ in range(random.randint(0, 3 if d < 4 else 0))]}
+  for _ in range(50):
+      t = tree(0)
+      assert depth_sum(t) == recursive(t)
+  assert depth_sum(deep) == 50_001 * 50_002 // 2

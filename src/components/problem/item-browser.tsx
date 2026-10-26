@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
-import { Suspense, useMemo } from "react"
+import { Suspense, useMemo, useState } from "react"
 import { CircleCheck, Search } from "lucide-react"
 import { DifficultyBadge, TagChip } from "@/components/lesson/badges"
 import { DIFFICULTIES, type Difficulty } from "@/lib/content/difficulty"
@@ -63,13 +63,30 @@ export function ItemBrowser(props: { items: BrowserItem[]; doneLabel: string }) 
   )
 }
 
+const TOP_TAGS = 10
+
 function FilteredBrowser({ items, doneLabel }: { items: BrowserItem[]; doneLabel: string }) {
   const params = useSearchParams()
   const pathname = usePathname()
   const { isDone } = useProgress()
   const filters = parseFilters(new URLSearchParams(params.toString()))
   const visible = applyFilters(items, filters, isDone)
-  const allTags = useMemo(() => [...new Set(items.flatMap((i) => i.tags))].sort(), [items])
+  // Most-used tags first (ties alphabetical). Long lists are collapsed so the results stay in view.
+  const allTags = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const t of items.flatMap((i) => i.tags)) counts.set(t, (counts.get(t) ?? 0) + 1)
+    return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([t]) => t)
+  }, [items])
+  const [showAllTags, setShowAllTags] = useState(false)
+  const shownTags =
+    showAllTags || allTags.length <= TOP_TAGS
+      ? allTags
+      : [
+          ...allTags.slice(0, TOP_TAGS),
+          ...(filters.tag && !allTags.slice(0, TOP_TAGS).includes(filters.tag)
+            ? [filters.tag]
+            : []),
+        ]
 
   function update(patch: Partial<Filters>) {
     // Read the live URL, not the rendered params: two quick clicks must not lose the first change.
@@ -150,7 +167,7 @@ function FilteredBrowser({ items, doneLabel }: { items: BrowserItem[]; doneLabel
         {allTags.length > 0 && (
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Tag">
             <span className="text-muted w-20 text-sm">Tag</span>
-            {allTags.map((t) => (
+            {shownTags.map((t) => (
               <button
                 key={t}
                 type="button"
@@ -162,6 +179,17 @@ function FilteredBrowser({ items, doneLabel }: { items: BrowserItem[]; doneLabel
                 #{t}
               </button>
             ))}
+            {allTags.length > TOP_TAGS && (
+              <button
+                type="button"
+                onClick={() => setShowAllTags((v) => !v)}
+                aria-expanded={showAllTags}
+                data-testid="toggle-all-tags"
+                className="text-accent text-sm font-medium underline-offset-2 hover:underline"
+              >
+                {showAllTags ? "Fewer tags" : `All ${allTags.length} tags`}
+              </button>
+            )}
           </div>
         )}
       </div>

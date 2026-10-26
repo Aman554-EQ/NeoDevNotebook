@@ -1,0 +1,55 @@
+id: py-p-016
+title: Run-length encoding
+difficulty: simple
+tags:
+  - strings
+  - iteration
+statement: |
+  Write `rle(text)` that compresses runs of the same character as `<count><char>`, for
+  example `"aaabcc"` → `"3a1b2c"`. Then write `unrle(code)` that reverses it (counts can
+  have several digits).
+constraints:
+  - "`text` contains no digits."
+  - "`0 <= len(text) <= 10**5`"
+examples:
+  - input: rle("aaabcc")
+    output: "'3a1b2c'"
+  - input: unrle("12x1y")
+    output: "'xxxxxxxxxxxxy'"
+hints:
+  - "`itertools.groupby(text)` yields each character with an iterator over its run."
+  - For decoding, `re.findall(r'(\d+)(\D)', code)` gives (count, char) pairs.
+solution:
+  language: python
+  code: |
+    import re
+    from itertools import groupby
+
+
+    def rle(text: str) -> str:
+        return "".join(f"{len(list(run))}{ch}" for ch, run in groupby(text))
+
+
+    def unrle(code: str) -> str:
+        return "".join(ch * int(count) for count, ch in re.findall(r"(\d+)(\D)", code))
+
+
+    print(rle("aaabcc"), unrle("12x1y"), unrle(rle("hello")) == "hello")
+  explanation: |
+    `groupby` groups **consecutive** equal characters, which is exactly a "run". For each
+    group we count its length and write `count` then `char`, and `"".join` assembles the
+    pieces in one pass.
+
+    To decode, the regex captures a run of digits followed by one non-digit, so `12x` is
+    read as twelve x's, not "1, 2x". Repeating a string with `ch * n` rebuilds each run.
+    Round-tripping (`unrle(rle(s)) == s`) is a great test.
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Only write the count when it's greater than 1 ('3ab2c').
+verify: |
+  for s in ["", "a", "aaabcc", "abc", "zzzzzzzzzzzz", "hello world"]:
+      assert unrle(rle(s)) == s, s
+  assert rle("aaabcc") == "3a1b2c"
+  assert unrle("12x1y") == "x" * 12 + "y"

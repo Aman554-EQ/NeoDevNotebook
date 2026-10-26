@@ -1,0 +1,78 @@
+id: py-p-037
+title: Queue from two stacks
+difficulty: medium
+tags:
+  - stack
+  - queue
+  - amortized
+statement: |
+  Implement a FIFO queue class `StackQueue` with `push(x)`, `pop()` and `__len__`, using
+  only two Python lists used as stacks (`append` and `pop()` at the end). `pop()` on an empty
+  queue raises `IndexError`.
+constraints:
+  - Every operation must be amortized O(1).
+examples:
+  - input: q = StackQueue(); q.push(1); q.push(2); q.pop()
+    output: "1"
+hints:
+  - Pour the input stack into the output stack ONLY when the output stack is empty.
+  - Pouring reverses the order, which turns LIFO into FIFO.
+solution:
+  language: python
+  code: |
+    class StackQueue:
+        def __init__(self) -> None:
+            self._in: list = []
+            self._out: list = []
+
+        def push(self, item) -> None:
+            self._in.append(item)
+
+        def pop(self):
+            if not self._out:
+                while self._in:  # reverse once; each item moves at most once
+                    self._out.append(self._in.pop())
+            if not self._out:
+                raise IndexError("pop from an empty queue")
+            return self._out.pop()
+
+        def __len__(self) -> int:
+            return len(self._in) + len(self._out)
+
+
+    q = StackQueue()
+    for x in [1, 2, 3]:
+        q.push(x)
+    print(q.pop(), q.pop(), len(q))
+  explanation: |
+    New items go onto `_in`. When we need the oldest item and `_out` is empty, we pop
+    everything from `_in` onto `_out`, which reverses the order, so the oldest item ends up
+    on top of `_out`.
+
+    A single `pop` can cost O(n) when it triggers a pour, but each item is moved from `_in`
+    to `_out` at most **once** in its lifetime. Over any sequence of operations that's
+    O(1) per operation on average: *amortized* O(1).
+complexity:
+  time: amortized O(1) per operation
+  space: O(n)
+variations:
+  - Implement a stack using two queues, and compare the costs.
+verify: |
+  from collections import deque
+  import random
+  random.seed(7)
+  q, ref = StackQueue(), deque()
+  for _ in range(2000):
+      if ref and random.random() < 0.45:
+          assert q.pop() == ref.popleft()
+      else:
+          v = random.randint(0, 99)
+          q.push(v)
+          ref.append(v)
+      assert len(q) == len(ref)
+  try:
+      StackQueue().pop()
+  except IndexError:
+      pass
+  else:
+      raise AssertionError

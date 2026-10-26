@@ -1,0 +1,46 @@
+id: py-p-008
+title: Merge two score dicts, adding shared keys
+difficulty: easy
+tags:
+  - dicts
+statement: |
+  Write `merge_scores(a, b)` that returns a **new** dict with every key from both dicts.
+  When a key appears in both, its value is the sum. Don't modify the inputs.
+constraints:
+  - Values are integers.
+examples:
+  - input: 'merge_scores({"ada": 3, "bo": 1}, {"bo": 4, "cy": 2})'
+    output: "{'ada': 3, 'bo': 5, 'cy': 2}"
+hints:
+  - Copy `a`, then loop over `b.items()`.
+  - "`d.get(key, 0)` returns 0 for a missing key."
+solution:
+  language: python
+  code: |
+    def merge_scores(a: dict[str, int], b: dict[str, int]) -> dict[str, int]:
+        merged = dict(a)  # a shallow copy: the input stays unchanged
+        for name, score in b.items():
+            merged[name] = merged.get(name, 0) + score
+        return merged
+
+
+    first = {"ada": 3, "bo": 1}
+    print(merge_scores(first, {"bo": 4, "cy": 2}), first)
+  explanation: |
+    `dict(a)` creates a new dict, so adding keys never touches the caller's `a`. For each
+    key in `b`, `merged.get(name, 0)` returns the existing score, or 0 when the key is new,
+    and we add `b`'s score to it.
+
+    `collections.Counter(a) + Counter(b)` does the same in one line, but it drops keys whose
+    total isn't positive. The explicit loop keeps zeros and negatives.
+complexity:
+  time: O(len(a) + len(b))
+  space: O(len(a) + len(b))
+variations:
+  - "Merge any number of dicts: `merge_scores(*dicts)`."
+verify: |
+  a = {"ada": 3, "bo": 1}
+  assert merge_scores(a, {"bo": 4, "cy": 2}) == {"ada": 3, "bo": 5, "cy": 2}
+  assert a == {"ada": 3, "bo": 1}
+  assert merge_scores({}, {}) == {}
+  assert merge_scores({"x": 2}, {"x": -2}) == {"x": 0}

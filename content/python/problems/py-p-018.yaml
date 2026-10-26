@@ -1,0 +1,50 @@
+id: py-p-018
+title: Split a list into chunks of n
+difficulty: simple
+tags:
+  - slicing
+  - range
+statement: |
+  Write `chunks(items, n)` that splits `items` into consecutive lists of length `n`. The last
+  chunk may be shorter. Raise `ValueError` if `n < 1`.
+constraints:
+  - "`1 <= n`"
+examples:
+  - input: chunks([1, 2, 3, 4, 5], 2)
+    output: "[[1, 2], [3, 4], [5]]"
+hints:
+  - "`range(0, len(items), n)` gives the start of every chunk."
+  - Slices never raise for out-of-range ends.
+solution:
+  language: python
+  code: |
+    def chunks(items: list, n: int) -> list[list]:
+        if n < 1:
+            raise ValueError("n must be at least 1")
+        return [items[i : i + n] for i in range(0, len(items), n)]
+
+
+    print(chunks([1, 2, 3, 4, 5], 2), chunks([], 3))
+  explanation: |
+    `range(0, len(items), n)` steps through the chunk starts: 0, n, 2n, and so on. Each
+    slice `items[i : i + n]` takes up to `n` items, and for the last chunk the slice
+    simply stops at the end of the list (slices clip, they never raise).
+
+    Without the guard, `n = 0` would make `range` raise `ValueError: range() arg 3 must not
+    be zero`. Checking first gives a clearer message. Python 3.12+ also has
+    `itertools.batched(items, n)` for tuples.
+complexity:
+  time: O(len(items))
+  space: O(len(items))
+variations:
+  - Make it a generator that works on any iterable, not just lists.
+verify: |
+  assert chunks([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]
+  assert chunks([], 3) == []
+  assert chunks([1, 2], 5) == [[1, 2]]
+  try:
+      chunks([1], 0)
+  except ValueError:
+      pass
+  else:
+      raise AssertionError

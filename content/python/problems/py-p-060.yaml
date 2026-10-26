@@ -1,0 +1,95 @@
+id: py-p-060
+title: Count friend groups
+difficulty: hard
+tags:
+  - union-find
+  - graphs
+  - classes
+statement: |
+  There are `n` people numbered `0..n-1` and a list of friendships `(a, b)`. Friendship is
+  transitive for grouping: friends of friends are in the same group. Write
+  `count_groups(n, friendships)` using a **union-find** (disjoint set) structure with path
+  compression and union by size.
+constraints:
+  - "`1 <= n <= 10**5`"
+  - Up to 10**5 friendships.
+examples:
+  - input: count_groups(5, [(0, 1), (1, 2), (3, 4)])
+    output: "2"
+hints:
+  - Each person points to a parent; the root names the group.
+  - "Path compression: while finding the root, point nodes directly at it."
+solution:
+  language: python
+  code: |
+    class DisjointSet:
+        def __init__(self, n: int) -> None:
+            self.parent = list(range(n))
+            self.size = [1] * n
+            self.groups = n
+
+        def find(self, x: int) -> int:
+            root = x
+            while self.parent[root] != root:
+                root = self.parent[root]
+            while self.parent[x] != root:  # path compression
+                self.parent[x], x = root, self.parent[x]
+            return root
+
+        def union(self, a: int, b: int) -> bool:
+            ra, rb = self.find(a), self.find(b)
+            if ra == rb:
+                return False  # already in the same group
+            if self.size[ra] < self.size[rb]:
+                ra, rb = rb, ra
+            self.parent[rb] = ra  # attach the smaller tree under the larger
+            self.size[ra] += self.size[rb]
+            self.groups -= 1
+            return True
+
+
+    def count_groups(n: int, friendships: list[tuple[int, int]]) -> int:
+        ds = DisjointSet(n)
+        for a, b in friendships:
+            ds.union(a, b)
+        return ds.groups
+
+
+    print(count_groups(5, [(0, 1), (1, 2), (3, 4)]), count_groups(3, []))
+  explanation: |
+    Every person starts as their own group, each one its own root. `union` joins two groups
+    by attaching one root under the other, and the group count drops by one each time a
+    union actually merges two different groups.
+
+    Two optimisations keep the trees nearly flat. **Union by size** attaches the smaller
+    tree under the larger, and **path compression** makes every node visited by `find`
+    point straight at the root. Together they make each operation effectively O(1)
+    (technically O(α(n)), the inverse Ackermann function). The same structure detects
+    cycles in Kruskal's minimum spanning tree algorithm.
+complexity:
+  time: O((n + m) α(n)) ≈ linear
+  space: O(n)
+variations:
+  - Return the size of the largest group, and support asking 'are a and b connected?'
+verify: |
+  import random
+  random.seed(13)
+  for _ in range(100):
+      n = random.randint(1, 30)
+      edges = [(random.randrange(n), random.randrange(n)) for _ in range(random.randint(0, 40))]
+      adj = {i: set() for i in range(n)}
+      for a, b in edges:
+          adj[a].add(b); adj[b].add(a)
+      seen, comps = set(), 0
+      for s in range(n):
+          if s in seen:
+              continue
+          comps += 1
+          stack = [s]
+          while stack:
+              x = stack.pop()
+              if x in seen:
+                  continue
+              seen.add(x)
+              stack.extend(adj[x] - seen)
+      assert count_groups(n, edges) == comps

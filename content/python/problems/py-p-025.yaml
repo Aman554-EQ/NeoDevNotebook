@@ -1,0 +1,47 @@
+id: py-p-025
+title: Running average generator
+difficulty: simple
+tags:
+  - generators
+  - state
+statement: |
+  Write a generator `running_average(numbers)` that yields the average of all values seen
+  so far after each new value. It must work on any iterable, including an infinite one.
+constraints:
+  - "Use O(1) memory: don't store the values."
+examples:
+  - input: list(running_average([10, 20, 60]))
+    output: "[10.0, 15.0, 30.0]"
+hints:
+  - "You only need two numbers of state: the running total and the count."
+solution:
+  language: python
+  code: |
+    from itertools import count, islice
+
+
+    def running_average(numbers):
+        total = 0.0
+        for n, value in enumerate(numbers, start=1):
+            total += value
+            yield total / n
+
+
+    print(list(running_average([10, 20, 60])))
+    print(list(islice(running_average(count(1)), 4)))  # works on an infinite stream
+  explanation: |
+    A generator keeps its local variables between `yield`s, so `total` and the count
+    (`n` from `enumerate`) persist across values with no class or globals needed.
+
+    Because nothing is stored except two numbers, memory stays constant however long the
+    stream is. With the infinite `count(1)` (1, 2, 3, …), `islice` takes the first four
+    averages: 1.0, 1.5, 2.0, 2.5.
+complexity:
+  time: O(1) per value
+  space: O(1)
+variations:
+  - Yield a moving average over the last k values (`collections.deque(maxlen=k)`).
+verify: |
+  assert list(running_average([10, 20, 60])) == [10.0, 15.0, 30.0]
+  assert list(running_average([])) == []
+  assert list(islice(running_average(count(1)), 4)) == [1.0, 1.5, 2.0, 2.5]

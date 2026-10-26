@@ -1,0 +1,71 @@
+id: py-p-057
+title: Find where a linked list's cycle starts
+difficulty: hard
+tags:
+  - linked-list
+  - two-pointers
+  - floyd
+statement: |
+  A singly linked list is built from `Node(value, next)` objects. The last node may point
+  back to an earlier node, forming a cycle. Write `cycle_start(head)` that returns the node
+  where the cycle begins, or `None`, using O(1) extra memory (no set of visited nodes).
+constraints:
+  - Up to 10**6 nodes.
+examples:
+  - input: 1 → 2 → 3 → 4 → back to 2
+    output: the node with value 2
+hints:
+  - "Floyd's tortoise and hare: one pointer moves 1 step, another 2 steps."
+  - After they meet, restart one pointer at the head; moving both 1 step, they meet at the cycle start.
+solution:
+  language: python
+  code: |
+    class Node:
+        def __init__(self, value, next=None) -> None:
+            self.value = value
+            self.next = next
+
+
+    def cycle_start(head: Node | None) -> Node | None:
+        slow = fast = head
+        while fast and fast.next:
+            slow, fast = slow.next, fast.next.next
+            if slow is fast:  # they met inside the cycle
+                slow = head
+                while slow is not fast:
+                    slow, fast = slow.next, fast.next
+                return slow
+        return None  # fast reached the end: no cycle
+
+
+    nodes = [Node(v) for v in [1, 2, 3, 4]]
+    for a, b in zip(nodes, nodes[1:]):
+        a.next = b
+    nodes[-1].next = nodes[1]  # 4 -> 2 makes a cycle
+    print(cycle_start(nodes[0]).value, cycle_start(Node(9)))
+  explanation: |
+    If there's a cycle, the fast pointer eventually laps the slow one inside it. If
+    there's no cycle, it falls off the end. Identity (`is`) is the right comparison: we
+    care about the same node object, not equal values.
+
+    Why does restarting at the head work? Say the cycle starts `μ` steps from the head.
+    When the pointers meet, the slow one has walked `μ + x` steps, and the fast one twice
+    that. The extra distance is a whole number of loops, so walking `μ` more steps from the
+    meeting point lands exactly on the start, just as walking `μ` steps from the head does.
+    Both pointers, moving one step at a time, arrive together.
+complexity:
+  time: O(n)
+  space: O(1)
+variations:
+  - Also return the cycle's length.
+verify: |
+  for length in range(1, 9):
+      for start in range(-1, length):
+          ns = [Node(i) for i in range(length)]
+          for a, b in zip(ns, ns[1:]):
+              a.next = b
+          if start >= 0:
+              ns[-1].next = ns[start]
+          got = cycle_start(ns[0])
+          assert (got is None) if start < 0 else (got is ns[start]), (length, start)
+  assert cycle_start(None) is None

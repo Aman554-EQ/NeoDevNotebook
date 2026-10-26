@@ -1,0 +1,66 @@
+id: py-p-034
+title: 🐞 Every callback prints the last value
+difficulty: medium
+tags:
+  - debugging
+  - closures
+  - late-binding
+statement: |
+  Each button should greet a different name, but every button says the **last** name. Explain
+  why and fix it.
+
+  ```python
+  def make_buttons(names):
+      buttons = []
+      for name in names:
+          buttons.append(lambda: f"Hi {name}")
+      return buttons
+
+  print([b() for b in make_buttons(["ada", "bo", "cy"])])
+  # ['Hi cy', 'Hi cy', 'Hi cy']
+  ```
+constraints:
+  - Keep one callable per name.
+examples:
+  - input: '[b() for b in make_buttons(["ada", "bo", "cy"])]'
+    output: "['Hi ada', 'Hi bo', 'Hi cy']"
+hints:
+  - "When does the lambda look up `name`: when it's created, or when it's called?"
+  - Default argument values are evaluated at definition time.
+solution:
+  language: python
+  code: |
+    from functools import partial
+
+
+    def make_buttons(names: list[str]):
+        return [lambda name=name: f"Hi {name}" for name in names]  # bind NOW
+
+
+    def greet(name: str) -> str:
+        return f"Hi {name}"
+
+
+    def make_buttons_partial(names: list[str]):
+        return [partial(greet, name) for name in names]  # also binds now
+
+
+    print([b() for b in make_buttons(["ada", "bo", "cy"])])
+    print([b() for b in make_buttons_partial(["ada", "bo"])])
+  explanation: |
+    A closure stores a reference to the **variable** `name`, not its value at that moment.
+    All three lambdas share the loop's single `name` variable, and they're called after the
+    loop has finished, when `name == "cy"`. This is called *late binding*.
+
+    `lambda name=name: ...` evaluates the default **when each lambda is created**, freezing
+    the current value into that function. `functools.partial(greet, name)` does the same
+    and reads more clearly. This bug often shows up with GUI callbacks and threads.
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Explain why a list comprehension doesn't fix it on its own.
+verify: |
+  assert [b() for b in make_buttons(["ada", "bo", "cy"])] == ["Hi ada", "Hi bo", "Hi cy"]
+  assert [b() for b in make_buttons_partial(["ada", "bo"])] == ["Hi ada", "Hi bo"]
+  assert make_buttons([]) == []

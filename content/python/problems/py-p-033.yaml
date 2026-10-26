@@ -1,0 +1,50 @@
+id: py-p-033
+title: Top-k frequent words with tie-break
+difficulty: medium
+tags:
+  - heapq
+  - sorting
+  - counter
+statement: |
+  Write `top_k(words, k)` that returns the `k` most frequent words. Higher counts come first.
+  Words with equal counts are ordered **alphabetically**.
+constraints:
+  - "`1 <= k <= number of distinct words`"
+examples:
+  - input: top_k(["b", "a", "c", "b", "a", "d"], 2)
+    output: "['a', 'b']"
+    explanation: a and b both appear twice; a sorts first.
+hints:
+  - "`Counter.most_common` breaks ties by first appearance, not alphabetically."
+  - Sort or select by the key `(-count, word)`.
+solution:
+  language: python
+  code: |
+    import heapq
+    from collections import Counter
+
+
+    def top_k(words: list[str], k: int) -> list[str]:
+        counts = Counter(words)
+        return heapq.nsmallest(k, counts, key=lambda w: (-counts[w], w))
+
+
+    print(top_k(["b", "a", "c", "b", "a", "d"], 2))
+    print(top_k(["the", "day", "is", "the", "sunny", "the", "is", "is"], 3))
+  explanation: |
+    The key `(-count, word)` encodes both rules. Negating the count makes **larger** counts
+    sort first, and the word breaks ties alphabetically, because tuples compare item by
+    item.
+
+    `heapq.nsmallest(k, ...)` keeps only `k` candidates while scanning, so it's O(n log k)
+    rather than O(n log n) for a full sort. For small inputs, `sorted(counts, key=...)[:k]`
+    gives the same answer.
+complexity:
+  time: O(n log k)
+  space: O(n)
+variations:
+  - "Stream version: maintain the top k while words keep arriving."
+verify: |
+  assert top_k(["b", "a", "c", "b", "a", "d"], 2) == ["a", "b"]
+  assert top_k(["the", "day", "is", "the", "sunny", "the", "is", "is"], 3) == ["is", "the", "day"]
+  assert top_k(["x"], 1) == ["x"]

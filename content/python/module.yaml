@@ -7,3 +7,5 @@ idPrefix: py
 # Targets grow as milestones complete (soul.md §12). Final: 36 lessons, 60 problems (15 per tier), 56 interview (8+ per tier).
 targets:
   lessons: 36
+  problems: 60
+  problemsPerDifficulty: 15

@@ -1,0 +1,48 @@
+id: py-p-028
+title: Memoized Fibonacci
+difficulty: simple
+tags:
+  - recursion
+  - functools
+  - caching
+statement: |
+  Write `fib(n)` (with `fib(0) = 0`, `fib(1) = 1`) that computes `fib(90)` instantly, using
+  the natural recursive definition plus caching.
+constraints:
+  - "`0 <= n <= 500`"
+examples:
+  - input: fib(10)
+    output: "55"
+  - input: fib(90)
+    output: "2880067194370816120"
+hints:
+  - "`@functools.cache` remembers results by argument."
+solution:
+  language: python
+  code: |
+    from functools import cache
+
+
+    @cache
+    def fib(n: int) -> int:
+        return n if n < 2 else fib(n - 1) + fib(n - 2)
+
+
+    print(fib(10), fib(90), fib.cache_info().currsize)
+  explanation: |
+    Plain recursion recomputes the same values exponentially often: `fib(90)` would need
+    billions of calls. `@cache` (the same as `lru_cache(maxsize=None)`) stores each
+    result the first time, so every `fib(k)` is computed once. That's 91 cached entries
+    for `fib(90)`, and O(n) time overall.
+
+    Recursion depth is still about `n`, which is fine for 500. For much larger `n`, a loop
+    with two variables avoids the depth limit and the memory.
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Write the O(1)-space iterative version and compare with timeit.
+verify: |
+  assert [fib(i) for i in range(10)] == [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+  assert fib(90) == 2880067194370816120
+  assert fib(300) > 10**60

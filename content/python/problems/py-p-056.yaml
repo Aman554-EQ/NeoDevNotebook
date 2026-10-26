@@ -1,0 +1,64 @@
+id: py-p-056
+title: Count N-Queens solutions
+difficulty: hard
+tags:
+  - backtracking
+  - recursion
+  - sets
+statement: |
+  Place `n` queens on an `n × n` board so that no two attack each other (same row, column
+  or diagonal). Write `count_queens(n)` that returns the number of distinct solutions.
+constraints:
+  - "`1 <= n <= 10`"
+examples:
+  - input: count_queens(4)
+    output: "2"
+  - input: count_queens(8)
+    output: "92"
+hints:
+  - Place one queen per row; that removes row conflicts.
+  - "A diagonal is identified by row - col, an anti-diagonal by row + col: track used ones in sets."
+solution:
+  language: python
+  code: |
+    def count_queens(n: int) -> int:
+        cols: set[int] = set()
+        diags: set[int] = set()  # row - col is constant on a diagonal
+        anti: set[int] = set()  # row + col is constant on an anti-diagonal
+
+        def place(row: int) -> int:
+            if row == n:
+                return 1  # every row has a queen: one solution
+            total = 0
+            for col in range(n):
+                if col in cols or row - col in diags or row + col in anti:
+                    continue  # attacked: prune this branch
+                cols.add(col)
+                diags.add(row - col)
+                anti.add(row + col)
+                total += place(row + 1)
+                cols.remove(col)  # undo: backtrack
+                diags.remove(row - col)
+                anti.remove(row + col)
+            return total
+
+        return place(0)
+
+
+    print([count_queens(n) for n in range(1, 9)])
+  explanation: |
+    Backtracking builds a solution one row at a time. For each row we try every column,
+    skip any square that's already attacked, recurse into the next row, and then **undo**
+    the placement so the next column starts from a clean state.
+
+    The three sets make the "is it attacked?" check O(1): squares on the same diagonal
+    share `row - col`, and squares on the same anti-diagonal share `row + col`. Pruning
+    attacked squares early is what keeps this fast. The search space is far smaller than
+    all n^n placements.
+complexity:
+  time: O(n!) worst case, heavily pruned
+  space: O(n)
+variations:
+  - Return the first solution as a list of column indexes, or print the board.
+verify: |
+  assert [count_queens(n) for n in range(1, 9)] == [1, 0, 0, 2, 10, 4, 40, 92]

@@ -1,0 +1,50 @@
+id: py-p-012
+title: Word frequency
+difficulty: easy
+tags:
+  - counter
+  - strings
+statement: |
+  Write `word_counts(text)` that returns a `Counter` of lower-cased words, where a word is a
+  run of letters or apostrophes. Then make `top_words(text, k)` return the `k` most common
+  as `(word, count)` pairs.
+constraints:
+  - "`0 <= len(text) <= 10**6`"
+examples:
+  - input: top_words("The cat and the hat. The END!", 2)
+    output: "[('the', 3), ('cat', 1)]"
+hints:
+  - '`re.findall(r"[a-z'']+", text.lower())` extracts the words.'
+  - "`Counter.most_common(k)` breaks ties by first occurrence."
+solution:
+  language: python
+  code: |
+    import re
+    from collections import Counter
+
+
+    def word_counts(text: str) -> Counter:
+        return Counter(re.findall(r"[a-z']+", text.lower()))
+
+
+    def top_words(text: str, k: int) -> list[tuple[str, int]]:
+        return word_counts(text).most_common(k)
+
+
+    print(top_words("The cat and the hat. The END!", 2))
+  explanation: |
+    `text.lower()` merges "The" and "the". The regular expression `[a-z']+` matches runs
+    of letters and apostrophes, so punctuation such as `.` and `!` is skipped and "don't"
+    stays one word.
+
+    `Counter` counts in one pass. `most_common(k)` returns the `k` largest counts, and ties
+    keep first-seen order. That's why 'cat' (seen before 'and' and 'hat') is second.
+complexity:
+  time: O(n)
+  space: O(number of distinct words)
+variations:
+  - Ignore a set of stop words such as 'the' and 'and'.
+verify: |
+  assert top_words("The cat and the hat. The END!", 2) == [("the", 3), ("cat", 1)]
+  assert word_counts("") == Counter()
+  assert word_counts("Don't stop, don't!")["don't"] == 2

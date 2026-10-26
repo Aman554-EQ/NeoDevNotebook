@@ -1,0 +1,54 @@
+id: py-p-013
+title: Safe integer parse with a default
+difficulty: easy
+tags:
+  - exceptions
+  - conversion
+statement: |
+  Write `to_int(text, default=0)` that converts `text` to an int (surrounding whitespace is
+  allowed). If the text isn't a valid integer, return `default` instead of raising.
+constraints:
+  - "Don't catch more than you need: only conversion errors."
+examples:
+  - input: to_int(" 42 ")
+    output: "42"
+  - input: to_int("4.2")
+    output: "0"
+  - input: to_int("x", default=-1)
+    output: "-1"
+hints:
+  - "`int()` already strips whitespace and raises `ValueError` for bad text."
+solution:
+  language: python
+  code: |
+    def to_int(text: str, default: int = 0) -> int:
+        try:
+            return int(text)
+        except ValueError:
+            return default
+
+
+    print(to_int(" 42 "), to_int("4.2"), to_int("x", default=-1))
+  explanation: |
+    This is the "easier to ask forgiveness than permission" (EAFP) style: try the
+    conversion and handle the specific failure. `int(" 42 ")` accepts surrounding
+    whitespace, while `int("4.2")` and `int("x")` raise `ValueError`.
+
+    Catching only `ValueError` matters. If someone passes `None`, `int(None)` raises
+    `TypeError`, and that's a programming error that should stay visible, not turn into 0.
+complexity:
+  time: O(len(text))
+  space: O(1)
+variations:
+  - Accept floats too, returning an int only if the float is whole ('4.0' → 4).
+verify: |
+  assert to_int(" 42 ") == 42
+  assert to_int("4.2") == 0
+  assert to_int("x", default=-1) == -1
+  assert to_int("-7") == -7
+  try:
+      to_int(None)
+  except TypeError:
+      pass
+  else:
+      raise AssertionError("TypeError must not be swallowed")
