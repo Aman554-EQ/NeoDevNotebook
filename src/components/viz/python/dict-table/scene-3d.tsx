@@ -6,23 +6,31 @@ import { useViz } from "../../_shared/viz-frame"
 import { DICT_FRAMES } from "./model"
 
 const SLOT_X = (i: number) => (i - 3.5) * 0.9
-const ENTRY_X = (j: number, n: number) => (j - (n - 1) / 2) * 2.05
 const SLOT_Y = 1.0
-const ENTRY_Y = -1.1
+
+/** Entries sit in two columns, read left to right then top to bottom (insertion order). */
+const ENTRY_X = (j: number) => (j % 2 === 0 ? -1.75 : 1.75)
+const ENTRY_Y = (j: number) => -1.15 - Math.floor(j / 2) * 1.0
+const ENTRY_BOX = [3.3, 0.78] as const
+const ENTRIES_LABEL_Y = -3.0
 
 export default function DictScene3D() {
   const { step } = useViz()
   const f = DICT_FRAMES[step]!
   const c = useThemeColors()
-  const n = f.entries.length
   return (
-    <SceneStage code={f.code} camera={[0, 0.8, 7.2]} fitWidth={8.8}>
+    <SceneStage
+      code={f.code}
+      camera={[0, 0.6, 7.2]}
+      height="h-72 sm:h-80"
+      fit={{ width: 7.4, height: 5.6, center: [0, -0.6] }}
+    >
       <TextFace
-        text="index table"
+        text="index table (slots 0–7)"
         color={c.muted}
-        width={2}
-        height={0.3}
-        position={[-3.2, 1.75, 0]}
+        width={6}
+        height={0.34}
+        position={[0, 2.05, 0]}
         bold={false}
       />
       {f.slots.map((entry, i) => {
@@ -56,44 +64,44 @@ export default function DictScene3D() {
               />
             )}
             <TextFace
-              text={`slot ${i}`}
+              text={String(i)}
               color={c.muted}
-              width={0.8}
-              height={0.24}
-              position={[0, -0.55, 0.26]}
+              width={0.6}
+              height={0.38}
+              position={[0, -0.6, 0.26]}
               bold={false}
             />
             {order !== -1 && f.probe.length > 1 && (
               <TextFace
                 text={`#${order + 1}`}
                 color={c.ink}
-                width={0.5}
-                height={0.26}
-                position={[0, 0.55, 0.26]}
+                width={0.7}
+                height={0.36}
+                position={[0, 0.6, 0.26]}
               />
             )}
           </group>
         )
       })}
       <TextFace
-        text="entries (insertion order)"
+        text="entries array (insertion order)"
         color={c.muted}
-        width={3}
-        height={0.3}
-        position={[0, -0.2, 0]}
+        width={7.4}
+        height={0.34}
+        position={[0, ENTRIES_LABEL_Y, 0]}
         bold={false}
       />
-      {f.entries.map((e, j) => (
-        <group key={e.key} position={[ENTRY_X(j, n), ENTRY_Y, 0]}>
+      {f.entries.map((entry, j) => (
+        <group key={entry.key} position={[ENTRY_X(j), ENTRY_Y(j), 0]}>
           <mesh>
-            <boxGeometry args={[1.9, 0.8, 0.5]} />
+            <boxGeometry args={[ENTRY_BOX[0], ENTRY_BOX[1], 0.5]} />
             <meshStandardMaterial color={f.hit === j ? c.accent : c.accentSoft} />
           </mesh>
           <TextFace
-            text={`${j}: ${e.key} → ${e.value}`}
+            text={`${j}: ${entry.key} → ${entry.value}`}
             color={f.hit === j ? c.accentInk : c.ink}
-            width={1.8}
-            height={0.56}
+            width={ENTRY_BOX[0] - 0.1}
+            height={0.6}
             position={[0, 0, 0.26]}
           />
         </group>
@@ -105,8 +113,9 @@ export default function DictScene3D() {
               <Line
                 key={i}
                 points={[
-                  [SLOT_X(i), SLOT_Y - 0.4, 0],
-                  [ENTRY_X(entry, n), ENTRY_Y + 0.38, 0],
+                  // Behind the boxes, so a line to the second row passes under the first.
+                  [SLOT_X(i), SLOT_Y - 0.85, -0.3],
+                  [ENTRY_X(entry), ENTRY_Y(entry) + ENTRY_BOX[1] / 2, -0.3],
                 ]}
                 color={f.hit === entry ? c.accent : c.muted}
                 lineWidth={f.hit === entry ? 2.5 : 1}

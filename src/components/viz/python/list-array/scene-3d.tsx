@@ -67,9 +67,9 @@ function Block({ capacity, colors }: { capacity: number; colors: ThemeColors }) 
           key={i}
           text={String(i)}
           color={colors.muted}
-          width={0.5}
-          height={0.3}
-          position={[(i - (capacity - 1) / 2) * SLOT, -0.3, 0.56]}
+          width={0.6}
+          height={0.4}
+          position={[(i - (capacity - 1) / 2) * SLOT, -0.36, 0.56]}
           bold={false}
         />
       ))}
@@ -83,7 +83,13 @@ export default function ListArrayScene3D() {
   const colors = useThemeColors()
   const total = frame.slots.length
   return (
-    <SceneStage code={frame.code} camera={[0, 1.6, 8]} fitWidth={7.6}>
+    // Framed for the largest block in the sequence (8 slots), so the camera never jumps between steps.
+    <SceneStage
+      code={frame.code}
+      camera={[0, 1.6, 8]}
+      fit={{ width: 7.0, height: 1.8, center: [0, -0.2] }}
+      height="h-48 sm:h-60"
+    >
       <Block capacity={total} colors={colors} />
       {frame.slots.map((v, i) =>
         v === null ? (

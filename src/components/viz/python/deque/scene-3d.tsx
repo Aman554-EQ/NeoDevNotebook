@@ -16,7 +16,13 @@ export default function DequeScene3D() {
   const total = f.blocks.length * BLOCK_W + (f.blocks.length - 1) * GAP
   const blockX = (b: number) => -total / 2 + BLOCK_W / 2 + b * (BLOCK_W + GAP)
   return (
-    <SceneStage code={f.code} camera={[0, 1.4, 7]} fitWidth={8.6}>
+    // Framed for two blocks (the most any step shows), so the camera never jumps between steps.
+    <SceneStage
+      code={f.code}
+      camera={[0, 1.4, 7]}
+      fit={{ width: 8.2, height: 2.8, center: [0, 0.1] }}
+      height="h-56 sm:h-64"
+    >
       {f.blocks.map((block, b) => (
         <group key={b} position={[blockX(b), 0, 0]}>
           <RoundedBox args={[BLOCK_W, 1.0, 0.6]} radius={0.08}>
@@ -65,26 +71,26 @@ export default function DequeScene3D() {
       <TextFace
         text="left end"
         color={c.muted}
-        width={1.4}
-        height={0.3}
-        position={[blockX(0) - BLOCK_W / 2 + 0.6, -0.8, 0.4]}
+        width={1.8}
+        height={0.42}
+        position={[blockX(0) - 1.5 * SLOT, -0.85, 0.4]}
         bold={false}
       />
       <TextFace
         text="right end"
         color={c.muted}
-        width={1.4}
-        height={0.3}
-        position={[blockX(f.blocks.length - 1) + BLOCK_W / 2 - 0.6, -0.8, 0.4]}
+        width={1.8}
+        height={0.42}
+        position={[blockX(f.blocks.length - 1) + 1.5 * SLOT, -0.85, 0.4]}
         bold={false}
       />
       {f.result && (
         <TextFace
           text={`→ ${f.result}`}
-          color={c.easy}
-          width={3.6}
-          height={0.36}
-          position={[0, 1.0, 0.4]}
+          color={c.ink}
+          width={5}
+          height={0.46}
+          position={[0, 1.05, 0.4]}
         />
       )}
     </SceneStage>

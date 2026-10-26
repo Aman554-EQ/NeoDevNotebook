@@ -7,6 +7,7 @@ import { MathUtils, type Group } from "three"
 import {
   NameTag3D,
   SceneStage,
+  type SceneFit,
   TextFace,
   useThemeColors,
   type ThemeColors,
@@ -21,6 +22,14 @@ import {
 } from "./model"
 
 const NAME_Y = 2.4
+const BOX_TOP = 0.48
+/**
+ * The type label sits to the left of its object. Name arrows arrive from above and reference
+ * arrows leave downwards, so neither can run through it.
+ */
+const typeLabelWidth = (o: MemObject) => o.type.length * 0.2 + 0.15
+/** Lowest point of an object: its box, or the attribute names under its cells. */
+const bottomOf = (o: MemObject) => o.y - (o.cellLabels ? 0.85 : 0.45)
 
 /** World position of slot i of an object (front face centre). */
 function cellPos(o: MemObject, i: number): [number, number, number] {
@@ -47,9 +56,9 @@ function ObjectMesh({ obj, colors }: { obj: MemObject; colors: ThemeColors }) {
       <TextFace
         text={obj.type}
         color={colors.muted}
-        width={Math.max(1.4, obj.type.length * 0.3)}
+        width={typeLabelWidth(obj)}
         height={0.42}
-        position={[0, 0.78, 0.2]}
+        position={[-w / 2 - 0.1 - typeLabelWidth(obj) / 2, 0, 0.2]}
         bold={false}
       />
       {obj.value !== undefined && (
@@ -89,8 +98,8 @@ function ObjectMesh({ obj, colors }: { obj: MemObject; colors: ThemeColors }) {
                 text={obj.cellLabels[i]!}
                 color={colors.muted}
                 width={cw}
-                height={0.3}
-                position={[0, -0.6, 0.1]}
+                height={0.34}
+                position={[0, -0.64, 0.11]}
                 bold={false}
               />
             )}
@@ -123,7 +132,7 @@ function NameTag({
       NAME_Y - 0.25,
       0,
       target.x,
-      target.y + 1.0,
+      target.y + BOX_TOP,
       0,
     ])
   })
@@ -136,7 +145,7 @@ function NameTag({
         ref={line}
         points={[
           [x, NAME_Y, 0],
-          [target.x, target.y + 1.0, 0],
+          [target.x, target.y + BOX_TOP, 0],
         ]}
         color={colors.muted}
         lineWidth={2}
@@ -145,13 +154,37 @@ function NameTag({
   )
 }
 
+/** One box around every object and name in every step, so the camera holds still across steps. */
+function sceneFit(scenario: MemoryScenarioName): SceneFit {
+  const top = NAME_Y + 0.3
+  let [left, right, bottom] = [Infinity, -Infinity, Infinity]
+  for (const f of MEMORY_SCENARIOS[scenario].frames) {
+    for (const o of f.objects) {
+      const half = objectWidth(o) / 2
+      left = Math.min(left, o.x - half - 0.1 - typeLabelWidth(o))
+      right = Math.max(right, o.x + half)
+      bottom = Math.min(bottom, bottomOf(o) - 0.1)
+    }
+    for (const n of f.names) {
+      left = Math.min(left, n.x - 0.6)
+      right = Math.max(right, n.x + 0.6)
+    }
+  }
+  return {
+    width: right - left,
+    height: top - bottom,
+    center: [(left + right) / 2, (top + bottom) / 2],
+  }
+}
+
 export default function MemoryScene3D({ scenario }: { scenario: MemoryScenarioName }) {
   const { step } = useViz()
   const frame = MEMORY_SCENARIOS[scenario].frames[step]!
   const colors = useThemeColors()
   const byId = useMemo(() => new Map(frame.objects.map((o) => [o.id, o])), [frame])
+  const fit = useMemo(() => sceneFit(scenario), [scenario])
   return (
-    <SceneStage code={frame.code} camera={[0, 0.5, 6.6]} fitWidth={9}>
+    <SceneStage code={frame.code} camera={[0, 0.5, 6.6]} fit={fit} height="h-72 sm:h-80">
       {frame.objects.map((o) => (
         <ObjectMesh key={o.id} obj={o} colors={colors} />
       ))}
@@ -162,7 +195,7 @@ export default function MemoryScene3D({ scenario }: { scenario: MemoryScenarioNa
           return [
             <Line
               key={`${o.id}-${i}`}
-              points={[cellPos(o, i), [target.x, target.y + 1.0, 0.2]]}
+              points={[cellPos(o, i), [target.x, target.y + BOX_TOP, 0.2]]}
               color={colors.accent}
               lineWidth={2}
             />,
@@ -176,8 +209,8 @@ export default function MemoryScene3D({ scenario }: { scenario: MemoryScenarioNa
           <Line
             key={`class-${o.id}`}
             points={[
-              [o.x, o.y - 0.5, 0],
-              [cls.x, cls.y + 1.0, 0],
+              [o.x, bottomOf(o), 0],
+              [cls.x, cls.y + BOX_TOP, 0],
             ]}
             color={colors.muted}
             lineWidth={1.5}

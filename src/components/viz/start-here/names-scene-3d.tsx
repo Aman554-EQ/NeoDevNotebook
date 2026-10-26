@@ -40,8 +40,8 @@ function ObjectMesh({ obj, colors }: { obj: ObjectBox; colors: Colors }) {
       <TextFace
         text="list object"
         color={colors.muted}
-        width={1.6}
-        height={0.32}
+        width={2}
+        height={0.4}
         position={[0, -0.75, 0.5]}
         bold={false}
       />
@@ -97,7 +97,7 @@ export default function NamesScene3D() {
   const frame = NAMES_FRAMES[step]!
   const colors = useThemeColors()
   return (
-    <SceneStage code={frame.code} fitWidth={7}>
+    <SceneStage code={frame.code} fit={{ width: 6.4, height: 3.9, center: [-0.1, 0.65] }}>
       {frame.objects.map((o) => (
         <ObjectMesh key={o.id} obj={o} colors={colors} />
       ))}

@@ -15,7 +15,7 @@ function CostLine() {
   const { step } = useViz()
   const f = LIST_OPS_FRAMES[step]!
   return (
-    <p className="text-muted pb-3 text-center font-mono text-xs" data-testid="list-cost">
+    <p className="text-muted px-4 pb-3 text-center font-mono text-xs" data-testid="list-cost">
       {f.cost}
     </p>
   )

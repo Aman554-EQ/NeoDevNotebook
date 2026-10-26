@@ -34,15 +34,15 @@ function Node({
   return (
     <group ref={ref} position={[x, y - 0.6, 0]} scale={0.01}>
       <mesh>
-        <sphereGeometry args={[0.34, 32, 32]} />
+        <sphereGeometry args={[0.42, 32, 32]} />
         <meshStandardMaterial color={hot ? colors.medium : colors.accent} />
       </mesh>
       <TextFace
         text={String(value)}
         color={colors.accentInk}
-        width={0.46}
-        height={0.4}
-        position={[0, 0, 0.35]}
+        width={0.6}
+        height={0.5}
+        position={[0, 0, 0.43]}
       />
     </group>
   )
@@ -53,7 +53,12 @@ export default function HeapScene3D() {
   const f = HEAP_FRAMES[step]!
   const c = useThemeColors()
   return (
-    <SceneStage code={f.code} camera={[0, 0.2, 7.4]} fitWidth={7.4} height="h-72 sm:h-80">
+    <SceneStage
+      code={f.code}
+      camera={[0, 0.2, 7.4]}
+      fit={{ width: 7.2, height: 5.4, center: [0, -0.5] }}
+      height="h-72 sm:h-80"
+    >
       {f.heap.map((_, i) => {
         if (i === 0) return null
         const a = heapNodePos(i)
@@ -74,35 +79,36 @@ export default function HeapScene3D() {
         <Node key={v} value={v} index={i} hot={f.path.includes(i)} colors={c} />
       ))}
       {f.heap.map((v, i) => (
-        <group key={`a${i}`} position={[(i - 2) * 0.82, ARRAY_Y, 0]}>
+        <group key={`a${i}`} position={[(i - 2) * 1.0, ARRAY_Y, 0]}>
           <mesh>
-            <boxGeometry args={[0.7, 0.6, 0.4]} />
-            <meshStandardMaterial color={f.path.includes(i) ? c.medium : c.accentSoft} />
+            <boxGeometry args={[0.88, 0.72, 0.4]} />
+            {/* Same colours as the tree: orange = on this step's sift path. */}
+            <meshStandardMaterial color={f.path.includes(i) ? c.medium : c.accent} />
           </mesh>
           <TextFace
             text={String(v)}
-            color={c.ink}
-            width={0.5}
-            height={0.42}
+            color={c.accentInk}
+            width={0.7}
+            height={0.56}
             position={[0, 0, 0.21]}
           />
           <TextFace
             text={`[${i}]`}
             color={c.muted}
-            width={0.5}
-            height={0.22}
-            position={[0, -0.45, 0.21]}
+            width={0.8}
+            height={0.36}
+            position={[0, -0.62, 0.21]}
             bold={false}
           />
         </group>
       ))}
       {f.popped !== undefined && (
         <TextFace
-          text={`returned ${f.popped}`}
-          color={c.easy}
-          width={2}
-          height={0.36}
-          position={[2.6, ARRAY_Y, 0.2]}
+          text={`heappop returned ${f.popped}`}
+          color={c.ink}
+          width={4}
+          height={0.42}
+          position={[0, ARRAY_Y - 1.1, 0.2]}
         />
       )}
     </SceneStage>
