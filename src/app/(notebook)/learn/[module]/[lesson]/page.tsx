@@ -9,6 +9,7 @@ import { KeyTakeaways } from "@/components/lesson/key-takeaways"
 import { LessonHeader } from "@/components/lesson/lesson-header"
 import { Reveal } from "@/components/lesson/reveal"
 import { BookmarkButton, DoneToggle } from "@/components/progress/progress-buttons"
+import { CodeStepper } from "@/components/viz/_shared/code-stepper"
 import { vizComponents } from "@/components/viz/__generated__/registry"
 import { allLessonParams, getLesson } from "@/lib/content"
 import { renderMdx } from "@/lib/mdx/render"
@@ -33,7 +34,16 @@ export default async function LessonPage({ params }: PageProps<"/learn/[module]/
   if (!data) notFound()
   const { lesson, prev, next } = data
   const { content, toc } = await renderMdx(lesson.body, {
-    components: { Callout, Reveal, KeyTakeaways, ...vizComponents },
+    components: {
+      Callout,
+      Reveal,
+      KeyTakeaways,
+      // Traces live in the lesson's own module folder.
+      CodeStepper: (props: Omit<React.ComponentProps<typeof CodeStepper>, "module">) => (
+        <CodeStepper module={module} {...props} />
+      ),
+      ...vizComponents,
+    },
   })
   const href = `/learn/${module}/${slug}`
 
