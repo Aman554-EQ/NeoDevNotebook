@@ -1,0 +1,424 @@
+---
+title: MongoDB alongside Django
+summary: When and how to use a document database with Django. Modelling documents, embedding vs referencing, CRUD and update operators with PyMongo, queries on nested data, indexes (unique, compound, TTL), the aggregation pipeline including $lookup, schema validation, and the honest options for combining MongoDB with Django's relational ORM.
+estimatedMinutes: 22
+difficulty: medium
+section: Databases in Practice
+objectives:
+  - Decide whether data fits documents or tables, and choose embedding or referencing
+  - Create, read, update and delete documents with PyMongo, including update operators
+  - Query nested fields and arrays, and add indexes that support those queries
+  - Summarise data with the aggregation pipeline
+  - Combine MongoDB with a Django project in a maintainable way
+prerequisites:
+  - Databases for backend developers
+  - Relationships & efficient queries
+tags: [mongodb, nosql, pymongo, aggregation, databases]
+---
+
+## Intuition: folders instead of spreadsheets
+
+A relational database is a set of spreadsheets linked by ids. **MongoDB** is a filing cabinet of
+**folders** (documents): each folder holds everything about one thing, including lists and nested
+sections, in a JSON-like format. Reading a whole folder is one fast lookup, and two folders don't need
+the same layout. The trade-off: information that appears in many folders has to be kept in sync by you,
+and questions across folders are harder.
+
+## See it
+
+<DocVsTableViz />
+
+## The precise rules
+
+**Vocabulary:** database → **collections** (like tables) → **documents** (BSON, like JSON with extra
+types: `ObjectId`, dates, decimals). Every document has a unique `_id` (an `ObjectId` unless you choose
+one).
+
+**Modelling:** design around how the data is **read**.
+
+- **Embed** data that belongs to the parent and is read with it (an order's line items, a post's
+  tags). One read, atomic single-document updates.
+- **Reference** data that's shared, large, or changes independently (the customer an order belongs
+  to, products). Store the `_id` and look it up (`$lookup` or a second query).
+- Avoid unbounded arrays (a document is limited to 16 MB, and huge arrays are slow to update).
+
+**CRUD with PyMongo:** `insert_one`/`insert_many`, `find(filter, projection).sort().limit()`,
+`find_one`, `count_documents`, `update_one`/`update_many` with operators (`$set`, `$inc`, `$push`,
+`$pull`, `$addToSet`, `upsert=True`), `delete_one`/`delete_many`.
+
+**Query operators:** `$eq $ne $gt $gte $lt $lte $in $nin`, `$and $or $not`, `$exists`, dot notation for
+nested fields (`"address.city"`), and for arrays: a plain value matches any element, `$all`,
+`$elemMatch` (one element matching several conditions), `$size`.
+
+**Indexes:** `create_index("email", unique=True)`, compound (`[("status", 1), ("created", -1)]`),
+multikey (on arrays, automatic), **TTL** (`expireAfterSeconds`, documents delete themselves), text
+indexes. Check with `explain()`.
+
+**Aggregation pipeline:** a list of stages, each transforming the stream of documents: `$match`,
+`$project`, `$unwind` (one document per array element), `$group` (with `$sum`, `$avg`, `$push`...),
+`$sort`, `$limit`, `$lookup` (a left join to another collection), `$facet`.
+
+**Validation** is opt-in: a collection-level `$jsonSchema` validator rejects documents with missing or
+wrongly typed fields. Multi-document transactions exist (replica sets), but if you need them often,
+your data is probably relational.
+
+**MongoDB and Django:** Django's ORM targets relational databases. Your honest options:
+
+1. **Keep PostgreSQL for the core data** (users, orders, payments) and use **PyMongo** directly, in a
+   small service module, for data that's naturally documents: activity feeds, event logs, analytics,
+   flexible product attributes. (ShopLite's capstone design does this.)
+2. **Django MongoDB Backend** (`django-mongodb-backend`, maintained by MongoDB) lets models live in
+   MongoDB; check that the Django features you rely on (admin, migrations, joins, transactions) are
+   supported for your version.
+3. Avoid unmaintained adapters (Djongo).
+
+```python norun title="Connecting for real"
+import os
+
+from pymongo import MongoClient
+
+client = MongoClient(os.environ["MONGO_URL"])  # e.g. mongodb://localhost:27017 or an Atlas URL
+db = client["shop"]
+```
+
+<Callout type="tip" title="Running these examples">
+  `python -m pip install pymongo mongomock`. The examples call `mongo_database()` from
+  playground.py: with `MONGO_URL` set it uses your real MongoDB (a throwaway database it drops
+  afterwards); without it, `mongomock`, an in-memory stand-in with the same API, so everything runs
+  with nothing installed.
+</Callout>
+
+## Worked example
+
+Orders as documents: embedded line items, a referenced customer, and the queries an order page needs.
+
+```python title="orders_documents.py"
+from datetime import datetime, timezone
+
+from playground import mongo_database
+
+db = mongo_database()
+orders = db.orders
+
+orders.insert_many([
+    {"_id": 41, "customer_id": 7, "status": "paid", "created": datetime(2026, 3, 9, tzinfo=timezone.utc),
+     "items": [{"sku": "dune", "qty": 2, "price": "12.50"}, {"sku": "emma", "qty": 1, "price": "8.00"}],
+     "shipping": {"city": "London", "country": "GB"}},
+    {"_id": 42, "customer_id": 9, "status": "pending", "created": datetime(2026, 3, 11, tzinfo=timezone.utc),
+     "items": [{"sku": "go-set", "qty": 1, "price": "45.00"}], "shipping": {"city": "Paris", "country": "FR"}},
+])
+
+order = orders.find_one({"_id": 41}, {"items": 1, "status": 1})  # one read: the whole order
+print(order["status"], [(i["sku"], i["qty"]) for i in order["items"]])
+print("in London:", [o["_id"] for o in orders.find({"shipping.city": "London"})])
+print("contain dune:", [o["_id"] for o in orders.find({"items.sku": "dune"})])
+print("paid count:", orders.count_documents({"status": "paid"}))
+```
+
+```text title="Output"
+paid [('dune', 2), ('emma', 1)]
+in London: [41]
+contain dune: [41]
+paid count: 1
+```
+
+- The order page needs one read; in SQL it would be a join of orders, order lines and products.
+- Dot notation reaches into nested documents (`shipping.city`) and into arrays (`items.sku` matches if
+  **any** item has that sku).
+- Prices are strings here on purpose: never store money as floats. MongoDB also has a `Decimal128`
+  type.
+- The customer is a **reference** (`customer_id`), because customer data is shared by many orders and
+  changes independently.
+
+## Variations
+
+### Update operators
+
+```python
+from playground import mongo_database
+
+db = mongo_database()
+carts = db.carts
+carts.insert_one({"_id": "ada", "items": [{"sku": "dune", "qty": 1}], "coupons": []})
+
+carts.update_one({"_id": "ada"}, {"$push": {"items": {"sku": "emma", "qty": 1}}})
+carts.update_one({"_id": "ada", "items.sku": "dune"}, {"$inc": {"items.$.qty": 2}})  # $ = the matched element
+carts.update_one({"_id": "ada"}, {"$addToSet": {"coupons": "SPRING"}})
+carts.update_one({"_id": "ada"}, {"$addToSet": {"coupons": "SPRING"}})  # no duplicate
+carts.update_one({"_id": "ada"}, {"$set": {"updated_by": "web"}})
+cart = carts.find_one({"_id": "ada"})
+print([(i["sku"], i["qty"]) for i in cart["items"]], cart["coupons"], cart["updated_by"])
+
+result = carts.update_one({"_id": "bob"}, {"$set": {"items": []}}, upsert=True)
+print("upserted new cart:", result.upserted_id, "| carts:", carts.count_documents({}))
+carts.update_one({"_id": "ada"}, {"$pull": {"items": {"sku": "emma"}}})
+print("after $pull:", [i["sku"] for i in carts.find_one({"_id": "ada"})["items"]])
+```
+
+```text title="Output"
+[('dune', 3), ('emma', 1)] ['SPRING'] web
+upserted new cart: bob | carts: 2
+after $pull: ['dune']
+```
+
+Operators change documents **on the server, atomically**: `$inc` on a quantity is race-free, like
+Django's `F()`. `$addToSet` treats an array as a set, `upsert=True` creates the document when no match
+exists, and the positional `$` updates the array element the filter matched.
+
+### Arrays and $elemMatch
+
+```python
+from playground import mongo_database
+
+db = mongo_database()
+db.orders.insert_many([
+    {"_id": 1, "items": [{"sku": "dune", "qty": 1}, {"sku": "emma", "qty": 5}]},
+    {"_id": 2, "items": [{"sku": "dune", "qty": 3}]},
+    {"_id": 3, "items": [{"sku": "emma", "qty": 1}], "tags": ["gift", "express"]},
+])
+ids = lambda f: [d["_id"] for d in db.orders.find(f).sort("_id")]  # noqa: E731
+
+print("dune and qty>=3 (any items):", ids({"items.sku": "dune", "items.qty": {"$gte": 3}}))
+print("one item that is dune with qty>=3:", ids({"items": {"$elemMatch": {"sku": "dune", "qty": {"$gte": 3}}}}))
+print("tag gift:", ids({"tags": "gift"}), "| all of gift+express:", ids({"tags": {"$all": ["gift", "express"]}}))
+print("no tags field:", ids({"tags": {"$exists": False}}))
+```
+
+```text title="Output"
+dune and qty>=3 (any items): [1, 2]
+one item that is dune with qty>=3: [2]
+tag gift: [3] | all of gift+express: [3]
+no tags field: [1, 2]
+```
+
+Without `$elemMatch`, each condition may be satisfied by a **different** array element, so order 1
+matches (it has a dune, and some other item with qty 5). `$elemMatch` requires a single element to
+satisfy all conditions. It's the most common MongoDB query bug.
+
+### Indexes: unique, compound and TTL
+
+```python
+from datetime import datetime, timedelta, timezone
+
+import pymongo
+
+from playground import mongo_database
+
+db = mongo_database()
+db.users.create_index("email", unique=True)
+db.orders.create_index([("customer_id", pymongo.ASCENDING), ("created", pymongo.DESCENDING)])
+db.sessions.create_index("created", expireAfterSeconds=3600)  # MongoDB deletes them after an hour
+
+db.users.insert_one({"email": "ada@example.com"})
+try:
+    db.users.insert_one({"email": "ada@example.com"})
+except pymongo.errors.DuplicateKeyError:
+    print("duplicate email refused")
+print("orders indexes:", sorted(db.orders.index_information()))
+ttl = db.sessions.index_information()["created_1"]
+print("sessions TTL seconds:", ttl["expireAfterSeconds"])
+db.sessions.insert_one({"created": datetime.now(timezone.utc) - timedelta(hours=2)})
+print("(a real server's background task would remove that expired session within a minute)")
+```
+
+```text title="Output"
+duplicate email refused
+orders indexes: ['_id_', 'customer_id_1_created_-1']
+sessions TTL seconds: 3600
+(a real server's background task would remove that expired session within a minute)
+```
+
+The compound index serves "this customer's orders, newest first" in one index walk (field order
+matters, exactly like SQL composite indexes). TTL indexes are perfect for sessions, one-time codes and
+caches; the removal runs in the background on a real server, which the in-memory stand-in doesn't
+emulate.
+
+### The aggregation pipeline
+
+```python
+from playground import mongo_database
+
+db = mongo_database()
+db.customers.insert_many([{"_id": 7, "name": "Ada"}, {"_id": 9, "name": "Grace"}, {"_id": 11, "name": "Linus"}])
+db.orders.insert_many([
+    {"customer_id": 7, "status": "paid", "items": [{"sku": "dune", "qty": 2, "price": 12.5}, {"sku": "emma", "qty": 1, "price": 8.0}]},
+    {"customer_id": 9, "status": "paid", "items": [{"sku": "go-set", "qty": 2, "price": 45.0}, {"sku": "dune", "qty": 1, "price": 12.5}]},
+    {"customer_id": 7, "status": "cancelled", "items": [{"sku": "vinyl", "qty": 1, "price": 25.0}]},
+])
+
+best_sellers = db.orders.aggregate([
+    {"$match": {"status": "paid"}},
+    {"$unwind": "$items"},  # one document per line item
+    {"$group": {"_id": "$items.sku", "units": {"$sum": "$items.qty"}}},
+    {"$sort": {"units": -1, "_id": 1}},
+])
+print("best sellers:", [(d["_id"], d["units"]) for d in best_sellers])
+
+spend = db.orders.aggregate([
+    {"$match": {"status": "paid"}},
+    {"$unwind": "$items"},
+    {"$group": {"_id": "$customer_id", "spent": {"$sum": {"$multiply": ["$items.qty", "$items.price"]}}}},
+    {"$lookup": {"from": "customers", "localField": "_id", "foreignField": "_id", "as": "customer"}},
+    {"$sort": {"spent": -1}},
+])
+print("spend:", [(d["customer"][0]["name"], d["spent"]) for d in spend])
+```
+
+```text title="Output"
+best sellers: [('dune', 3), ('go-set', 2), ('emma', 1)]
+spend: [('Grace', 102.5), ('Ada', 33.0)]
+```
+
+`$match` first (so later stages see fewer documents and indexes can be used), `$unwind` to work on
+array elements, `$group` like SQL's GROUP BY, `$lookup` like a LEFT JOIN. Linus has no paid orders, so
+he never reaches the `$lookup`: pipelines start from the documents you match. (Floats are fine for this
+demo; use `Decimal128` for real money.)
+
+### Validation with $jsonSchema
+
+```python norun title="A collection that refuses bad documents (real MongoDB)"
+db.create_collection("orders", validator={
+    "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["customer_id", "status", "items"],
+        "properties": {
+            "status": {"enum": ["pending", "paid", "shipped", "cancelled"]},
+            "items": {"bsonType": "array", "minItems": 1,
+                      "items": {"bsonType": "object", "required": ["sku", "qty"],
+                                "properties": {"qty": {"bsonType": "int", "minimum": 1}}}},
+        },
+    }
+})
+db.orders.insert_one({"customer_id": 7, "status": "lost", "items": []})  # WriteError: Document failed validation
+```
+
+"Schemaless" doesn't have to mean "anything goes". A validator gives you the database-level safety
+net that relational constraints give, while still allowing optional fields. (The in-memory stand-in
+used for the other examples doesn't implement validators, so this block is shown, not run.)
+
+## Putting it together
+
+The pattern ShopLite's design uses: orders and payments stay in PostgreSQL through Django's ORM, while
+an **activity feed** (high-volume, append-only, flexible event shapes, always read newest first) goes
+to MongoDB through a small service module. Views and tests talk to the service, not to PyMongo.
+
+```python title="activity_feed.py"
+from datetime import datetime, timedelta, timezone
+
+import pymongo
+
+from playground import migrate, mongo_database, setup
+
+setup()
+
+from django.db import models
+
+
+class Order(models.Model):  # relational: money, consistency, joins
+    customer = models.CharField(max_length=30)
+    total = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+class ActivityFeed:
+    """All MongoDB access in one place, so the rest of the app never imports pymongo."""
+
+    def __init__(self, db):
+        self.events = db.activity
+        self.events.create_index([("user", pymongo.ASCENDING), ("at", pymongo.DESCENDING)])
+
+    def record(self, user, kind, at, **data):
+        self.events.insert_one({"user": user, "kind": kind, "at": at, "data": data})
+
+    def recent(self, user, limit=3):
+        cursor = self.events.find({"user": user}).sort("at", pymongo.DESCENDING).limit(limit)
+        return [(e["kind"], e["data"]) for e in cursor]
+
+    def counts_by_kind(self, since):
+        rows = self.events.aggregate([{"$match": {"at": {"$gte": since}}},
+                                      {"$group": {"_id": "$kind", "n": {"$sum": 1}}}, {"$sort": {"_id": 1}}])
+        return {r["_id"]: r["n"] for r in rows}
+
+
+migrate()
+feed = ActivityFeed(mongo_database())
+start = datetime(2026, 3, 1, tzinfo=timezone.utc)
+
+
+def place_order(customer, total, at):
+    order = Order.objects.create(customer=customer, total=total)  # the source of truth
+    feed.record(customer, "order.placed", at, order=order.pk, total=str(order.total))
+    return order
+
+
+feed.record("ada", "login", start)
+place_order("ada", "25.00", start + timedelta(minutes=5))
+feed.record("ada", "review.posted", start + timedelta(hours=1), product="dune", stars=5)
+place_order("bob", "90.00", start + timedelta(hours=2))
+feed.record("ada", "login", start + timedelta(days=2))
+
+print("ada's feed:", feed.recent("ada"))
+print("this month:", feed.counts_by_kind(since=start))
+print("orders in PostgreSQL/SQLite:", [(c, str(t)) for c, t in Order.objects.order_by("id").values_list("customer", "total")])
+```
+
+```text title="Output"
+ada's feed: [('login', {}), ('review.posted', {'product': 'dune', 'stars': 5}), ('order.placed', {'order': 1, 'total': '25.00'})]
+this month: {'login': 2, 'order.placed': 2, 'review.posted': 1}
+orders in PostgreSQL/SQLite: [('ada', '25.00'), ('bob', '90.00')]
+```
+
+Each store does what it's best at: the relational database keeps orders consistent and joinable,
+MongoDB keeps a flexible, append-only event stream that's cheap to write and fast to read per user
+(thanks to the compound index). Because only `ActivityFeed` touches MongoDB, you could swap it for a
+PostgreSQL table later without changing any view.
+
+## Common mistakes
+
+<Callout type="warning" title="Picking MongoDB to avoid designing a schema">
+  Every application has a schema; with MongoDB it lives in your code instead of the database.
+  Relational data (users, orders, payments, inventory) forced into documents leads to duplicated,
+  drifting data and painful cross-document transactions.
+</Callout>
+
+- **Multi-condition array queries without `$elemMatch`**, matching documents you didn't mean.
+- **Unbounded embedded arrays** (all comments ever, inside the post). Use a separate collection with a
+  reference.
+- **No indexes.** Every unindexed `find()` scans the collection; index the fields you filter and sort on.
+- **Storing money as floats.** Use `Decimal128` or integer cents.
+- **PyMongo calls scattered through views.** Wrap them in one service module you can test and replace.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: embed or reference: a blog post's tags? A blog post's author?"
+>
+  Tags: embed (small, read with the post). Author: reference by id (shared by many posts, changes
+  independently).
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: increment a product's view counter safely in MongoDB.">
+  `db.products.update_one({"_id": pid}, {"$inc": {"views": 1}})`: one atomic server-side update, no
+  read-modify-write.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: find orders where a single item is 'dune' with qty at least 2.">
+  `{"items": {"$elemMatch": {"sku": "dune", "qty": {"$gte": 2}}}}`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: make login codes disappear 10 minutes after creation.">
+  `db.codes.create_index("created", expireAfterSeconds=600)` and store `created` as a UTC datetime.
+</Reveal>
+
+<KeyTakeaways>
+
+- Documents hold everything read together; embed owned data, reference shared data.
+- PyMongo CRUD + update operators (`$set`, `$inc`, `$push`, `$addToSet`, upserts) work atomically per
+  document.
+- Dot notation and `$elemMatch` for nested data; index what you filter and sort on (compound, unique,
+  TTL).
+- The aggregation pipeline (`$match` → `$unwind` → `$group` → `$lookup` → `$sort`) does reporting.
+- With Django: keep core relational data in PostgreSQL, use MongoDB through a service module for
+  document-shaped data, or evaluate Django MongoDB Backend.
+
+</KeyTakeaways>

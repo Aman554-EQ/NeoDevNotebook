@@ -135,6 +135,29 @@ def postgres_database():
     }
 
 
+def mongo_database():
+    """A throwaway MongoDB database for one example, dropped again when the script ends.
+
+    Uses a real server when MONGO_URL is set (e.g. mongodb://localhost:27017), otherwise mongomock,
+    an in-memory stand-in with the same API. Requires: python -m pip install pymongo mongomock
+    """
+    import atexit
+    import os
+    import uuid
+
+    import pymongo
+
+    if os.environ.get("MONGO_URL"):
+        client = pymongo.MongoClient(os.environ["MONGO_URL"])
+    else:
+        import mongomock
+
+        client = mongomock.MongoClient()
+    name = f"playground_{uuid.uuid4().hex[:10]}"
+    atexit.register(client.drop_database, name)
+    return client[name]
+
+
 def migrate():
     """Create the tables of Django's built-in apps and of every model defined so far."""
     from django.core.management import call_command
