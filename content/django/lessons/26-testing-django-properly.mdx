@@ -1,0 +1,660 @@
+---
+title: Testing Django properly
+summary: Tests that catch real bugs and run in seconds. The test pyramid, Django's TestCase and test client, DRF's APIClient, pytest-django fixtures and factories, testing models, views, permissions, validation and services, locking query counts with assertNumQueries, mocking external services, health checks, settings overrides and coverage.
+estimatedMinutes: 28
+difficulty: medium
+section: Quality, Security & Production
+objectives:
+  - Choose what to test at each level of the pyramid
+  - Write Django TestCase and pytest-django tests for models, views, APIs and permissions
+  - Build test data with setUpTestData, fixtures and factories
+  - Lock in performance with assertNumQueries and isolate external services with mocks
+  - Add health and readiness checks and run the suite with coverage in CI
+prerequisites:
+  - A complete CRUD API
+  - API authentication & permissions
+tags: [django, testing, pytest, tdd, ci, quality]
+---
+
+## Intuition: a safety net you can trust
+
+Tests are a safety net under every change you make. A good net is **wide** (it covers the behaviour
+users rely on), **fine-grained** (when something breaks, the failing test points at it) and **fast**
+(you run it constantly, not once a week). Django gives you a test database that's created fresh and
+rolled back after every test, so each test starts from a clean, known state.
+
+## See it
+
+<TestPyramidViz />
+
+## The precise rules
+
+**What to test:** behaviour, not implementation. Models and services (business rules), views and API
+endpoints (status codes, response bodies, redirects, permissions for each role), validation (every
+error message a user can see), query counts on list endpoints, and the unhappy paths (404, 403,
+conflicts, bad input).
+
+**Django's tools:**
+
+- `django.test.TestCase`: each test runs in a transaction that's rolled back; `setUpTestData()`
+  creates data **once** per class (fast).
+- `self.client` (`django.test.Client`) and DRF's `APIClient` (`force_authenticate`, `credentials`,
+  `format="json"`).
+- Assertions: `assertContains`, `assertRedirects`, `assertTemplateUsed`, `assertNumQueries`,
+  `assertFormError`.
+- `TransactionTestCase` when you need real commits (`on_commit` callbacks, threads); `override_settings`
+  for settings; `django.core.mail.outbox` for sent emails.
+
+**pytest-django** (used by this module's projects): plain `assert`, fixtures (`client`, `db`,
+`settings`, `django_assert_num_queries`), `@pytest.mark.django_db`, `@pytest.mark.parametrize`,
+and a `conftest.py` for shared fixtures. Configure with `DJANGO_SETTINGS_MODULE` in `pytest.ini`;
+make warnings errors (`filterwarnings = error`) so deprecations surface early.
+
+**Test data:** factories (`model_bakery`, `factory_boy`) or small fixture functions beat big JSON
+fixtures: each test states only the fields it cares about.
+
+**External services** (payment providers, email APIs, other HTTP services) are replaced in tests:
+`unittest.mock.patch` the client, or inject a fake. Tests must never call real services or need real
+secrets; load fake values (this module's projects read `.env.example` in tests).
+
+**Health checks:** `/health/` (the process is alive, no database) and `/ready/` (dependencies work,
+503 otherwise) are tested like any endpoint, including the failure case.
+
+**Run it:** `python manage.py test` or `python -m pytest`; `coverage run -m pytest` then
+`coverage report` to find untested code (aim for meaningful coverage of business logic, not 100%).
+CI runs the suite on every push, against the same database engine as production.
+
+## Worked example
+
+A model rule and an endpoint, tested with Django's `TestCase`: happy path, validation, and the
+permission rule that matters most.
+
+```python title="test_notes.py"
+from playground import run_tests, setup
+
+setup()
+
+from django.contrib.auth.models import User
+from django.db import models
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
+from django.test import TestCase
+from django.urls import path
+
+
+class Note(models.Model):
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    title = models.CharField(max_length=60)
+
+    def clean_title(self):
+        return self.title.strip().capitalize()
+
+
+def note_detail(request, pk):
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "login required"}, status=401)
+    note = get_object_or_404(Note, pk=pk, owner=request.user)
+    return JsonResponse({"id": note.pk, "title": note.title})
+
+
+urlpatterns = [path("notes/<int:pk>/", note_detail)]
+
+
+class NoteTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):  # runs once for the class; each test still sees a clean copy
+        cls.ada = User.objects.create_user("ada")
+        cls.bob = User.objects.create_user("bob")
+        cls.note = Note.objects.create(owner=cls.ada, title="groceries")
+
+    def test_title_is_tidied(self):
+        self.assertEqual(Note(title="  shopping list ").clean_title(), "Shopping list")
+
+    def test_owner_can_read(self):
+        self.client.force_login(self.ada)
+        response = self.client.get(f"/notes/{self.note.pk}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"id": self.note.pk, "title": "groceries"})
+
+    def test_anonymous_gets_401(self):
+        self.assertEqual(self.client.get(f"/notes/{self.note.pk}/").status_code, 401)
+
+    def test_other_users_get_404_not_the_note(self):
+        self.client.force_login(self.bob)
+        self.assertEqual(self.client.get(f"/notes/{self.note.pk}/").status_code, 404)
+
+
+run_tests(NoteTests)
+```
+
+```text title="Output"
+  ok    test_anonymous_gets_401
+  ok    test_other_users_get_404_not_the_note
+  ok    test_owner_can_read
+  ok    test_title_is_tidied
+4 passed
+```
+
+- Each test checks one behaviour and is named after it, so a failure reads like a bug report.
+- `setUpTestData` creates the users and note once; Django wraps each test in a transaction, so a test
+  that changes data can't affect the next one.
+- `force_login` skips the login form: login itself is tested once, elsewhere.
+- The most valuable test here is the last one: it proves Bob can't read Ada's note.
+
+## Variations
+
+### API tests with APIClient and parametrised roles
+
+```python
+from playground import run_tests, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
+})
+
+from django.contrib.auth.models import User
+from django.db import models
+from django.test import TestCase
+from rest_framework import permissions, routers, serializers, viewsets
+from rest_framework.test import APIClient
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=50)
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+class ProductSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = ["id", "name", "price"]
+
+    def validate_price(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Price must be positive.")
+        return value
+
+
+class IsStaffOrReadOnly(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return request.method in permissions.SAFE_METHODS or request.user.is_staff
+
+
+class ProductViewSet(viewsets.ModelViewSet):
+    queryset = Product.objects.order_by("id")
+    serializer_class = ProductSerializer
+    permission_classes = [IsStaffOrReadOnly]
+
+
+router = routers.DefaultRouter()
+router.register("products", ProductViewSet)
+urlpatterns = router.urls
+
+
+class ProductApiTests(TestCase):
+    def setUp(self):
+        self.api = APIClient()
+
+    def test_create_permissions_by_role(self):
+        cases = [(None, 403), (User(username="cy"), 403), (User(username="sam", is_staff=True), 201)]
+        for user, expected in cases:
+            with self.subTest(role=user.username if user else "anonymous"):
+                if user:
+                    user.save()
+                    self.api.force_authenticate(user)
+                response = self.api.post("/products/", {"name": "Dune", "price": "12.50"}, format="json")
+                self.assertEqual(response.status_code, expected)
+
+    def test_validation_message_reaches_the_client(self):
+        self.api.force_authenticate(User.objects.create_user("sam", is_staff=True))
+        response = self.api.post("/products/", {"name": "Free", "price": "0"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"price": ["Price must be positive."]})
+
+
+run_tests(ProductApiTests)
+```
+
+```text title="Output"
+  ok    test_create_permissions_by_role
+  ok    test_validation_message_reaches_the_client
+2 passed
+```
+
+`subTest` runs one case per role and reports each failure separately (pytest's `parametrize` does the
+same). Asserting the exact error body protects what clients depend on: if a refactor changes the
+message or its shape, a test says so.
+
+### Locking in query counts
+
+```python
+from playground import run_tests, setup
+
+setup()
+
+from django.db import models
+from django.http import JsonResponse
+from django.test import TestCase
+from django.urls import path
+
+
+class Author(models.Model):
+    name = models.CharField(max_length=50)
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=50)
+    author = models.ForeignKey(Author, on_delete=models.CASCADE)
+
+
+def book_list(request):
+    books = Book.objects.select_related("author").order_by("id")  # remove select_related: test fails
+    return JsonResponse({"books": [{"title": b.title, "author": b.author.name} for b in books]})
+
+
+def slow_book_list(request):
+    return JsonResponse({"books": [{"title": b.title, "author": b.author.name} for b in Book.objects.all()]})
+
+
+urlpatterns = [path("books/", book_list), path("slow/", slow_book_list)]
+
+
+class QueryBudgetTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        for n in range(10):
+            Book.objects.create(title=f"Book {n}", author=Author.objects.create(name=f"Author {n}"))
+
+    def test_book_list_is_one_query(self):
+        with self.assertNumQueries(1):
+            self.client.get("/books/")
+
+    def test_slow_list_would_be_caught(self):
+        with self.assertNumQueries(1):  # this fails on purpose: 1 + 10 queries
+            self.client.get("/slow/")
+
+
+run_tests(QueryBudgetTests)
+```
+
+```text title="Output"
+  ok    test_book_list_is_one_query
+  FAIL  test_slow_list_would_be_caught: AssertionError: 11 != 1 : 11 queries executed, 1 expected
+1 passed, 1 failed
+```
+
+The second test fails on purpose, showing what a regression looks like: someone drops a
+`select_related`, and CI says "11 != 1" instead of production slowing down. With pytest-django the same
+check is the `django_assert_num_queries` fixture.
+
+### Mocking an external service
+
+```python
+from unittest import mock
+
+from playground import run_tests, setup
+
+setup()
+
+from django.test import TestCase
+
+
+class PaymentDeclined(Exception):
+    pass
+
+
+class PaymentGateway:  # in production this calls a provider's HTTP API
+    def charge(self, amount, token):
+        raise RuntimeError("tests must never call the real gateway")
+
+
+gateway = PaymentGateway()
+
+
+def checkout(amount, token):
+    try:
+        charge_id = gateway.charge(amount, token)
+    except PaymentDeclined:
+        return {"status": "declined"}
+    return {"status": "paid", "charge": charge_id}
+
+
+class CheckoutTests(TestCase):
+    @mock.patch.object(gateway, "charge", return_value="ch_123")
+    def test_successful_charge(self, charge):
+        self.assertEqual(checkout("25.00", "tok_visa"), {"status": "paid", "charge": "ch_123"})
+        charge.assert_called_once_with("25.00", "tok_visa")
+
+    @mock.patch.object(gateway, "charge", side_effect=PaymentDeclined)
+    def test_declined_card(self, charge):
+        self.assertEqual(checkout("25.00", "tok_declined"), {"status": "declined"})
+
+
+run_tests(CheckoutTests)
+```
+
+```text title="Output"
+  ok    test_declined_card
+  ok    test_successful_charge
+2 passed
+```
+
+`mock.patch` replaces the gateway's method only inside each test, and you can both script its answer
+(`return_value`, `side_effect`) and check how your code called it. ShopLite goes one step further and
+tests its real signing code with fake secrets, so webhook verification is covered end to end.
+
+### Emails, settings and the clock
+
+```python
+from datetime import datetime, timezone
+from unittest import mock
+
+from playground import run_tests, setup
+
+setup(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+
+from django.conf import settings
+from django.core import mail
+from django.test import TestCase, override_settings
+
+
+def send_welcome(email):
+    mail.send_mail("Welcome!", f"Hi from {settings.SITE_NAME}", "no-reply@example.com", [email])
+
+
+def greeting(now=None):
+    hour = (now or datetime.now(timezone.utc)).hour
+    return "Good morning" if hour < 12 else "Good afternoon"
+
+
+class SideEffectTests(TestCase):
+    @override_settings(SITE_NAME="ShopLite")
+    def test_welcome_email(self):
+        send_welcome("ada@example.com")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["ada@example.com"])
+        self.assertIn("ShopLite", mail.outbox[0].body)
+
+    def test_greeting_depends_on_time(self):
+        self.assertEqual(greeting(datetime(2026, 1, 1, 9, tzinfo=timezone.utc)), "Good morning")
+        self.assertEqual(greeting(datetime(2026, 1, 1, 15, tzinfo=timezone.utc)), "Good afternoon")
+
+
+run_tests(SideEffectTests)
+```
+
+```text title="Output"
+  ok    test_greeting_depends_on_time
+  ok    test_welcome_email
+2 passed
+```
+
+During tests Django swaps in the in-memory email backend, so sent messages land in `mail.outbox`.
+`override_settings` changes settings for one test. Code that depends on the current time is easiest to
+test when the time can be passed in (or frozen with a library such as `time-machine`).
+
+### Health and readiness checks
+
+```python
+from unittest import mock
+
+from playground import run_tests, setup
+
+setup()
+
+from django.db import connection
+from django.db.utils import OperationalError
+from django.http import JsonResponse
+from django.test import TestCase
+from django.urls import path
+
+
+def health(request):
+    return JsonResponse({"status": "ok"})
+
+
+def ready(request):
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+    except OperationalError:
+        return JsonResponse({"status": "unavailable", "database": "error"}, status=503)
+    return JsonResponse({"status": "ok", "database": "ok"})
+
+
+urlpatterns = [path("health/", health), path("ready/", ready)]
+
+
+class HealthTests(TestCase):
+    def test_health_never_touches_the_database(self):
+        with self.assertNumQueries(0):
+            self.assertEqual(self.client.get("/health/").json(), {"status": "ok"})
+
+    def test_ready_when_the_database_answers(self):
+        self.assertEqual(self.client.get("/ready/").status_code, 200)
+
+    def test_not_ready_when_the_database_is_down(self):
+        with mock.patch.object(connection, "cursor", side_effect=OperationalError("down")):
+            response = self.client.get("/ready/")
+        self.assertEqual((response.status_code, response.json()["database"]), (503, "error"))
+
+
+run_tests(HealthTests)
+```
+
+```text title="Output"
+  ok    test_health_never_touches_the_database
+  ok    test_not_ready_when_the_database_is_down
+  ok    test_ready_when_the_database_answers
+3 passed
+```
+
+A load balancer restarts or stops routing to a server based on these endpoints, so a bug in them takes
+the site down. Testing the "database is down" path with a mock is the only way to know the endpoint
+really answers 503 instead of crashing with 500.
+
+## Putting it together
+
+ShopLite's test suite is the reference: shared fixtures in `conftest.py` (users per role, a small
+catalogue, an authenticated client factory), tests for the service layer, the API, idempotency,
+webhooks, middleware and settings, and a PostgreSQL-only concurrency test:
+
+<ProjectFiles
+  project="shoplite"
+  paths="tests/conftest.py tests/test_orders.py tests/test_platform.py tests/test_concurrency.py pytest.ini"
+/>
+
+Run it yourself (57 tests, about 3 seconds):
+
+```bash
+cd projects/django/shoplite
+python -m pytest                     # SQLite; the concurrency test is skipped
+SHOPLITE_TEST_DATABASE_URL=postgres://user:pass@localhost:5432/shoplite python -m pytest
+python -m pip install coverage && coverage run -m pytest && coverage report -m
+```
+
+A runnable mini-suite in the same spirit: a service with a business rule, tested at the unit level, the
+API level and for its query budget, with one deliberately broken expectation so you can see a useful
+failure message.
+
+```python title="order_suite.py"
+from decimal import Decimal
+
+from playground import run_tests, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+})
+
+from django.contrib.auth.models import User
+from django.db import models, transaction
+from django.db.models import F
+from django.test import TestCase
+from django.urls import path
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework.test import APIClient
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=50)
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    stock = models.PositiveIntegerField()
+
+
+class Order(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+    qty = models.PositiveIntegerField()
+    total = models.DecimalField(max_digits=10, decimal_places=2)
+
+
+class OutOfStock(Exception):
+    pass
+
+
+def place_order(user, product_id, qty):
+    with transaction.atomic():
+        product = Product.objects.select_for_update().get(pk=product_id)
+        if product.stock < qty:
+            raise OutOfStock(f"Only {product.stock} left.")
+        Product.objects.filter(pk=product_id).update(stock=F("stock") - qty)
+        return Order.objects.create(user=user, product=product, qty=qty, total=product.price * qty)
+
+
+@api_view(["POST"])
+def orders(request):
+    try:
+        order = place_order(request.user, request.data["product"], int(request.data["qty"]))
+    except OutOfStock as exc:
+        return Response({"error": str(exc)}, status=409)
+    return Response({"id": order.pk, "total": str(order.total)}, status=201)
+
+
+urlpatterns = [path("orders/", orders)]
+
+
+class Base(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.ada = User.objects.create_user("ada")
+        cls.dune = Product.objects.create(name="Dune", price=Decimal("12.50"), stock=3)
+
+
+class ServiceTests(Base):
+    def test_reserves_stock_and_prices_the_order(self):
+        order = place_order(self.ada, self.dune.pk, 2)
+        self.dune.refresh_from_db()
+        self.assertEqual((order.total, self.dune.stock), (Decimal("25.00"), 1))
+
+    def test_out_of_stock_changes_nothing(self):
+        with self.assertRaisesMessage(OutOfStock, "Only 3 left."):
+            place_order(self.ada, self.dune.pk, 5)
+        self.dune.refresh_from_db()
+        self.assertEqual((self.dune.stock, Order.objects.count()), (3, 0))
+
+
+class ApiTests(Base):
+    def setUp(self):
+        self.api = APIClient()
+        self.api.force_authenticate(self.ada)
+
+    def test_create(self):
+        response = self.api.post("/orders/", {"product": self.dune.pk, "qty": 1}, format="json")
+        self.assertEqual((response.status_code, response.json()["total"]), (201, "12.50"))
+
+    def test_conflict(self):
+        response = self.api.post("/orders/", {"product": self.dune.pk, "qty": 9}, format="json")
+        self.assertEqual(response.status_code, 409)
+
+    def test_needs_login(self):
+        self.assertEqual(APIClient().post("/orders/", {}, format="json").status_code, 403)
+
+    def test_query_budget(self):
+        with self.assertNumQueries(5):  # savepoint, SELECT (locked), UPDATE, INSERT, release
+            self.api.post("/orders/", {"product": self.dune.pk, "qty": 1}, format="json")
+
+    def test_a_wrong_expectation_shows_a_clear_failure(self):
+        response = self.api.post("/orders/", {"product": self.dune.pk, "qty": 2}, format="json")
+        self.assertEqual(response.json()["total"], "24.00")  # deliberately wrong: 2 x 12.50 = 25.00
+
+
+run_tests(ServiceTests, ApiTests)
+```
+
+```text title="Output"
+  ok    test_out_of_stock_changes_nothing
+  ok    test_reserves_stock_and_prices_the_order
+  FAIL  test_a_wrong_expectation_shows_a_clear_failure: AssertionError: '25.00' != '24.00'
+  ok    test_conflict
+  ok    test_create
+  ok    test_needs_login
+  ok    test_query_budget
+6 passed, 1 failed
+```
+
+Unit tests check the rule directly; API tests check what clients see (status codes, bodies, auth);
+the query budget catches performance regressions. The deliberately wrong test shows what you want from
+a failure: the exact values, side by side, pointing straight at the cause.
+
+## Common mistakes
+
+<Callout type="warning" title="Tests that only test the happy path">
+  Most production bugs live in the unhappy paths: the other user's object, the missing field, the
+  empty list, the duplicate request, the service that times out. For every endpoint, test at least
+  one way it should refuse.
+</Callout>
+
+- **Calling real services or needing real secrets.** Mock or fake them; load fake configuration.
+- **Shared mutable test data** created at module level: tests start depending on each other's order.
+  Use `setUpTestData`/fixtures.
+- **Asserting implementation details** (which internal function was called) instead of behaviour
+  (status, body, database state): tests break on every refactor.
+- **Slow suites** (password hashing, sleeps, real network). Use a fast hasher in test settings,
+  freeze time, mock I/O.
+- **Testing on SQLite only when production is PostgreSQL.** Run at least CI on the production engine.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: setUp or setUpTestData for users shared by every test in a class?"
+>
+  `setUpTestData` (a classmethod): it runs once per class, and Django gives each test a clean copy
+  thanks to the per-test transaction. `setUp` would recreate them before every test.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: how do you make sure an order list never goes back to N+1?">
+  A test with `assertNumQueries(n)` (or `django_assert_num_queries`) around the list request, with
+  several orders in the database so N+1 would exceed the budget.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: test that a signup sends a welcome email, without sending one."
+>
+  In tests Django uses the locmem email backend: perform the signup, then `assert len(mail.outbox)
+  == 1` and check `mail.outbox[0].to` and the subject.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: your view calls a payment API. How do you test the 'card declined' path?"
+>
+  Patch the client used by the view (`mock.patch.object(gateway, "charge",
+  side_effect=PaymentDeclined)`) and assert your view's response and database state.
+</Reveal>
+
+<KeyTakeaways>
+
+- Many fast unit/service tests, a solid layer of API tests, few end-to-end tests.
+- `TestCase` + test client (or pytest-django) with fresh data per test; `setUpTestData` and fixtures.
+- Test behaviour: status codes, bodies, database state, permissions per role, every refusal.
+- `assertNumQueries` locks performance; mocks and fakes isolate external services and secrets.
+- Health/readiness endpoints get tests too, including the failure case.
+- Run the suite in CI on the production database engine; use coverage to find gaps.
+
+</KeyTakeaways>

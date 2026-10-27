@@ -1,0 +1,454 @@
+---
+title: Codebases, docs & deployment; Django vs others
+summary: Grow a Django codebase that stays easy to change, document it, and ship it. App boundaries and project layout, split settings, a services layer, logging, Docker and gunicorn, static files, migrations and zero-downtime deploys, CI, and an honest comparison of Django with FastAPI and Flask, including where each is used in industry.
+estimatedMinutes: 25
+difficulty: medium
+section: Quality, Security & Production
+objectives:
+  - Organise a project into apps with clear boundaries and a services layer
+  - Split settings per environment and configure logging for production
+  - Package and run Django with Docker and gunicorn behind a reverse proxy, with static files and migrations handled
+  - Set up CI that tests, checks and builds on every push
+  - Explain the strengths and weaknesses of Django, FastAPI and Flask and pick one for a project
+prerequisites:
+  - Testing Django properly
+  - Security & best practices
+tags: [django, architecture, deployment, docker, ci, comparison]
+---
+
+## Intuition: a building that can get new floors
+
+A small project can live in one app with views that do everything. A product that lives for years
+needs structure that lets many people change it safely: rooms (apps) with clear doors between them,
+the rules of the house in one place (services), a different set of keys for each environment
+(settings), and a repeatable way to move in (deployment). None of this is exotic; it's the same few
+patterns applied consistently.
+
+## See it
+
+<FrameworkCompareViz />
+
+## The precise rules
+
+**Apps by domain, not by layer.** `accounts`, `catalog`, `cart`, `orders`, `payments`, `core` (shared
+infrastructure: middleware, error handling, health checks). Each app owns its models, admin, URLs,
+templates and tests. Dependencies point one way (`orders` may import `catalog`; `catalog` never
+imports `orders`).
+
+**Where code goes:**
+
+| Code                                                     | Home                                                  |
+| -------------------------------------------------------- | ----------------------------------------------------- |
+| Data shape, constraints, small model behaviour           | `models.py`                                           |
+| Business rules and workflows (place order, refund, ship) | `services.py` (plain functions)                       |
+| HTTP: parse input, call a service, shape the response    | `views.py` / `api.py`                                 |
+| Input validation and output shape                        | `forms.py` / `serializers.py`                         |
+| Reusable query logic                                     | custom QuerySet methods                               |
+| Cross-cutting HTTP concerns                              | middleware                                            |
+| Talking to outside systems                               | one client module per system (`payments/provider.py`) |
+
+**Split settings:** `config/settings/base.py` (shared, environment-driven), `dev.py`, `test.py`,
+`prod.py`; choose with `DJANGO_SETTINGS_MODULE`. Production values come only from the environment.
+
+**Logging:** configure `LOGGING` to write structured lines to stdout (containers collect them), include
+a request id, log at `INFO` in production, and send errors to a tracker (Sentry and similar).
+
+**Documentation:** a README per project (run, configure, test, deploy, layout), docstrings on services,
+generated API docs (lesson 22), and short Architecture Decision Records for big choices.
+
+**Deployment, the usual shape:**
+
+1. Build a Docker image with pinned dependencies and the code.
+2. On release: `python manage.py migrate` (once, before the new code takes traffic) and
+   `collectstatic`.
+3. Run `gunicorn config.wsgi` (or uvicorn/gunicorn with uvicorn workers for ASGI) with a few workers
+   per CPU.
+4. Put a reverse proxy or load balancer in front for TLS, compression, slow clients and static files
+   (or WhiteNoise / a CDN for static files).
+5. Health checks (`/health/`, `/ready/`) let the platform restart and route correctly.
+
+**Zero-downtime migrations:** new code must work with the old schema and vice versa during the
+switch. Add columns as nullable first, backfill, then add constraints; rename in two releases; never
+drop a column that running code still reads.
+
+**CI:** on every push, lint, run the tests (on PostgreSQL), `makemigrations --check`,
+`check --deploy` with production settings, validate the OpenAPI schema, build the image. This
+module's own CI does all of that for the projects.
+
+**Django vs FastAPI vs Flask** (the comparison above, in short):
+
+- **Django**: the most complete; ORM, migrations, admin, auth, forms, security defaults. Best for
+  full products with users, data and back-office needs. Heavier for tiny services; async is
+  supported but the ORM is synchronous underneath.
+- **FastAPI**: modern, async-first, type hints drive validation and automatic OpenAPI docs; excellent
+  performance for I/O-heavy JSON APIs and ML model serving. You assemble the database layer, auth and
+  admin yourself.
+- **Flask**: minimal and flexible; you pick every extension. Great for small services, prototypes and
+  unusual architectures; large Flask apps need discipline to stay consistent.
+
+**In industry:** Django powers Instagram, Mozilla's sites, Disqus, Sentry and countless SaaS products,
+newsrooms and government services; FastAPI is common for ML inference APIs and microservices (Netflix,
+Uber and Microsoft have published FastAPI projects); Flask runs many internal tools and services
+(Pinterest and LinkedIn have used it). Many companies run more than one.
+
+## Worked example
+
+A thin view and a service: the view only translates HTTP, the service holds the rule, so the same rule
+serves the website, the API, an admin action and a management command.
+
+```python title="thin_views.py"
+from decimal import Decimal
+
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+})
+
+from django.db import models, transaction
+from django.test import Client
+from django.urls import path
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+
+class Coupon(models.Model):
+    code = models.CharField(max_length=20, unique=True)
+    percent = models.PositiveIntegerField()
+    uses_left = models.PositiveIntegerField()
+
+
+# --- services.py: the business rule, no HTTP in sight -------------------------------------
+class CouponError(Exception):
+    pass
+
+
+def apply_coupon(code: str, total: Decimal) -> Decimal:
+    """Return the discounted total and use up the coupon once."""
+    with transaction.atomic():
+        coupon = Coupon.objects.select_for_update().filter(code=code.upper()).first()
+        if coupon is None:
+            raise CouponError("Unknown coupon.")
+        if coupon.uses_left == 0:
+            raise CouponError("This coupon has been used up.")
+        coupon.uses_left -= 1
+        coupon.save(update_fields=["uses_left"])
+    return (total * (100 - coupon.percent) / 100).quantize(Decimal("0.01"))
+
+
+# --- api.py: translate HTTP <-> service ---------------------------------------------------
+@api_view(["POST"])
+def coupon_view(request):
+    try:
+        new_total = apply_coupon(request.data["code"], Decimal(request.data["total"]))
+    except CouponError as exc:
+        return Response({"error": str(exc)}, status=409)
+    return Response({"total": str(new_total)})
+
+
+urlpatterns = [path("coupon/", coupon_view)]
+migrate()
+Coupon.objects.create(code="SPRING", percent=15, uses_left=1)
+c = Client()
+post = lambda code: c.post("/coupon/", {"code": code, "total": "40.00"}, content_type="application/json")  # noqa: E731
+print("api:", post("spring").json(), post("spring").json(), post("nope").json())
+Coupon.objects.filter(code="SPRING").update(uses_left=1)
+print("same rule from a script or command:", apply_coupon("SPRING", Decimal("100")))
+```
+
+```text title="Output"
+api: {'total': '34.00'} {'error': 'This coupon has been used up.'} {'error': 'Unknown coupon.'}
+same rule from a script or command: 85.00
+```
+
+- The view has no `if` about coupons: it parses input, calls the service, maps the service's error to a
+  status code.
+- The service has no `request` or `Response`: you can call it from a management command, a Celery
+  task, the admin or a test, and it behaves the same.
+- This is exactly how ShopLite is organised (`orders/services.py` holds every order rule).
+
+## Variations
+
+### Split settings in one picture
+
+```python
+import os
+
+BASE = {"DEBUG": False, "ALLOWED_HOSTS": ["localhost"], "CACHE": "locmem", "PASSWORD_HASHER": "pbkdf2"}
+DEV = {**BASE, "DEBUG": True, "EMAIL": "console"}
+TEST = {**BASE, "PASSWORD_HASHER": "md5 (speed, tests only)", "EMAIL": "locmem", "DATABASE": ":memory:"}
+PROD = {**BASE, "ALLOWED_HOSTS": os.environ.get("HOSTS", "shop.example.com").split(","),
+        "CACHE": "redis", "SECURE_SSL_REDIRECT": True, "HSTS_SECONDS": 31536000}
+MODULES = {"config.settings.dev": DEV, "config.settings.test": TEST, "config.settings.prod": PROD}
+
+for module in ["config.settings.dev", "config.settings.test", "config.settings.prod"]:
+    settings = MODULES[module]
+    differences = {k: v for k, v in settings.items() if BASE.get(k) != v}
+    print(f"{module:<22} {differences}")
+```
+
+```text title="Output"
+config.settings.dev    {'DEBUG': True, 'EMAIL': 'console'}
+config.settings.test   {'PASSWORD_HASHER': 'md5 (speed, tests only)', 'EMAIL': 'locmem', 'DATABASE': ':memory:'}
+config.settings.prod   {'ALLOWED_HOSTS': ['shop.example.com'], 'CACHE': 'redis', 'SECURE_SSL_REDIRECT': True, 'HSTS_SECONDS': 31536000}
+```
+
+Each environment file starts from `base` and changes only what differs, so you can read a diff of
+environments in a few lines. ShopLite's `dev.py`, `test.py` and `prod.py` follow this shape; `test.py`
+also loads `.env.example` first, so tests always run with fake keys.
+
+### Production logging
+
+```python
+import json
+import logging
+import sys
+from contextvars import ContextVar
+
+request_id: ContextVar[str] = ContextVar("request_id", default="-")
+
+
+class JsonLines(logging.Formatter):
+    """One JSON object per line: easy for log collectors to parse and search."""
+
+    def format(self, record):
+        return json.dumps({"level": record.levelname, "logger": record.name,
+                           "request_id": request_id.get(), "message": record.getMessage()})
+
+
+handler = logging.StreamHandler(sys.stdout)  # containers collect stdout
+handler.setFormatter(JsonLines())
+log = logging.getLogger("shoplite.orders")
+log.addHandler(handler)
+log.setLevel(logging.INFO)
+log.propagate = False
+
+token = request_id.set("3f9c2a1b")
+log.info("order %s placed, total %s", 41, "25.00")
+log.debug("not shown at INFO level")
+log.warning("stock low for product %s", 7)
+request_id.reset(token)
+log.info("background job finished")
+```
+
+```text title="Output"
+{"level": "INFO", "logger": "shoplite.orders", "request_id": "3f9c2a1b", "message": "order 41 placed, total 25.00"}
+{"level": "WARNING", "logger": "shoplite.orders", "request_id": "3f9c2a1b", "message": "stock low for product 7"}
+{"level": "INFO", "logger": "shoplite.orders", "request_id": "-", "message": "background job finished"}
+```
+
+Structured lines with a request id turn "the site was slow at 10:42" into a search: every line of the
+slow request, across services. ShopLite sets the id in middleware and adds it with a logging filter;
+Django's `LOGGING` setting wires formatters, filters and handlers the same way.
+
+### What a release does
+
+```python
+steps = [
+    ("build", "docker build -t shoplite:41 .", "image with pinned deps + code"),
+    ("test", "python -m pytest", "57 passed"),
+    ("check", "python manage.py check --deploy --fail-level WARNING", "no issues"),
+    ("migrate", "python manage.py migrate --noinput", "run once, before new code takes traffic"),
+    ("static", "python manage.py collectstatic --noinput", "hashed files into STATIC_ROOT / CDN"),
+    ("roll out", "gunicorn config.wsgi --workers 3 --bind 0.0.0.0:8000", "new containers, old ones drain"),
+    ("verify", "curl -fsS https://shop.example.com/ready/", '{"status": "ok"}'),
+]
+for n, (name, command, note) in enumerate(steps, 1):
+    print(f"{n}. {name:<9} $ {command}")
+    print(f"   {'':<9} -> {note}")
+```
+
+```text title="Output"
+1. build     $ docker build -t shoplite:41 .
+             -> image with pinned deps + code
+2. test      $ python -m pytest
+             -> 57 passed
+3. check     $ python manage.py check --deploy --fail-level WARNING
+             -> no issues
+4. migrate   $ python manage.py migrate --noinput
+             -> run once, before new code takes traffic
+5. static    $ python manage.py collectstatic --noinput
+             -> hashed files into STATIC_ROOT / CDN
+6. roll out  $ gunicorn config.wsgi --workers 3 --bind 0.0.0.0:8000
+             -> new containers, old ones drain
+7. verify    $ curl -fsS https://shop.example.com/ready/
+             -> {"status": "ok"}
+```
+
+Whatever the platform (a VM with systemd, Kubernetes, Render, Fly.io, AWS), a Django release is these
+steps in this order. Automate them in CI/CD so every release is the same; a release that needs a human
+to remember step 4 will one day skip it.
+
+### Expand, then contract: a zero-downtime rename
+
+```python
+releases = [
+    ("1 expand", "add column full_name (nullable); code writes both name and full_name"),
+    ("2 backfill", "data migration: UPDATE ... SET full_name = name WHERE full_name IS NULL (in batches)"),
+    ("3 switch", "code reads full_name; full_name made NOT NULL"),
+    ("4 contract", "remove name from the code; next release drops the column"),
+]
+running = {"1 expand": ["old code", "new code"], "2 backfill": ["new code"],
+           "3 switch": ["new code"], "4 contract": ["new code"]}
+for release, change in releases:
+    print(f"release {release:<11} {change}")
+    print(f"{'':<20}safe while {' and '.join(running[release])} run{'s' if len(running[release]) == 1 else ''}")
+```
+
+```text title="Output"
+release 1 expand    add column full_name (nullable); code writes both name and full_name
+                    safe while old code and new code run
+release 2 backfill  data migration: UPDATE ... SET full_name = name WHERE full_name IS NULL (in batches)
+                    safe while new code runs
+release 3 switch    code reads full_name; full_name made NOT NULL
+                    safe while new code runs
+release 4 contract  remove name from the code; next release drops the column
+                    safe while new code runs
+```
+
+During a rolling deploy, old and new code run against the same database for a few minutes. A rename
+done in one migration breaks whichever version isn't expecting it; the expand/contract sequence keeps
+every step compatible with the code running beside it.
+
+## Putting it together
+
+ShopLite's codebase is the reference layout, generated here from its real files:
+
+<ProjectTree project="shoplite" />
+
+A Dockerfile and CI workflow for a project like it (the image is built in CI; the comments explain each
+choice):
+
+```dockerfile title="Dockerfile"
+FROM python:3.13-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt   # cached layer: only rebuilt when deps change
+COPY . .
+RUN DJANGO_SETTINGS_MODULE=config.settings.prod DJANGO_SECRET_KEY=build-only-not-secret \
+    JWT_SIGNING_KEY=build-only PAYMENTS_WEBHOOK_SECRET=build-only \
+    python manage.py collectstatic --noinput
+RUN useradd --create-home app && chown -R app /app
+USER app                                             # never run the app as root
+EXPOSE 8000
+CMD ["gunicorn", "config.wsgi", "--bind", "0.0.0.0:8000", "--workers", "3", "--access-logfile", "-"]
+```
+
+```yaml title=".github/workflows/ci.yml"
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env: { POSTGRES_USER: shop, POSTGRES_PASSWORD: shop, POSTGRES_DB: shop }
+        ports: ["5432:5432"]
+    env:
+      SHOPLITE_TEST_DATABASE_URL: postgres://shop:shop@localhost:5432/shop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install -r requirements.txt
+      - run: python -m pytest # includes check --deploy and the race test
+      - run: DJANGO_SETTINGS_MODULE=config.settings.test python manage.py makemigrations --check --dry-run
+      - run: docker build -t shoplite:${{ github.sha }} .
+```
+
+And a runnable "is this codebase healthy?" script, the kind of check a team runs in CI to keep
+architecture rules from eroding: apps may only import the apps they're allowed to.
+
+```python title="architecture_check.py"
+import ast
+
+FILES = {  # in a real check: read every .py file under each app
+    "catalog/services.py": "from django.core.cache import cache\nfrom .models import Category\n",
+    "orders/services.py": "from catalog.models import Product\nfrom .models import Order\n",
+    "payments/api.py": "from orders.models import Order\nfrom orders.services import mark_paid\n",
+    "catalog/views.py": "from orders.models import Order  # wrong way round!\n",
+}
+ALLOWED = {"catalog": set(), "orders": {"catalog"}, "payments": {"orders", "catalog"}}
+
+problems = []
+for path, source in FILES.items():
+    app = path.split("/")[0]
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            target = node.module.split(".")[0]
+            if target in ALLOWED and target != app and target not in ALLOWED[app]:
+                problems.append(f"{path}: '{app}' must not import '{target}'")
+print("\n".join(problems) or "dependencies point the right way")
+print(f"checked {len(FILES)} files, {len(problems)} problem(s)")
+```
+
+```text title="Output"
+catalog/views.py: 'catalog' must not import 'orders'
+checked 4 files, 1 problem(s)
+```
+
+The catalogue must not know about orders (otherwise every catalogue change risks breaking checkout).
+Tools like `import-linter` enforce rules like this for real; even a tiny script in CI keeps the
+dependency arrows from slowly turning into a tangle.
+
+## Common mistakes
+
+<Callout type="warning" title="Fat views">
+  Views that validate, apply business rules, talk to payment providers and send emails can't be
+  reused or tested in isolation, and the rules get copied into the API, the admin and commands. Keep
+  views thin and put the rules in services.
+</Callout>
+
+- **One giant `utils.py`** or an app called `common` that everything depends on. Put code in the app it
+  belongs to.
+- **Settings full of `if DEBUG:` branches.** Split settings per environment.
+- **Running migrations from every container at start-up.** Run them once per release, before the new
+  code takes traffic.
+- **`runserver` or `DEBUG=True` behind a public URL.** Use gunicorn/uvicorn, `DEBUG=False`, a proxy.
+- **Choosing a framework by popularity.** Choose by what the product needs: full product with
+  back-office → Django; JSON/ML APIs with high concurrency → FastAPI; small or unusual services → Flask.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: where does 'a refund can only happen within 30 days of payment' live?"
+>
+  In a service function (`payments/services.py: refund(payment)`), called by the view, the admin
+  action and any task. Not in a view, a template or a signal.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: in which order do migrate and the new code rollout happen?">
+  Migrate first (with backwards-compatible migrations), then roll out the new code, so new code
+  never meets an old schema. Destructive changes wait for a later release.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why does the Dockerfile copy requirements.txt before the rest of the code?"
+>
+  Docker caches layers. Installing dependencies before copying the code means a code-only change
+  reuses the cached dependency layer, making builds much faster.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: a startup needs a JSON API serving an ML model with thousands of concurrent requests and no admin. Django, FastAPI or Flask?"
+>
+  FastAPI: async-first, Pydantic validation and automatic docs, great for I/O-bound model serving.
+  Django would shine if they also needed users, an admin and lots of relational data.
+</Reveal>
+
+<KeyTakeaways>
+
+- Apps by domain with one-way dependencies; thin views, business rules in services.
+- Split settings (base/dev/test/prod) driven by environment variables; JSON logs with request ids.
+- Release = build image → test/check → migrate once → collectstatic → roll out → verify `/ready/`.
+- Zero-downtime schema changes: expand, backfill, switch, contract.
+- CI on every push: tests on PostgreSQL, migrations check, deploy check, schema, image build.
+- Django for full products, FastAPI for async JSON/ML APIs, Flask for small flexible services.
+
+</KeyTakeaways>
