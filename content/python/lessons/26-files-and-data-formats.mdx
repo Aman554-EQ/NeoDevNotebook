@@ -120,7 +120,7 @@ with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
     (root / "data" / "2026" / "oct").mkdir(parents=True)      # create the whole chain
     for name in ["a.csv", "b.csv", "notes.txt"]:
-        (root / "data" / "2026" / "oct" / name).write_text("x\n", encoding="utf-8")
+        (root / "data" / "2026" / "oct" / name).write_text("x\n", encoding="utf-8", newline="\n")
     (root / "data" / "readme.md").write_text("# data\n", encoding="utf-8")
 
     print(sorted(p.name for p in (root / "data").rglob("*.csv")))         # recursive search
@@ -139,13 +139,16 @@ with tempfile.TemporaryDirectory() as tmp:
 ['a.csv', 'b.csv']
 ['data/readme.md']
 a.json oct ('2026', 'oct', 'a.csv')
-3 bytes True True
+2 bytes True True
 archive-a.csv False
 ```
 
 - `mkdir(parents=True)` creates intermediate folders; add `exist_ok=True` to ignore folders that
   already exist.
 - `glob` matches one folder, `rglob` searches all subfolders.
+- Text mode turns `"\n"` into the system's line ending when writing: on Windows `"x\n"` is saved as
+  `x\r\n` (3 bytes). `newline="\n"` writes the same bytes everywhere, so the file is 2 bytes on every
+  system.
 - `with_suffix`, `with_name`, `parent` and `relative_to` build new paths without string slicing,
   and work the same on Windows and Linux.
 
