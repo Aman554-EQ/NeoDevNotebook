@@ -1,0 +1,709 @@
+openapi: 3.0.3
+info:
+  title: Library API
+  version: 1.0.0
+  description: Books, authors and loans. A NeoDevNotebook guided project.
+paths:
+  /api/auth/token/:
+    post:
+      operationId: auth_token_create
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AuthToken'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AuthToken'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthToken'
+        required: true
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+          description: ''
+  /api/authors/:
+    get:
+      operationId: authors_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - authors
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAuthorList'
+          description: ''
+    post:
+      operationId: authors_create
+      tags:
+      - authors
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Author'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Author'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Author'
+        required: true
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Author'
+          description: ''
+  /api/authors/{id}/:
+    get:
+      operationId: authors_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this author.
+        required: true
+      tags:
+      - authors
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Author'
+          description: ''
+    put:
+      operationId: authors_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this author.
+        required: true
+      tags:
+      - authors
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Author'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Author'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Author'
+        required: true
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Author'
+          description: ''
+    patch:
+      operationId: authors_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this author.
+        required: true
+      tags:
+      - authors
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAuthor'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAuthor'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAuthor'
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Author'
+          description: ''
+    delete:
+      operationId: authors_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this author.
+        required: true
+      tags:
+      - authors
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/books/:
+    get:
+      operationId: books_list
+      parameters:
+      - in: query
+        name: author
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: published_year
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - books
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedBookList'
+          description: ''
+    post:
+      operationId: books_create
+      tags:
+      - books
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Book'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Book'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Book'
+        required: true
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Book'
+          description: ''
+  /api/books/{id}/:
+    get:
+      operationId: books_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this book.
+        required: true
+      tags:
+      - books
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Book'
+          description: ''
+    put:
+      operationId: books_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this book.
+        required: true
+      tags:
+      - books
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Book'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Book'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Book'
+        required: true
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Book'
+          description: ''
+    patch:
+      operationId: books_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this book.
+        required: true
+      tags:
+      - books
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedBook'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedBook'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedBook'
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Book'
+          description: ''
+    delete:
+      operationId: books_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this book.
+        required: true
+      tags:
+      - books
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/loans/:
+    get:
+      operationId: loans_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - loans
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedLoanList'
+          description: ''
+    post:
+      operationId: loans_create
+      tags:
+      - loans
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Loan'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Loan'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Loan'
+        required: true
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Loan'
+          description: ''
+  /api/loans/{id}/:
+    get:
+      operationId: loans_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this loan.
+        required: true
+      tags:
+      - loans
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Loan'
+          description: ''
+  /api/loans/{id}/return/:
+    post:
+      operationId: loans_return_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this loan.
+        required: true
+      tags:
+      - loans
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Loan'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Loan'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Loan'
+        required: true
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Loan'
+          description: ''
+components:
+  schemas:
+    AuthToken:
+      type: object
+      properties:
+        username:
+          type: string
+          writeOnly: true
+        password:
+          type: string
+          writeOnly: true
+        token:
+          type: string
+          readOnly: true
+      required:
+      - password
+      - token
+      - username
+    Author:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 120
+        book_count:
+          type: integer
+          readOnly: true
+      required:
+      - book_count
+      - id
+      - name
+    Book:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          maxLength: 200
+        isbn:
+          type: string
+          maxLength: 13
+        author:
+          type: integer
+        author_name:
+          type: string
+          readOnly: true
+        published_year:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        copies:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        available:
+          type: integer
+          readOnly: true
+      required:
+      - author
+      - author_name
+      - available
+      - id
+      - isbn
+      - published_year
+      - title
+    Loan:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        book:
+          type: integer
+        book_title:
+          type: string
+          readOnly: true
+        borrowed_at:
+          type: string
+          format: date-time
+          readOnly: true
+        due_at:
+          type: string
+          format: date-time
+          readOnly: true
+        returned_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - book
+      - book_title
+      - borrowed_at
+      - due_at
+      - id
+      - returned_at
+    PaginatedAuthorList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Author'
+    PaginatedBookList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Book'
+    PaginatedLoanList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Loan'
+    PatchedAuthor:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 120
+        book_count:
+          type: integer
+          readOnly: true
+    PatchedBook:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          maxLength: 200
+        isbn:
+          type: string
+          maxLength: 13
+        author:
+          type: integer
+        author_name:
+          type: string
+          readOnly: true
+        published_year:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        copies:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        available:
+          type: integer
+          readOnly: true
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid
+    tokenAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Token-based authentication with required prefix "Token"

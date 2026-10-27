@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Your cart{% endblock %}
+{% block content %}
+  <h1>Your cart</h1>
+  {% if lines %}
+    <table>
+      <thead><tr><th>Product</th><th>Qty</th><th>Total</th><th></th></tr></thead>
+      <tbody>
+        {% for product, qty, line_total in lines %}
+          <tr>
+            <td>{{ product.name }}</td><td>{{ qty }}</td><td>${{ line_total }}</td>
+            <td><form method="post" action="{% url 'cart-remove' product.pk %}">{% csrf_token %}<button>Remove</button></form></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p><strong>Total: ${{ total }}</strong></p>
+    <form method="post" action="{% url 'checkout' %}">{% csrf_token %}<button type="submit">Place order</button></form>
+  {% else %}
+    <p>Your cart is empty.</p>
+  {% endif %}
+{% endblock %}

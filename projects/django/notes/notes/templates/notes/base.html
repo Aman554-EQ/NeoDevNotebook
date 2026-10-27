@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Notes{% endblock %}</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+      .note { border: 1px solid #ddd; border-radius: 8px; padding: 0.75rem 1rem; margin: 0.75rem 0; }
+      .pinned { border-color: #4f46e5; }
+      .messages li { color: #15803d; }
+      .errorlist { color: #be123c; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a href="{% url 'notes:list' %}">All notes</a> · <a href="{% url 'notes:create' %}">New note</a>
+    </header>
+    {% if messages %}
+      <ul class="messages">
+        {% for message in messages %}<li>{{ message }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    <main>{% block content %}{% endblock %}</main>
+  </body>
+</html>
