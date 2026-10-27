@@ -1,0 +1,67 @@
+{
+  "kind": "orm",
+  "title": "N+1 queries and how to avoid them",
+  "steps": [
+    {
+      "label": "N+1",
+      "note": "One query for the books, then one more per book the moment the loop touches b.author: 1 + N queries. With 100 books on a page, 101 round trips.",
+      "python": "[(b.title, b.author.name) for b in Book.objects.order_by(\"id\")]",
+      "sql": [
+        "SELECT \"shop_book\".\"id\", \"shop_book\".\"title\", \"shop_book\".\"author_id\" FROM \"shop_book\" ORDER BY \"shop_book\".\"id\" ASC",
+        "SELECT \"shop_author\".\"id\", \"shop_author\".\"name\" FROM \"shop_author\" WHERE \"shop_author\".\"id\" = 1 LIMIT 21",
+        "SELECT \"shop_author\".\"id\", \"shop_author\".\"name\" FROM \"shop_author\" WHERE \"shop_author\".\"id\" = 2 LIMIT 21",
+        "SELECT \"shop_author\".\"id\", \"shop_author\".\"name\" FROM \"shop_author\" WHERE \"shop_author\".\"id\" = 3 LIMIT 21"
+      ],
+      "result": "[('Dune', 'Herbert'), ('Emma', 'Austen'), ('The Dispossessed', 'Le Guin')]"
+    },
+    {
+      "label": "select_related",
+      "note": "select_related follows a ForeignKey (or OneToOne) with a JOIN: the same result in one query, however many books.",
+      "python": "[(b.title, b.author.name) for b in Book.objects.select_related(\"author\").order_by(\"id\")]",
+      "sql": [
+        "SELECT \"shop_book\".\"id\", \"shop_book\".\"title\", \"shop_book\".\"author_id\", \"shop_author\".\"id\", \"shop_author\".\"name\" FROM \"shop_book\" INNER JOIN \"shop_author\" ON (\"shop_book\".\"author_id\" = \"shop_author\".\"id\") ORDER BY \"shop_book\".\"id\" ASC"
+      ],
+      "result": "[('Dune', 'Herbert'), ('Emma', 'Austen'), ('The Dispossessed', 'Le Guin')]"
+    },
+    {
+      "label": "N+1 on many-to-many",
+      "note": "Many-to-many can't be one JOIN without duplicating rows, so the naive loop again costs one query per book.",
+      "python": "[(b.title, [t.name for t in b.tags.all()]) for b in Book.objects.order_by(\"id\")]",
+      "sql": [
+        "SELECT \"shop_book\".\"id\", \"shop_book\".\"title\", \"shop_book\".\"author_id\" FROM \"shop_book\" ORDER BY \"shop_book\".\"id\" ASC",
+        "SELECT \"shop_tag\".\"id\", \"shop_tag\".\"name\" FROM \"shop_tag\" INNER JOIN \"shop_book_tags\" ON (\"shop_tag\".\"id\" = \"shop_book_tags\".\"tag_id\") WHERE \"shop_book_tags\".\"book_id\" = 1",
+        "SELECT \"shop_tag\".\"id\", \"shop_tag\".\"name\" FROM \"shop_tag\" INNER JOIN \"shop_book_tags\" ON (\"shop_tag\".\"id\" = \"shop_book_tags\".\"tag_id\") WHERE \"shop_book_tags\".\"book_id\" = 2",
+        "SELECT \"shop_tag\".\"id\", \"shop_tag\".\"name\" FROM \"shop_tag\" INNER JOIN \"shop_book_tags\" ON (\"shop_tag\".\"id\" = \"shop_book_tags\".\"tag_id\") WHERE \"shop_book_tags\".\"book_id\" = 3"
+      ],
+      "result": "[('Dune', ['classic', 'sci-fi']), ('Emma', ['classic']), ('The Dispossessed', ['sci-fi'])]"
+    },
+    {
+      "label": "prefetch_related",
+      "note": "prefetch_related runs one extra query for all the tags (WHERE book_id IN (...)) and joins them in Python: 2 queries in total, not 1 + N.",
+      "python": "[(b.title, [t.name for t in b.tags.all()]) for b in Book.objects.prefetch_related(\"tags\").order_by(\"id\")]",
+      "sql": [
+        "SELECT \"shop_book\".\"id\", \"shop_book\".\"title\", \"shop_book\".\"author_id\" FROM \"shop_book\" ORDER BY \"shop_book\".\"id\" ASC",
+        "SELECT (\"shop_book_tags\".\"book_id\") AS \"_prefetch_related_val_book_id\", \"shop_tag\".\"id\", \"shop_tag\".\"name\" FROM \"shop_tag\" INNER JOIN \"shop_book_tags\" ON (\"shop_tag\".\"id\" = \"shop_book_tags\".\"tag_id\") WHERE \"shop_book_tags\".\"book_id\" IN (1, 2, 3)"
+      ],
+      "result": "[('Dune', ['classic', 'sci-fi']), ('Emma', ['classic']), ('The Dispossessed', ['sci-fi'])]"
+    },
+    {
+      "label": "Count in the database",
+      "note": "Need only a number per author? Let the database count with annotate instead of loading every book.",
+      "python": "list(Author.objects.annotate(n=Count(\"books\")).order_by(\"name\").values_list(\"name\", \"n\"))",
+      "sql": [
+        "SELECT \"shop_author\".\"name\" AS \"name\", COUNT(\"shop_book\".\"id\") AS \"n\" FROM \"shop_author\" LEFT OUTER JOIN \"shop_book\" ON (\"shop_author\".\"id\" = \"shop_book\".\"author_id\") GROUP BY \"shop_author\".\"id\", 1 ORDER BY 1 ASC"
+      ],
+      "result": "[('Austen', 1), ('Herbert', 1), ('Le Guin', 1)]"
+    },
+    {
+      "label": "only()",
+      "note": "only() loads just the columns you need. Touching another field later costs an extra query per object, so use it deliberately.",
+      "python": "[b.title for b in Book.objects.only(\"title\").order_by(\"id\")]",
+      "sql": [
+        "SELECT \"shop_book\".\"id\", \"shop_book\".\"title\" FROM \"shop_book\" ORDER BY \"shop_book\".\"id\" ASC"
+      ],
+      "result": "['Dune', 'Emma', 'The Dispossessed']"
+    }
+  ]
+}

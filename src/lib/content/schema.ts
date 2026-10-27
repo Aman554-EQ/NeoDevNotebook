@@ -49,6 +49,20 @@ export const lessonFrontmatterSchema = z.object({
 })
 export type LessonFrontmatter = z.infer<typeof lessonFrontmatterSchema>
 
+/** Frontmatter of content/<module>/projects/NN-slug.mdx (a guided build of real code). */
+export const projectFrontmatterSchema = z.object({
+  title: nonEmpty,
+  summary: nonEmpty,
+  /** "guided": a small project; "capstone": the big one that uses the whole module. */
+  kind: z.enum(["guided", "capstone"]),
+  difficulty: difficultySchema,
+  estimatedHours: z.number().positive(),
+  /** Folder under projects/<module>/ that holds the project's real, tested code. */
+  code: slug,
+  skills: z.array(nonEmpty).min(1).max(12),
+})
+export type ProjectFrontmatter = z.infer<typeof projectFrontmatterSchema>
+
 const codeSchema = z.object({
   language: z.enum([
     "python",

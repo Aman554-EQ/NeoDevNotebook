@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
-import { ChevronDown, CircleCheck, ListChecks, MessageSquareText } from "lucide-react"
+import { ChevronDown, CircleCheck, Hammer, ListChecks, MessageSquareText } from "lucide-react"
 import type { NavLesson, NavModule } from "@/lib/content"
 import { groupBySection, sectionId } from "@/lib/content/sections"
 import { useProgress } from "@/lib/progress/store"
@@ -125,6 +125,15 @@ function ModuleNode({
               </SectionNode>
             ),
           )}
+          {m.projects.length > 0 &&
+            item(
+              `/projects/${m.slug}`,
+              <>
+                <Hammer className="size-4 shrink-0" aria-hidden />
+                <span>Projects ({m.projects.length})</span>
+              </>,
+              "projects",
+            )}
           {m.problemCount > 0 &&
             item(
               `/practice/${m.slug}`,

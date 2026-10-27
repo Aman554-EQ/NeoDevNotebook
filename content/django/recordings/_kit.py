@@ -7,6 +7,15 @@ kinds:
 """
 
 import json
+import re
+
+# Tokens change on every run (iat, exp, jti), so recordings show only their fixed start.
+JWT = re.compile(r"(eyJ[A-Za-z0-9_-]{17})[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
+
+
+def mask(text):
+    return JWT.sub(lambda m: m.group(1) + "…", text) if isinstance(text, str) else text
+
 
 SHOWN_RESPONSE_HEADERS = (
     "Content-Type",
@@ -46,18 +55,30 @@ def http(client, method, url, *, label, note, json_body=None, headers=None, extr
             if name == "Set-Cookie":
                 value = value.split(";")[0][:40] + "; …"
             shown[name] = value
+    if not response.content:
+        shown.pop("Content-Type", None)  # an empty body has no meaningful type
+    if response.status_code != 405:
+        shown.pop("Allow", None)  # DRF sends it on every response; it matters on a 405
+    if response.status_code not in (200, 304):
+        shown.pop("ETag", None)  # only meaningful on content a client may cache
     for cookie in response.cookies.values():
-        shown.setdefault("Set-Cookie", f"{cookie.key}=…; HttpOnly" if cookie["httponly"] else f"{cookie.key}=…")
+        flags = "; HttpOnly" if cookie["httponly"] else ""
+        shown.setdefault("Set-Cookie", f"{cookie.key}=…{flags}")
     content_type = response.get("Content-Type", "")
     return {
         "label": label,
         "note": note,
-        "request": {"method": method.upper(), "url": url, "headers": headers, "body": request_body},
+        "request": {
+            "method": method.upper(),
+            "url": url,
+            "headers": {k: mask(v) for k, v in headers.items()},
+            "body": mask(request_body),
+        },
         "response": {
             "status": response.status_code,
             "reason": response.reason_phrase,
             "headers": shown,
-            "body": _body(response.content, content_type),
+            "body": mask(_body(response.content, content_type)),
             "size": len(response.content),
         },
     }

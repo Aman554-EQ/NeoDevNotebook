@@ -1,0 +1,109 @@
+{
+  "kind": "http",
+  "title": "A DRF serializer validating real requests",
+  "steps": [
+    {
+      "label": "Valid",
+      "note": "The serializer turns JSON into validated Python data, save() creates the row, and the response is the serializer's output: 201 Created.",
+      "request": {
+        "method": "POST",
+        "url": "/api/books/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"title\": \"Dune\",\n  \"isbn\": \"9780441172719\",\n  \"year\": 1965\n}"
+      },
+      "response": {
+        "status": 201,
+        "reason": "Created",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"id\": 1,\n  \"title\": \"Dune\",\n  \"isbn\": \"9780441172719\",\n  \"year\": 1965\n}",
+        "size": 58
+      }
+    },
+    {
+      "label": "Field errors",
+      "note": "Every invalid field is reported at once, keyed by field name: required text can't be blank, your validate_isbn rule, and a type conversion error.",
+      "request": {
+        "method": "POST",
+        "url": "/api/books/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"title\": \"\",\n  \"isbn\": \"123\",\n  \"year\": \"soon\"\n}"
+      },
+      "response": {
+        "status": 400,
+        "reason": "Bad Request",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"title\": [\n    \"This field may not be blank.\"\n  ],\n  \"isbn\": [\n    \"ISBN must be 13 digits.\"\n  ],\n  \"year\": [\n    \"A valid integer is required.\"\n  ]\n}",
+        "size": 117
+      }
+    },
+    {
+      "label": "Unique",
+      "note": "ModelSerializer copies the model's unique=True into a validator, so a duplicate ISBN is a 400, not a database crash.",
+      "request": {
+        "method": "POST",
+        "url": "/api/books/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"title\": \"Dune again\",\n  \"isbn\": \"9780441172719\",\n  \"year\": 1965\n}"
+      },
+      "response": {
+        "status": 400,
+        "reason": "Bad Request",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"isbn\": [\n    \"book with this isbn already exists.\"\n  ]\n}",
+        "size": 48
+      }
+    },
+    {
+      "label": "Missing fields",
+      "note": "Required fields that are absent get 'This field is required.'",
+      "request": {
+        "method": "POST",
+        "url": "/api/books/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"isbn\": \"9780141439587\"\n}"
+      },
+      "response": {
+        "status": 400,
+        "reason": "Bad Request",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"title\": [\n    \"This field is required.\"\n  ],\n  \"year\": [\n    \"This field is required.\"\n  ]\n}",
+        "size": 72
+      }
+    },
+    {
+      "label": "List",
+      "note": "many=True serializes a whole QuerySet into a JSON list.",
+      "request": {
+        "method": "GET",
+        "url": "/api/books/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "[\n  {\n    \"id\": 1,\n    \"title\": \"Dune\",\n    \"isbn\": \"9780441172719\",\n    \"year\": 1965\n  }\n]",
+        "size": 60
+      }
+    }
+  ]
+}

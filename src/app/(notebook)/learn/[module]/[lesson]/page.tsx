@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 import "katex/dist/katex.min.css"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
 import { PrevNext } from "@/components/layout/prev-next"
+import { ReadingAids } from "@/components/layout/reading-aids"
 import { Toc } from "@/components/layout/toc"
 import { LessonHeader } from "@/components/lesson/lesson-header"
 import { RelatedPractice } from "@/components/lesson/related-practice"
@@ -73,6 +74,7 @@ export default async function LessonPage({ params }: PageProps<"/learn/[module]/
       <aside className="sticky top-24 hidden max-h-[calc(100dvh-7rem)] self-start overflow-y-auto xl:block">
         <Toc items={toc} />
       </aside>
+      <ReadingAids items={toc} />
     </div>
   )
 }

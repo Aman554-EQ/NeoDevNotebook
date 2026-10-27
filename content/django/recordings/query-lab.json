@@ -1,0 +1,225 @@
+{
+  "kind": "sql",
+  "title": "Reporting queries on a shop database",
+  "tables": [
+    {
+      "name": "products",
+      "columns": [
+        "id",
+        "name",
+        "category",
+        "price"
+      ],
+      "rows": [
+        [
+          1,
+          "Dune",
+          "books",
+          12.5
+        ],
+        [
+          2,
+          "Emma",
+          "books",
+          8
+        ],
+        [
+          3,
+          "Chess set",
+          "games",
+          30
+        ],
+        [
+          4,
+          "Go board",
+          "games",
+          45
+        ]
+      ]
+    },
+    {
+      "name": "sales",
+      "columns": [
+        "id",
+        "product_id",
+        "month",
+        "qty"
+      ],
+      "rows": [
+        [
+          1,
+          1,
+          "2026-01",
+          10
+        ],
+        [
+          2,
+          2,
+          "2026-01",
+          4
+        ],
+        [
+          3,
+          3,
+          "2026-01",
+          2
+        ],
+        [
+          4,
+          1,
+          "2026-02",
+          6
+        ],
+        [
+          5,
+          2,
+          "2026-02",
+          9
+        ],
+        [
+          6,
+          3,
+          "2026-02",
+          5
+        ]
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "label": "Revenue per category",
+      "note": "Multiply inside the aggregate: SUM(qty * price) per category. printf formats the money with two decimals.",
+      "sql": "SELECT p.category,\n       printf('%.2f', SUM(s.qty * p.price)) AS revenue\nFROM sales s\nJOIN products p ON p.id = s.product_id\nGROUP BY p.category\nORDER BY SUM(s.qty * p.price) DESC;",
+      "uses": [
+        "products",
+        "sales"
+      ],
+      "columns": [
+        "category",
+        "revenue"
+      ],
+      "rows": [
+        [
+          "books",
+          "304.00"
+        ],
+        [
+          "games",
+          "210.00"
+        ]
+      ]
+    },
+    {
+      "label": "RANK() OVER",
+      "note": "A window function ranks rows within each category without collapsing them, which GROUP BY alone can't do.",
+      "sql": "SELECT p.name, p.category, SUM(s.qty) AS sold,\n       RANK() OVER (PARTITION BY p.category\n                    ORDER BY SUM(s.qty) DESC) AS rank_in_category\nFROM sales s\nJOIN products p ON p.id = s.product_id\nGROUP BY p.id\nORDER BY p.category, rank_in_category;",
+      "uses": [
+        "products",
+        "sales"
+      ],
+      "columns": [
+        "name",
+        "category",
+        "sold",
+        "rank_in_category"
+      ],
+      "rows": [
+        [
+          "Dune",
+          "books",
+          16,
+          1
+        ],
+        [
+          "Emma",
+          "books",
+          13,
+          2
+        ],
+        [
+          "Chess set",
+          "games",
+          7,
+          1
+        ]
+      ]
+    },
+    {
+      "label": "Running total",
+      "note": "SUM(...) OVER (ORDER BY month) accumulates across the grouped months.",
+      "sql": "SELECT month,\n       SUM(qty) AS units,\n       SUM(SUM(qty)) OVER (ORDER BY month) AS running_total\nFROM sales\nGROUP BY month\nORDER BY month;",
+      "uses": [
+        "sales"
+      ],
+      "columns": [
+        "month",
+        "units",
+        "running_total"
+      ],
+      "rows": [
+        [
+          "2026-01",
+          16,
+          16
+        ],
+        [
+          "2026-02",
+          20,
+          36
+        ]
+      ]
+    },
+    {
+      "label": "NOT EXISTS",
+      "note": "Products that never sold. EXISTS stops at the first matching row, so it stays cheap on big tables.",
+      "sql": "SELECT name\nFROM products p\nWHERE NOT EXISTS (SELECT 1 FROM sales s WHERE s.product_id = p.id)\nORDER BY name;",
+      "uses": [
+        "products",
+        "sales"
+      ],
+      "columns": [
+        "name"
+      ],
+      "rows": [
+        [
+          "Go board"
+        ]
+      ]
+    },
+    {
+      "label": "CTE + self-join",
+      "note": "WITH names a subquery (a CTE) so it can be used twice: January joined to February per product.",
+      "sql": "WITH monthly AS (\n  SELECT product_id, month, qty FROM sales\n)\nSELECT p.name, jan.qty AS jan, feb.qty AS feb, feb.qty - jan.qty AS change\nFROM monthly jan\nJOIN monthly feb ON feb.product_id = jan.product_id\nJOIN products p ON p.id = jan.product_id\nWHERE jan.month = '2026-01' AND feb.month = '2026-02'\nORDER BY change DESC;",
+      "uses": [
+        "products",
+        "sales"
+      ],
+      "columns": [
+        "name",
+        "jan",
+        "feb",
+        "change"
+      ],
+      "rows": [
+        [
+          "Emma",
+          4,
+          9,
+          5
+        ],
+        [
+          "Chess set",
+          2,
+          5,
+          3
+        ],
+        [
+          "Dune",
+          10,
+          6,
+          -4
+        ]
+      ]
+    }
+  ]
+}

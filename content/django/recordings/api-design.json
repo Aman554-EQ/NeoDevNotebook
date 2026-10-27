@@ -1,0 +1,165 @@
+{
+  "kind": "http",
+  "title": "API design details that save clients pain",
+  "steps": [
+    {
+      "label": "v1",
+      "note": "The version is part of the URL. ConditionalGetMiddleware adds an ETag: a fingerprint of this exact response.",
+      "request": {
+        "method": "GET",
+        "url": "/api/v1/products/1/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"4cfdc6497b7a676be77438f433744406\""
+        },
+        "body": "{\n  \"id\": 1,\n  \"name\": \"Dune\",\n  \"price\": \"12.50\"\n}",
+        "size": 38
+      }
+    },
+    {
+      "label": "v2",
+      "note": "v2 renamed price to price_eur. Old apps keep calling v1 and don't break; new apps use v2.",
+      "request": {
+        "method": "GET",
+        "url": "/api/v2/products/1/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"a004386dcd6a90f7163773cf8849aa54\""
+        },
+        "body": "{\n  \"id\": 1,\n  \"name\": \"Dune\",\n  \"price_eur\": \"12.50\"\n}",
+        "size": 42
+      }
+    },
+    {
+      "label": "304 Not Modified",
+      "note": "The client sends back the ETag it has. Nothing changed, so the answer is 304 with no body: the client reuses its cached copy.",
+      "request": {
+        "method": "GET",
+        "url": "/api/v1/products/1/",
+        "headers": {
+          "If-None-Match": "\"4cfdc6497b7a676be77438f433744406\""
+        },
+        "body": null
+      },
+      "response": {
+        "status": 304,
+        "reason": "Not Modified",
+        "headers": {
+          "ETag": "\"4cfdc6497b7a676be77438f433744406\""
+        },
+        "body": "",
+        "size": 0
+      }
+    },
+    {
+      "label": "Unknown version",
+      "note": "Asking for a version that doesn't exist is a clear 404 in the standard error shape.",
+      "request": {
+        "method": "GET",
+        "url": "/api/v3/products/1/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 404,
+        "reason": "Not Found",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"error\": {\n    \"code\": \"not_found\",\n    \"message\": \"Invalid version in URL path.\"\n  }\n}",
+        "size": 71
+      }
+    },
+    {
+      "label": "Not found",
+      "note": "The same {error: {code, message}} shape for every failure, produced by one exception handler.",
+      "request": {
+        "method": "GET",
+        "url": "/api/v1/products/99/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 404,
+        "reason": "Not Found",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"error\": {\n    \"code\": \"not_found\",\n    \"message\": \"No Product matches the given query.\"\n  }\n}",
+        "size": 78
+      }
+    },
+    {
+      "label": "Search 1",
+      "note": "Search is rate limited to 2 requests per day per client (tiny, to show the limit).",
+      "request": {
+        "method": "GET",
+        "url": "/api/v1/search/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"ea0d94e38076cbf42a8f7be98f9dfb42\""
+        },
+        "body": "{\n  \"results\": [\n    \"Dune\"\n  ]\n}",
+        "size": 20
+      }
+    },
+    {
+      "label": "Search 2",
+      "note": "The second request is still within the limit.",
+      "request": {
+        "method": "GET",
+        "url": "/api/v1/search/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"ea0d94e38076cbf42a8f7be98f9dfb42\""
+        },
+        "body": "{\n  \"results\": [\n    \"Dune\"\n  ]\n}",
+        "size": 20
+      }
+    },
+    {
+      "label": "429",
+      "note": "The third gets 429 Too Many Requests, and Retry-After tells the client how many seconds to wait.",
+      "request": {
+        "method": "GET",
+        "url": "/api/v1/search/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 429,
+        "reason": "Too Many Requests",
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "86400"
+        },
+        "body": "{\n  \"error\": {\n    \"code\": \"throttled\",\n    \"message\": \"Request was throttled. Expected available in 86400 seconds.\"\n  }\n}",
+        "size": 102
+      }
+    }
+  ]
+}
