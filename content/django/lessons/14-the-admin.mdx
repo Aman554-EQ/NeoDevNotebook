@@ -1,0 +1,552 @@
+---
+title: The admin
+summary: Django's automatic admin site as a real internal tool. Registering models, list pages with columns, filters and search, editable lists, read-only fields and fieldsets, inlines, custom actions, query performance, permissions, and how to keep the admin safe.
+estimatedMinutes: 18
+difficulty: simple
+section: The Django Toolbox
+objectives:
+  - Register models and configure list pages (columns, filters, search, ordering)
+  - Customise edit pages with fieldsets, read-only fields, prepopulated slugs and inlines
+  - Write admin actions and computed columns
+  - Keep admin pages fast and control who can see and change what
+  - Explain why the admin is an internal tool and how to secure it
+prerequisites:
+  - Models & migrations
+  - Relationships & efficient queries
+tags: [django, admin, permissions, internal-tools]
+---
+
+## Intuition: a back office you get for free
+
+Every business needs a back office: staff looking up an order, fixing a typo in a product, refunding
+a customer. Django builds one automatically from your models: list pages, search, filters, forms,
+validation, permissions and a change history. A few lines of configuration turn it into a genuinely
+useful internal tool.
+
+It is **not** your product's user interface. It assumes trusted staff, and it shows the database's
+shape, not your customers' workflow.
+
+## The precise rules
+
+**Registering:**
+
+```python norun title="catalog/admin.py"
+from django.contrib import admin
+
+from .models import Product
+
+
+@admin.register(Product)
+class ProductAdmin(admin.ModelAdmin):
+    list_display = ["name", "category", "price", "stock", "is_active"]
+    list_filter = ["category", "is_active"]
+    search_fields = ["name", "category__name"]
+    ordering = ["name"]
+```
+
+The admin lives at the URL you include: `path("admin/", admin.site.urls)`. Users need
+`is_staff=True` to log in, and model permissions (or `is_superuser`) to see each model.
+
+**List page options:** `list_display` (fields, methods, `@admin.display` callables), `list_filter`,
+`search_fields` (`^` starts-with, `=` exact), `ordering`, `list_editable` (edit in the list),
+`list_per_page`, `date_hierarchy`, `list_select_related` (avoid N+1 for related columns).
+
+**Edit page options:** `fields` or `fieldsets` (grouped sections), `readonly_fields`,
+`prepopulated_fields = {"slug": ["name"]}`, `autocomplete_fields` / `raw_id_fields` (for big
+related tables), `inlines` (`TabularInline`, `StackedInline`) to edit related rows on the same page.
+
+**Behaviour hooks:** `actions` (bulk operations on selected rows), `get_queryset()` (restrict or
+annotate), `save_model()` (run extra logic on save), `has_add_permission()` /
+`has_change_permission()` / `has_delete_permission()`.
+
+**Permissions:** every model gets `add`, `change`, `delete` and `view` permissions automatically,
+assigned to users directly or through **groups** ("Support", "Catalogue editors").
+
+**Safety:** the admin is a powerful door into your database. Move it off `/admin/`, require strong
+passwords and two-factor authentication (a package such as django-otp), restrict it by network or VPN
+where you can, give staff the narrowest groups, and remember every change runs through the same model
+rules as the rest of your app.
+
+## Worked example
+
+A configured `ModelAdmin`, inspected the way Django builds the list page for a request: which rows
+match a search and a filter, and in what order.
+
+```python title="product_admin.py"
+from decimal import Decimal
+
+from playground import migrate, setup
+
+setup(apps=["django.contrib.admin"])
+
+from django.contrib import admin
+from django.contrib.auth.models import User
+from django.db import models
+from django.test import RequestFactory
+
+
+class Category(models.Model):
+    name = models.CharField(max_length=50)
+
+    def __str__(self):
+        return self.name
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=100)
+    category = models.ForeignKey(Category, on_delete=models.PROTECT)
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    stock = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
+
+
+@admin.register(Product)
+class ProductAdmin(admin.ModelAdmin):
+    list_display = ["name", "category", "price", "stock", "is_active"]
+    list_filter = ["category", "is_active"]
+    search_fields = ["name", "category__name"]
+    ordering = ["name"]
+    list_select_related = ["category"]
+
+
+urlpatterns = []
+migrate()
+books, games = Category.objects.create(name="Books"), Category.objects.create(name="Games")
+for name, cat, price, stock, active in [("Dune", books, "12.50", 3, True), ("Emma", books, "8.00", 0, True),
+                                        ("Chess set", games, "30.00", 2, True), ("Old map", games, "1.00", 9, False)]:
+    Product.objects.create(name=name, category=cat, price=Decimal(price), stock=stock, is_active=active)
+
+model_admin = admin.site._registry[Product]
+request = RequestFactory().get("/admin/shop/product/", {"q": "books", "is_active__exact": "1"})
+request.user = User.objects.create_superuser("admin", "admin@example.com", "fake-pass")
+changelist = model_admin.get_changelist_instance(request)
+print("matching rows:", changelist.result_count, "of", changelist.full_result_count)
+print([str(p) for p in changelist.result_list])
+print("columns:", changelist.list_display)
+```
+
+```text title="Output"
+matching rows: 2 of 4
+['Dune', 'Emma']
+columns: ['action_checkbox', 'name', 'category', 'price', 'stock', 'is_active']
+```
+
+- `search_fields` with `category__name` lets staff type "books" and find products by their category.
+- The `is_active__exact=1` query parameter is what clicking the "Yes" filter adds to the URL.
+- `full_result_count` is the unfiltered total the page shows next to the result count.
+- `list_select_related` makes the category column part of the same query.
+
+## Variations
+
+### Computed columns and N+1 in the admin
+
+```python
+from playground import migrate, setup
+
+setup(apps=["django.contrib.admin"])
+
+from django.contrib import admin
+from django.contrib.auth.models import User
+from django.db import connection, models
+from django.db.models import Count
+from django.test import Client
+from django.test.utils import CaptureQueriesContext
+from django.urls import path
+
+
+class Author(models.Model):
+    name = models.CharField(max_length=50)
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=50)
+    author = models.ForeignKey(Author, on_delete=models.CASCADE, related_name="books")
+
+
+class BookAdmin(admin.ModelAdmin):
+    list_display = ["title", "author_name"]
+
+    @admin.display(description="Author", ordering="author__name")
+    def author_name(self, obj):
+        return obj.author.name
+
+
+class FastBookAdmin(BookAdmin):
+    list_select_related = ["author"]
+
+
+class AuthorAdmin(admin.ModelAdmin):
+    list_display = ["name", "book_count"]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(n=Count("books"))
+
+    @admin.display(description="Books", ordering="n")
+    def book_count(self, obj):
+        return obj.n
+
+
+site_slow, site_fast = admin.AdminSite(name="slow"), admin.AdminSite(name="fast")
+site_slow.register(Book, BookAdmin)
+site_fast.register(Book, FastBookAdmin)
+site_fast.register(Author, AuthorAdmin)
+urlpatterns = [path("slow/", site_slow.urls), path("fast/", site_fast.urls)]
+migrate()
+for n in range(20):
+    Book.objects.create(title=f"Book {n}", author=Author.objects.create(name=f"Author {n}"))
+
+client = Client()
+client.force_login(User.objects.create_superuser("admin", "a@example.com", "fake-pass"))
+for url in ["/slow/shop/book/", "/fast/shop/book/", "/fast/shop/author/"]:
+    with CaptureQueriesContext(connection) as ctx:
+        status = client.get(url).status_code
+    print(f"{url:<20} {status}  {len(ctx)} queries")
+```
+
+```text title="Output"
+/slow/shop/book/     200  25 queries
+/fast/shop/book/     200  5 queries
+/fast/shop/author/   200  5 queries
+```
+
+A computed column that follows a relation runs one query per row unless the admin selects the
+relation up front: 20 extra queries on a 20-row page, 100 on a full page. `list_select_related` (or
+`get_queryset` with `select_related`/`annotate`) brings it back to a fixed number. `@admin.display`
+sets the column title and makes it sortable.
+
+### Admin actions
+
+```python
+from playground import migrate, setup
+
+setup(apps=["django.contrib.admin"])
+
+from django.contrib import admin, messages
+from django.contrib.auth.models import User
+from django.contrib.messages import get_messages
+from django.db import models
+from django.test import Client
+from django.urls import path
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=50)
+    is_active = models.BooleanField(default=True)
+
+
+@admin.register(Product)
+class ProductAdmin(admin.ModelAdmin):
+    list_display = ["name", "is_active"]
+    actions = ["retire"]
+
+    @admin.action(description="Retire selected products")
+    def retire(self, request, queryset):
+        changed = queryset.update(is_active=False)
+        self.message_user(request, f"{changed} product(s) retired.", messages.SUCCESS)
+
+
+urlpatterns = [path("admin/", admin.site.urls)]
+migrate()
+for name in ["Dune", "Emma", "Chess set"]:
+    Product.objects.create(name=name)
+client = Client()
+client.force_login(User.objects.create_superuser("admin", "a@example.com", "fake-pass"))
+
+response = client.post("/admin/shop/product/", {
+    "action": "retire",
+    "_selected_action": [str(p.pk) for p in Product.objects.filter(name__in=["Dune", "Emma"])],
+}, follow=True)
+print(response.status_code, [m.message for m in get_messages(response.wsgi_request)])
+print(dict(Product.objects.order_by("name").values_list("name", "is_active")))
+```
+
+```text title="Output"
+200 ['2 product(s) retired.']
+{'Chess set': True, 'Dune': False, 'Emma': False}
+```
+
+An action receives the selected rows as a QuerySet, so `update()` changes them all in one statement.
+`message_user` shows a confirmation on the next page. Django also adds a "Delete selected" action to
+every model by default.
+
+### Who may see and change what
+
+```python
+from playground import migrate, setup
+
+setup(apps=["django.contrib.admin"])
+
+from django.contrib import admin
+from django.contrib.auth.models import Group, Permission, User
+from django.db import models
+from django.test import Client
+from django.urls import path
+
+
+class Order(models.Model):
+    reference = models.CharField(max_length=20)
+
+
+@admin.register(Order)
+class OrderAdmin(admin.ModelAdmin):
+    def has_delete_permission(self, request, obj=None):
+        return False  # orders are never deleted, by anyone
+
+
+urlpatterns = [path("admin/", admin.site.urls)]
+migrate()
+order = Order.objects.create(reference="A-41")
+support = Group.objects.create(name="Support")
+support.permissions.add(Permission.objects.get(codename="view_order"))
+sam = User.objects.create_user("sam", password="fake-pass", is_staff=True)
+sam.groups.add(support)
+boss = User.objects.create_superuser("boss", "b@example.com", "fake-pass")
+
+for n, user in enumerate([None, sam, boss]):
+    client = Client()
+    if user:
+        client.force_login(user)
+    view = client.get(f"/admin/shop/order/{order.pk}/change/")
+    change = client.post(f"/admin/shop/order/{order.pk}/change/", {"reference": f"A-41-{n}"})
+    delete = client.get(f"/admin/shop/order/{order.pk}/delete/")
+    name = user.username if user else "anonymous"
+    print(f"{name:<9} view={view.status_code} change={change.status_code} delete={delete.status_code}")
+print("reference:", Order.objects.get().reference)
+```
+
+```text title="Output"
+anonymous view=302 change=302 delete=302
+sam       view=200 change=403 delete=403
+boss      view=200 change=302 delete=403
+reference: A-41-2
+```
+
+Anonymous users are redirected to the admin login (`302`). Sam's "Support" group only has
+`view_order`: he can open the page (read-only) but not save changes (`403`). The superuser's edit
+was saved (the `302` is the redirect after a successful save, hence `A-41-2`), yet even he can't
+delete orders, because `has_delete_permission` says so for everyone.
+
+### Edit pages: fieldsets, read-only fields, slugs and inlines
+
+```python
+import re
+
+from playground import migrate, setup
+
+setup(apps=["django.contrib.admin"])
+
+from django.contrib import admin
+from django.contrib.auth.models import User
+from django.db import models
+from django.test import Client
+from django.urls import path
+
+
+class Order(models.Model):
+    reference = models.SlugField()
+    customer = models.CharField(max_length=50)
+    status = models.CharField(max_length=10, default="pending")
+
+
+class Line(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="lines")
+    product = models.CharField(max_length=50)
+    qty = models.PositiveIntegerField()
+
+
+class LineInline(admin.TabularInline):
+    model = Line
+    extra = 0
+
+
+@admin.register(Order)
+class OrderAdmin(admin.ModelAdmin):
+    inlines = [LineInline]
+    readonly_fields = ["status"]  # changed by the payment flow, not by hand
+    prepopulated_fields = {"reference": ["customer"]}
+    fieldsets = [("Order", {"fields": ["reference", "customer"]}), ("State", {"fields": ["status"]})]
+
+
+urlpatterns = [path("admin/", admin.site.urls)]
+migrate()
+order = Order.objects.create(reference="ada-1", customer="Ada")
+Line.objects.create(order=order, product="Dune", qty=2)
+client = Client()
+client.force_login(User.objects.create_superuser("admin", "a@example.com", "fake-pass"))
+page = client.get(f"/admin/shop/order/{order.pk}/change/").content.decode()
+print("section headings:", [h.strip() for h in re.findall(r"<h2[^>]*>([^<]+)</h2>", page)[1:]])
+print("status editable?", 'name="status"' in page)
+print("inline lines shown:", 'name="lines-0-product"' in page and 'value="Dune"' in page)
+```
+
+```text title="Output"
+section headings: ['Order', 'State', 'Lines']
+status editable? False
+inline lines shown: True
+```
+
+Inlines edit the order lines on the order's page; `readonly_fields` shows a value without an input,
+so staff can't bypass a workflow; `prepopulated_fields` fills the slug from another field as staff
+type.
+
+## Putting it together
+
+ShopLite's real admin configuration: products editable in the list, categories with cache
+invalidation on save, orders with read-only status and inline lines, and a webhook log:
+
+<ProjectFiles project="shoplite" paths="catalog/admin.py orders/admin.py payments/admin.py" />
+
+A runnable store admin with the same ideas: filters and search, a computed and sortable column, a
+bulk action, an inline, read-only workflow fields and a fixed query count.
+
+```python title="store_admin.py"
+from decimal import Decimal
+
+from playground import migrate, setup
+
+setup(apps=["django.contrib.admin"])
+
+from django.contrib import admin
+from django.contrib.auth.models import User
+from django.db import connection, models
+from django.db.models import DecimalField, ExpressionWrapper, F, Sum
+from django.test import Client
+from django.test.utils import CaptureQueriesContext
+from django.urls import path
+
+
+class Customer(models.Model):
+    email = models.EmailField()
+
+    def __str__(self):
+        return self.email
+
+
+class Order(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT)
+    status = models.CharField(max_length=10, default="pending")
+
+
+class Line(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="lines")
+    product = models.CharField(max_length=50)
+    qty = models.PositiveIntegerField()
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+class LineInline(admin.TabularInline):
+    model = Line
+    extra = 0
+
+
+@admin.register(Order)
+class OrderAdmin(admin.ModelAdmin):
+    list_display = ["id", "customer", "status", "total"]
+    list_filter = ["status"]
+    search_fields = ["customer__email"]
+    list_select_related = ["customer"]
+    readonly_fields = ["status"]
+    inlines = [LineInline]
+    actions = ["mark_shipped"]
+
+    def get_queryset(self, request):
+        line_total = ExpressionWrapper(F("lines__qty") * F("lines__price"), output_field=DecimalField())
+        return super().get_queryset(request).annotate(order_total=Sum(line_total))
+
+    @admin.display(description="Total", ordering="order_total")
+    def total(self, obj):
+        return f"{obj.order_total:.2f}"
+
+    @admin.action(description="Mark selected paid orders as shipped")
+    def mark_shipped(self, request, queryset):
+        updated = queryset.filter(status="paid").update(status="shipped")
+        self.message_user(request, f"{updated} order(s) shipped; unpaid ones were skipped.")
+
+
+urlpatterns = [path("staff/", admin.site.urls)]  # not /admin/: bots probe that path first
+migrate()
+for n in range(12):
+    customer = Customer.objects.create(email=f"user{n}@example.com")
+    order = Order.objects.create(customer=customer, status="paid" if n % 3 else "pending")
+    Line.objects.create(order=order, product="Dune", qty=n % 4 + 1, price=Decimal("12.50"))
+
+client = Client()
+client.force_login(User.objects.create_superuser("admin", "a@example.com", "fake-pass"))
+with CaptureQueriesContext(connection) as ctx:
+    page = client.get("/staff/shop/order/", {"o": "-4"})  # sort by the 4th column (total), descending
+print("list page:", page.status_code, "|", len(ctx), "queries for 12 orders")
+print("search:", client.get("/staff/shop/order/", {"q": "user7@"}).content.decode().count("user7@example.com") > 0)
+client.post("/staff/shop/order/", {"action": "mark_shipped", "_selected_action": [str(o.pk) for o in Order.objects.all()]})
+print(dict(Order.objects.values("status").annotate(n=models.Count("id")).values_list("status", "n")))
+```
+
+```text title="Output"
+list page: 200 | 6 queries for 12 orders
+search: True
+{'pending': 4, 'shipped': 8}
+```
+
+The list page cost a fixed handful of queries (session, user, count, the annotated orders with
+customers) instead of one per order, the action skipped unpaid orders on purpose, and the admin URL
+isn't the default one. That's a back office staff can rely on.
+
+## Common mistakes
+
+<Callout type="warning" title="Building the customer-facing product in the admin">
+  The admin is generic: its forms, permissions and URLs map to tables, not to customer journeys, and
+  it trusts its users. Build customer screens as normal views (or a front end on your API) and keep
+  the admin for staff.
+</Callout>
+
+- **Related columns without `list_select_related`.** A 100-row page quietly runs 100+ queries.
+- **Everyone a superuser.** Create groups with the permissions each role needs.
+- **Editing workflow fields by hand** (order status, payment state). Make them `readonly_fields` and
+  change them through actions that run your business rules.
+- **`search_fields` on huge text columns without indexes.** Every search becomes a full scan; search
+  on short, indexed fields or add full-text search.
+- **Leaving the admin at `/admin/` with weak passwords.** Bots try it constantly.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: staff should edit price and stock directly in the product list. Which option?"
+>
+  `list_editable = ["price", "stock"]` (the fields must also be in `list_display`, and not the first
+  column).
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: a 'customer email' column on the order list makes the page slow. Why, and the fix?"
+>
+  Each row fetches its customer separately (N+1). Add `list_select_related = ["customer"]`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: support staff may look at orders but never change them. How?"
+>
+  Put them in a group with only the `view_order` permission. They get read-only pages; saves are
+  refused with `403`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: how do you show order lines on the order edit page?">
+  Define `class LineInline(admin.TabularInline): model = Line` and set `inlines = [LineInline]` on
+  the order's ModelAdmin.
+</Reveal>
+
+<KeyTakeaways>
+
+- `@admin.register(Model)` + a `ModelAdmin` gives staff list, search, filter and edit pages.
+- `list_display`, `list_filter`, `search_fields`, `ordering`, `list_editable` shape the list;
+  `fieldsets`, `readonly_fields`, `inlines` shape the edit page.
+- Actions run bulk operations on selected rows; `@admin.display` adds computed, sortable columns.
+- Watch for N+1: `list_select_related`, or `get_queryset` with `select_related`/`annotate`.
+- Permissions per model (add/change/delete/view) through groups; override `has_*_permission` for rules.
+- The admin is an internal tool: move its URL, use 2FA and least privilege.
+
+</KeyTakeaways>

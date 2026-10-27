@@ -72,7 +72,10 @@ def setup(*, apps=(), templates=None, middleware=None, script_tags=False, **over
             {
                 "BACKEND": "django.template.backends.django.DjangoTemplates",
                 "OPTIONS": {
-                    "loaders": [("django.template.loaders.locmem.Loader", templates or {})],
+                    "loaders": [
+                        ("django.template.loaders.locmem.Loader", templates or {}),
+                        "django.template.loaders.app_directories.Loader",  # e.g. the admin's
+                    ],
                     "builtins": ["__main__"] if script_tags else [],
                     "context_processors": [
                         "django.template.context_processors.request",
@@ -82,6 +85,7 @@ def setup(*, apps=(), templates=None, middleware=None, script_tags=False, **over
                 },
             }
         ],
+        STATIC_URL="static/",
         # Fast hashing keeps examples quick. Never use MD5 for real passwords.
         PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"],
         USE_TZ=True,

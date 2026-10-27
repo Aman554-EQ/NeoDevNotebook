@@ -1,0 +1,535 @@
+---
+title: Caching, async & background work
+summary: Make Django fast and responsive. The cache framework (backends, the low-level API, per-view and fragment caching, invalidation and versioned keys, HTTP caching headers), async views and the async ORM, and moving slow work out of the request with task queues, scheduled jobs and the outbox pattern.
+estimatedMinutes: 22
+difficulty: medium
+section: The Django Toolbox
+objectives:
+  - Cache data with get/set/get_or_set and invalidate it correctly
+  - Cache whole views and template fragments, and set HTTP caching headers
+  - Write async views that run I/O concurrently, and call the ORM from async code
+  - Move slow or unreliable work into background tasks safely (on_commit, retries, outbox)
+prerequisites:
+  - "The ORM: querying"
+  - Middleware & signals
+tags: [django, caching, redis, async, celery, background-jobs]
+---
+
+## Intuition: the fridge, the phone calls and the to-do list
+
+- **Caching** is a fridge: instead of cooking (querying the database, calling an API) every time
+  someone is hungry, you keep a ready portion for a while. The hard part is throwing it out when it
+  goes stale.
+- **Async** is making three phone calls at once instead of one after the other, while you wait on
+  hold for each.
+- **Background work** is the to-do list: "send the confirmation email" doesn't need to happen
+  before the customer sees "Thanks for your order". Write it down, answer immediately, and let a
+  worker do it.
+
+## See it
+
+<CacheHitViz />
+
+## The precise rules
+
+**Configure a cache** in `CACHES`. Development: `LocMemCache` (per process). Production: **Redis**
+(`django.core.cache.backends.redis.RedisCache`) or Memcached, shared by every server.
+
+**The low-level API** (`from django.core.cache import cache`): `get(key, default)`,
+`set(key, value, timeout)`, `add()` (only if missing), `get_or_set(key, callable, timeout)`,
+`delete()`, `incr()`/`decr()`, `get_many`/`set_many`. Values are pickled; keys are strings. Timeouts
+are seconds (`None` = forever, which you rarely want).
+
+**Bigger hammers:** `@cache_page(60 * 5)` caches a whole view's response (varying by URL and by
+headers listed in `Vary`); `{% cache 600 sidebar request.user.id %}` caches a template fragment.
+
+**Invalidation strategies:** short timeouts (accept slightly stale data); **delete on write** (the
+code that changes data deletes the key); **versioned keys** (`catalog:v7:...`, bump the version to
+abandon old entries). Never cache per-user data under a shared key.
+
+**HTTP caching:** `Cache-Control: max-age=60` lets browsers and CDNs reuse a response;
+`@never_cache` for private pages; `ETag` + `If-None-Match` → `304 Not Modified` (lesson 21).
+
+**Async views:** `async def view(request)` runs on an event loop under an ASGI server (uvicorn,
+daphne). Useful when a request waits on several slow I/O calls (other APIs) that can overlap. The ORM
+has async methods (`aget`, `acreate`, `acount`, `async for`), which run the synchronous ORM in a
+thread; wrap other blocking calls with `sync_to_async`. CPU-heavy work gains nothing from async.
+
+**Background work:** emails, image processing, reports, webhooks out, anything slow or flaky. Use a
+task queue (**Celery** with Redis/RabbitMQ, **RQ**, Dramatiq; Django 6.0 adds a built-in tasks API).
+Rules: enqueue with `transaction.on_commit` (never for data that rolled back), make tasks
+**idempotent** (safe to run twice), retry with backoff, pass ids not objects. For guaranteed
+delivery, use the **outbox pattern**: write an "event" row in the same transaction as the data;
+a worker sends pending events and marks them done. Scheduled jobs: Celery beat, or cron running a
+management command.
+
+## Worked example
+
+The low-level cache in front of a database query, with the number of queries showing hits and
+misses, and invalidation when data changes.
+
+```python title="cached_categories.py"
+from playground import migrate, setup
+
+setup()
+
+from django.core.cache import cache
+from django.db import connection, models
+from django.test.utils import CaptureQueriesContext
+
+KEY = "catalog:categories:v1"
+
+
+class Category(models.Model):
+    name = models.CharField(max_length=50)
+
+
+def category_names():
+    return cache.get_or_set(KEY, lambda: list(Category.objects.order_by("name").values_list("name", flat=True)), 3600)
+
+
+def rename(category, new_name):
+    category.name = new_name
+    category.save()
+    cache.delete(KEY)  # delete on write: the next read rebuilds the entry
+
+
+migrate()
+books = Category.objects.create(name="Books")
+Category.objects.create(name="Games")
+
+for label in ["first call (miss)", "second call (hit)"]:
+    with CaptureQueriesContext(connection) as ctx:
+        names = category_names()
+    print(f"{label:<20} {names} queries={len(ctx)}")
+
+rename(books, "Novels")
+with CaptureQueriesContext(connection) as ctx:
+    names = category_names()
+print(f"{'after rename':<20} {names} queries={len(ctx)}")
+```
+
+```text title="Output"
+first call (miss)    ['Books', 'Games'] queries=1
+second call (hit)    ['Books', 'Games'] queries=0
+after rename         ['Games', 'Novels'] queries=1
+```
+
+- `get_or_set` returns the cached value, or calls the function, stores the result and returns it.
+- The second call costs zero queries. On a busy page, that's thousands of queries saved per minute.
+- `rename()` deletes the key in the same place it changes the data, so nobody sees "Books" after it
+  became "Novels". ShopLite does exactly this for its categories.
+
+## Variations
+
+### Caching a whole view
+
+```python
+from playground import setup
+
+setup()
+
+from django.http import JsonResponse
+from django.test import Client
+from django.urls import path
+from django.views.decorators.cache import cache_page, never_cache
+
+calls = {"popular": 0, "account": 0}
+
+
+@cache_page(60 * 5)
+def popular(request):
+    calls["popular"] += 1
+    return JsonResponse({"popular": ["Dune", "Emma"], "built": calls["popular"]})
+
+
+@never_cache
+def account(request):
+    calls["account"] += 1
+    return JsonResponse({"balance": 42})
+
+
+urlpatterns = [path("popular/", popular), path("account/", account)]
+client = Client()
+for _ in range(3):
+    client.get("/popular/")
+    client.get("/account/")
+print("view bodies ran:", calls)
+first = client.get("/popular/")
+print("Cache-Control:", first["Cache-Control"], "| Expires set:", first.has_header("Expires"))
+print("never_cache:", client.get("/account/")["Cache-Control"])
+print("different URL, own entry:", client.get("/popular/?page=2").json()["built"])
+```
+
+```text title="Output"
+view bodies ran: {'popular': 1, 'account': 3}
+Cache-Control: max-age=300 | Expires set: True
+never_cache: max-age=0, no-cache, no-store, must-revalidate, private
+different URL, own entry: 2
+```
+
+`cache_page` stored the first response and served it three more times; it also sets `Cache-Control:
+max-age` so browsers can reuse it. Each URL (including its query string) gets its own entry. Pages
+that depend on the user need `Vary: Cookie` (Django adds it when the session is accessed) or must not
+be cached at all, which is what `never_cache` says to browsers and proxies.
+
+### Counters and rate limits with add and incr
+
+```python
+from playground import setup
+
+setup()
+
+from django.core.cache import cache
+
+LIMIT = 3
+
+
+def allow(ip, window="2026-01-01T10:15"):
+    key = f"ratelimit:{ip}:{window}"  # one counter per client per minute
+    cache.add(key, 0, timeout=60)  # creates it only if it doesn't exist
+    return cache.incr(key) <= LIMIT  # atomic increment in Redis/Memcached
+
+
+print([allow("203.0.113.5") for _ in range(5)])
+print([allow("198.51.100.7") for _ in range(2)])
+print("next minute:", allow("203.0.113.5", window="2026-01-01T10:16"))
+```
+
+```text title="Output"
+[True, True, True, False, False]
+[True, True]
+next minute: True
+```
+
+`add` + `incr` is how simple rate limiters and view counters are built: no database writes, and in
+Redis the increment is atomic even with many servers. DRF's throttling (lesson 20) stores its counters
+in the cache too.
+
+### Template fragment caching
+
+```python
+from playground import migrate, setup
+
+setup(templates={
+    "page.html": "{% load cache %}user={{ user_name }} | "
+                 "{% cache 600 sidebar %}top: {{ top|join:', ' }}{% endcache %}",
+})
+
+from django.template.loader import render_to_string
+
+top = ["Dune", "Emma"]
+print(render_to_string("page.html", {"user_name": "ada", "top": top}))
+top.append("Chess set")  # the data changed...
+print(render_to_string("page.html", {"user_name": "bob", "top": top}))  # ...the cached sidebar didn't
+```
+
+```text title="Output"
+user=ada | top: Dune, Emma
+user=bob | top: Dune, Emma
+```
+
+The uncached part (`user=`) changes per render; the fragment is reused for 10 minutes, even though the
+list changed. Add extra arguments (`{% cache 600 sidebar request.user.id %}`) to keep one copy per
+user, language or page.
+
+### An async view running I/O concurrently
+
+```python
+import asyncio
+import time
+
+from playground import setup
+
+setup()
+
+from django.http import JsonResponse
+from django.test import Client
+from django.urls import path
+
+
+async def fetch(service, seconds):  # stands in for an HTTP call to another API
+    await asyncio.sleep(seconds)
+    return f"{service}: ok"
+
+
+async def dashboard(request):
+    start = time.perf_counter()
+    results = await asyncio.gather(fetch("payments", 0.2), fetch("shipping", 0.2), fetch("stock", 0.2))
+    return JsonResponse({"results": results, "concurrent": time.perf_counter() - start < 0.5})
+
+
+urlpatterns = [path("dashboard/", dashboard)]
+print(Client().get("/dashboard/").json())
+```
+
+```text title="Output"
+{'results': ['payments: ok', 'shipping: ok', 'stock: ok'], 'concurrent': True}
+```
+
+Three 0.2-second waits finished in about 0.2 seconds, not 0.6, because `gather` waits on all of them
+at once. In production you'd use an async HTTP client such as `httpx.AsyncClient` and run Django under
+an ASGI server; the test client runs async views for you.
+
+### The ORM from async code
+
+```python
+import asyncio
+import tempfile
+from pathlib import Path
+
+from playground import migrate, setup
+
+# A file database, like a real project: async ORM calls run in a worker thread with its own
+# connection, which can't see the playground's default in-memory database.
+db_file = Path(tempfile.mkdtemp()) / "async-demo.sqlite3"
+setup(DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": db_file}})
+
+from asgiref.sync import sync_to_async
+from django.db import models
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=50)
+
+
+async def report():
+    await Book.objects.acreate(title="Dune")
+    await Book.objects.acreate(title="Emma")
+    count = await Book.objects.acount()
+    first = await Book.objects.order_by("title").afirst()
+    titles = [b.title async for b in Book.objects.order_by("-title")]
+    legacy = await sync_to_async(lambda: Book.objects.filter(title__startswith="D").count())()
+    return count, first.title, titles, legacy
+
+
+migrate()
+print(asyncio.run(report()))
+```
+
+```text title="Output"
+(2, 'Dune', ['Emma', 'Dune'], 1)
+```
+
+The `a`-prefixed methods and `async for` are safe in async code. Calling the normal synchronous ORM
+directly from an `async def` raises `SynchronousOnlyOperation`; wrap such calls (and any blocking
+library) in `sync_to_async`.
+
+### The outbox: background work that can't get lost
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import models, transaction
+
+
+class Order(models.Model):
+    email = models.EmailField()
+
+
+class Outbox(models.Model):
+    topic = models.CharField(max_length=50)
+    payload = models.JSONField()
+    attempts = models.PositiveIntegerField(default=0)
+    sent = models.BooleanField(default=False)
+
+
+def place_order(email):
+    with transaction.atomic():  # the order and its event commit together, or not at all
+        order = Order.objects.create(email=email)
+        Outbox.objects.create(topic="order.placed", payload={"order": order.pk, "email": email})
+    return order
+
+
+flaky = {"failures_left": 1}
+
+
+def send_email(payload):
+    if flaky["failures_left"]:
+        flaky["failures_left"] -= 1
+        raise ConnectionError("SMTP timeout")
+    return f"emailed {payload['email']} about order {payload['order']}"
+
+
+def worker_tick():
+    """Runs every few seconds in a separate process (Celery beat, a cron'd command...)."""
+    done = []
+    for event in Outbox.objects.filter(sent=False, attempts__lt=5).order_by("id"):
+        try:
+            done.append(send_email(event.payload))
+            event.sent = True
+        except ConnectionError as exc:
+            done.append(f"attempt {event.attempts + 1} failed: {exc}")
+        event.attempts += 1
+        event.save(update_fields=["sent", "attempts"])
+    return done
+
+
+migrate()
+place_order("ada@example.com")
+print(worker_tick())
+print(worker_tick())
+print(worker_tick(), "| pending:", Outbox.objects.filter(sent=False).count())
+```
+
+```text title="Output"
+['attempt 1 failed: SMTP timeout']
+['emailed ada@example.com about order 1']
+[] | pending: 0
+```
+
+Writing the event in the same transaction means there's never an order without its email event, or
+an email for an order that rolled back. The worker retries until it succeeds (with a cap), and marks
+events done so they're sent once. Consumers should still be idempotent: if the worker crashes right
+after sending but before saving `sent=True`, the email goes out twice.
+
+## Putting it together
+
+A product page that is fast and stays correct: a versioned cache for the catalogue, invalidated by the
+one service that changes prices, a whole-view cache for an anonymous landing page, and a background
+"price alert" queued only after the change commits.
+
+```python title="fast_catalogue.py"
+from decimal import Decimal
+
+from playground import migrate, setup
+
+setup()
+
+from django.core.cache import cache
+from django.db import connection, models, transaction
+from django.http import JsonResponse
+from django.test import Client
+from django.test.utils import CaptureQueriesContext
+from django.urls import path
+from django.views.decorators.cache import cache_page
+
+queue = []  # stands in for Celery/RQ
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=50)
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+def catalogue_version():
+    return cache.get_or_set("catalogue:version", 1, None)
+
+
+def catalogue():
+    key = f"catalogue:v{catalogue_version()}"
+    return cache.get_or_set(key, lambda: [
+        {"name": p.name, "price": str(p.price)} for p in Product.objects.order_by("name")], 600)
+
+
+def change_price(product, new_price):
+    with transaction.atomic():
+        old = product.price
+        product.price = new_price
+        product.save(update_fields=["price"])
+        cache.incr("catalogue:version")  # every cached catalogue entry is now unreachable
+        if new_price < old:
+            transaction.on_commit(lambda: queue.append(f"price-drop alert: {product.name}"))
+
+
+def products(request):
+    return JsonResponse({"products": catalogue()})
+
+
+@cache_page(60)
+def landing(request):
+    return JsonResponse({"featured": catalogue()[:1]})
+
+
+urlpatterns = [path("products/", products), path("", landing)]
+migrate()
+dune = Product.objects.create(name="Dune", price=Decimal("12.50"))
+Product.objects.create(name="Emma", price=Decimal("8.00"))
+client = Client()
+
+for label in ["cold", "warm", "warm"]:
+    with CaptureQueriesContext(connection) as ctx:
+        body = client.get("/products/").json()
+    print(f"{label:<5} queries={len(ctx)} {body['products'][0]}")
+
+change_price(dune, Decimal("9.99"))
+print("after the price change:", client.get("/products/").json()["products"][0], "| queue:", queue)
+try:
+    with transaction.atomic():
+        change_price(dune, Decimal("1.00"))
+        raise RuntimeError("something later in the request failed")
+except RuntimeError:
+    pass
+print("rolled back:", Product.objects.get(name="Dune").price, "| queue still:", len(queue), "alert")
+```
+
+```text title="Output"
+cold  queries=1 {'name': 'Dune', 'price': '12.50'}
+warm  queries=0 {'name': 'Dune', 'price': '12.50'}
+warm  queries=0 {'name': 'Dune', 'price': '12.50'}
+after the price change: {'name': 'Dune', 'price': '9.99'} | queue: ['price-drop alert: Dune']
+rolled back: 9.99 | queue still: 1 alert
+```
+
+Bumping a version number invalidates every key built from it in one operation, without knowing all the
+keys. The price-drop alert was queued after the first change committed, and the second (rolled-back)
+change queued nothing. Note one subtlety: the cache bump itself isn't transactional, so the rollback
+still forced one harmless rebuild.
+
+## Common mistakes
+
+<Callout type="warning" title="Caching per-user data under a shared key">
+  `cache_page` on a view that shows the logged-in user's name, or `cache.set("cart", ...)`, serves
+  one user's data to another. Include the user in the key, rely on `Vary: Cookie`, or don't cache
+  it.
+</Callout>
+
+- **Caching without an invalidation plan.** Decide up front: timeout, delete on write, or versioned
+  keys.
+- **LocMemCache in production with several processes.** Each process has its own cache, so deletes
+  in one don't reach the others; use Redis or Memcached.
+- **Blocking calls in async views** (`requests.get`, the synchronous ORM): they block the whole event
+  loop. Use async clients, `a`-methods, or `sync_to_async`.
+- **Sending emails or calling APIs inside the request** when they can be queued: slow pages and lost
+  work when they fail. Queue with `on_commit`, retry with backoff.
+- **Non-idempotent tasks.** Queues deliver "at least once"; a task that runs twice must not charge
+  twice.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: a product's price changed but the old one keeps showing for 10 minutes. What's missing?"
+>
+  Invalidation: delete (or version-bump) the cache key in the code that changes the price, instead
+  of waiting for the timeout.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why doesn't async make a CPU-heavy image resize faster?">
+  Async only overlaps **waiting** (network, disk). CPU work still runs one step at a time on the
+  event loop and blocks it; move it to a background worker or a process pool.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: where should 'send the order confirmation email' run?">
+  In a background task, enqueued with `transaction.on_commit` (or written to an outbox in the same
+  transaction), retried on failure, written to be safe if it runs twice.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: how do versioned keys invalidate many entries at once?">
+  Every key includes a version number read from the cache (`catalogue:v7:...`). Incrementing the
+  version makes all old keys unreachable at once; they simply expire.
+</Reveal>
+
+<KeyTakeaways>
+
+- Cache expensive, shared results; plan invalidation (timeouts, delete on write, versioned keys).
+- `cache_page` for whole responses, `{% cache %}` for fragments, `Cache-Control`/`never_cache` for
+  browsers and proxies.
+- Use Redis or Memcached in production so every server shares the cache.
+- Async views overlap I/O waits; use `a`-ORM methods or `sync_to_async`, never blocking calls.
+- Move slow work to a queue: `on_commit`, idempotent tasks, retries; the outbox pattern for
+  guaranteed delivery.
+
+</KeyTakeaways>

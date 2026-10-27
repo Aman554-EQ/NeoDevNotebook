@@ -1,0 +1,527 @@
+---
+title: Middleware & signals
+summary: Code that runs around every request, and code that reacts to events. How middleware wraps views and in which order, writing request-ID, timing, maintenance and error-handling middleware, the built-in security middleware and CORS, then signals, what they're good for and why explicit code is usually better.
+estimatedMinutes: 20
+difficulty: medium
+section: The Django Toolbox
+objectives:
+  - Explain middleware order on the way in and out, and short-circuiting
+  - Write middleware for request IDs, timing, maintenance mode and error handling
+  - Configure the built-in security middleware and CORS for a separate front end
+  - Connect signal receivers, and know when an explicit function call is the better design
+prerequisites:
+  - URLs & views
+  - Users, sessions & permissions
+tags: [django, middleware, signals, security, cors]
+---
+
+## Intuition: layers of an onion
+
+Middleware are the layers of an onion around your views. A request passes through every layer on its
+way in, the view at the centre answers, and the response passes through the same layers on its way
+out, in reverse. A layer can look at or change the request, change the response, or answer early and
+never call the view at all (a 401, a maintenance page, a rate limit).
+
+**Signals** are different: they're notifications. "A user was saved", "a request finished".
+Receivers subscribed elsewhere react, without the sender knowing about them.
+
+## See it
+
+<RequestLifecycleViz
+  framework="django"
+  variant="rejected"
+  caption="Middleware runs before routing. When one layer answers early, the URLconf, the view and the database never run, which is why authentication checks, maintenance mode and rate limits are cheap in middleware."
+/>
+
+## The precise rules
+
+**A middleware** is a factory that receives `get_response` (the next layer) and returns a callable
+that handles a request:
+
+```python norun
+class TimingMiddleware:
+    def __init__(self, get_response):  # once, at startup
+        self.get_response = get_response
+
+    def __call__(self, request):  # every request
+        # ... before the view (and the layers below) ...
+        response = self.get_response(request)
+        # ... after: the response is on its way out ...
+        return response
+```
+
+**Order:** `settings.MIDDLEWARE` runs **top to bottom on the way in and bottom to top on the way
+out**. Order matters: `SessionMiddleware` must come before `AuthenticationMiddleware` (which reads
+the session), `CorsMiddleware` before `CommonMiddleware`, and a request-ID middleware first so every
+later log line has the ID.
+
+**Optional hooks** on class middleware: `process_view(request, view_func, args, kwargs)` (after URL
+resolution, before the view), `process_exception(request, exception)` (the view raised),
+`process_template_response(request, response)`.
+
+**Short-circuiting:** returning a response instead of calling `get_response` stops the request.
+Only the layers **above** see that response on the way out.
+
+**Built-ins worth knowing:** `SecurityMiddleware` (HTTPS redirect, HSTS, `X-Content-Type-Options`,
+`Referrer-Policy`), `SessionMiddleware`, `CommonMiddleware` (`APPEND_SLASH`), `CsrfViewMiddleware`,
+`AuthenticationMiddleware` (`request.user`), `MessageMiddleware`, `XFrameOptionsMiddleware`
+(clickjacking), `GZipMiddleware`, `ConditionalGetMiddleware` (ETags), `LoginRequiredMiddleware`
+(5.1+). For a front end on another origin, add **django-cors-headers** and allow exactly its origins.
+
+**Signals:** `pre_save`/`post_save`, `pre_delete`/`post_delete`, `m2m_changed`, `request_started`,
+`request_finished`, `user_logged_in`... Connect with `@receiver(post_save, sender=User)` in your
+app's `apps.py` `ready()` (or a module imported there). Caveats: bulk operations (`update()`,
+`bulk_create()`) don't send them; they run synchronously in the same transaction; they hide control
+flow. Prefer an explicit function call (a **service**) when the code that triggers the work is
+yours; use signals to react to code you **don't** own (Django's auth, third-party apps).
+
+## Worked example
+
+Three small middleware, so you can watch the order on the way in and out, and one view.
+
+```python title="onion.py"
+from playground import setup
+
+trace = []
+
+
+def layer(name):
+    def factory(get_response):
+        def middleware(request):
+            trace.append(f"{name} in")
+            response = get_response(request)
+            trace.append(f"{name} out")
+            response[f"X-{name}"] = "seen"
+            return response
+        return middleware
+    return factory
+
+
+A, B, C = layer("A"), layer("B"), layer("C")
+setup(middleware=["__main__.A", "__main__.B", "__main__.C"])
+
+from django.http import HttpResponse
+from django.test import Client
+from django.urls import path
+
+
+def view(request):
+    trace.append("view")
+    return HttpResponse("ok")
+
+
+urlpatterns = [path("", view)]
+response = Client().get("/")
+print(" -> ".join(trace))
+print([h for h in response.headers if h.startswith("X-")])
+```
+
+```text title="Output"
+A in -> B in -> C in -> view -> C out -> B out -> A out
+['X-C', 'X-B', 'X-A']
+```
+
+- Each layer wraps the next: A wraps B, B wraps C, C wraps the view. So the order is A, B, C on the
+  way in and C, B, A on the way out.
+- A function-based middleware is a factory returning a closure; the class form (with `__init__` and
+  `__call__`) is the same thing with a place for helper methods.
+- Each layer added a header on the way out; all three arrived at the client.
+
+## Variations
+
+### Request IDs and timing logs
+
+```python
+import logging
+import re
+import time
+import uuid
+
+from playground import setup
+
+SAFE_ID = re.compile(r"^[A-Za-z0-9-]{8,64}$")
+log_lines = []
+
+
+class RequestIDMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        incoming = request.headers.get("X-Request-ID", "")
+        request.request_id = incoming if SAFE_ID.match(incoming) else uuid.uuid4().hex
+        start = time.perf_counter()
+        response = self.get_response(request)
+        ms = (time.perf_counter() - start) * 1000
+        log_lines.append(f"{request.method} {request.path} {response.status_code} id={request.request_id[:8]} ms<1000={ms < 1000}")
+        response["X-Request-ID"] = request.request_id
+        return response
+
+
+setup(middleware=["__main__.RequestIDMiddleware"])
+
+from django.http import JsonResponse
+from django.test import Client
+from django.urls import path
+
+urlpatterns = [path("ping/", lambda request: JsonResponse({"id": request.request_id}))]
+client = Client()
+generated = client.get("/ping/")
+print(len(generated["X-Request-ID"]), generated.json()["id"] == generated["X-Request-ID"])
+echoed = client.get("/ping/", headers={"X-Request-ID": "trace-abc-123"})
+print(echoed["X-Request-ID"])
+print(client.get("/ping/", headers={"X-Request-ID": "<script>"})["X-Request-ID"] != "<script>")
+print("\n".join(log_lines[1:2]))
+```
+
+```text title="Output"
+32 True
+trace-abc-123
+True
+GET /ping/ 200 id=trace-ab ms<1000=True
+```
+
+A request ID that appears in every log line and in the response header lets you find exactly what
+happened to the request a user reports. Accepting the caller's ID (from a load balancer or another
+service) links logs across services; validating it stops attackers injecting junk into headers and
+logs. ShopLite's version also stores it in a context variable so a logging filter adds it to every
+log record.
+
+### Short-circuit: maintenance mode
+
+```python
+from playground import migrate, setup
+
+
+class MaintenanceMiddleware:
+    ALWAYS_OPEN = ("/health/", "/admin/")
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        from django.conf import settings
+        from django.http import JsonResponse
+
+        if settings.MAINTENANCE and not request.path.startswith(self.ALWAYS_OPEN):
+            response = JsonResponse({"error": "Down for maintenance, back soon."}, status=503)
+            response["Retry-After"] = "600"
+            return response  # the view never runs
+        return self.get_response(request)
+
+
+setup(MAINTENANCE=True, middleware=["__main__.MaintenanceMiddleware"])
+
+from django.http import JsonResponse
+from django.test import Client, override_settings
+from django.urls import path
+
+calls = []
+
+
+def orders(request):
+    calls.append("orders view")
+    return JsonResponse({"orders": []})
+
+
+urlpatterns = [path("api/orders/", orders), path("health/", lambda r: JsonResponse({"status": "ok"}))]
+client = Client()
+r = client.get("/api/orders/")
+print(r.status_code, r["Retry-After"], r.json())
+print(client.get("/health/").json(), "| views run:", calls)
+with override_settings(MAINTENANCE=False):
+    print(client.get("/api/orders/").status_code, "| views run:", calls)
+```
+
+```text title="Output"
+503 600 {'error': 'Down for maintenance, back soon.'}
+{'status': 'ok'} | views run: []
+200 | views run: ['orders view']
+```
+
+`503 Service Unavailable` with `Retry-After` tells clients and search engines the outage is
+temporary. The health check stays open so the load balancer doesn't remove the server entirely.
+
+### process_exception: one JSON error for unhandled crashes
+
+```python
+import uuid
+
+from playground import setup
+
+
+class JsonErrorsMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        return self.get_response(request)
+
+    def process_exception(self, request, exception):
+        from django.http import JsonResponse
+
+        if not request.path.startswith("/api/"):
+            return None  # let Django's normal 500 handling run
+        error_id = uuid.uuid4().hex[:12]
+        # a real app logs here: logger.exception("unhandled error %s", error_id)
+        return JsonResponse({"error": {"code": "server_error", "id_length": len(error_id)}}, status=500)
+
+
+setup(DEBUG=False, middleware=["__main__.JsonErrorsMiddleware"])
+
+from django.test import Client
+from django.urls import path
+
+
+def broken(request):
+    return 1 / 0
+
+
+urlpatterns = [path("api/broken/", broken)]
+response = Client(raise_request_exception=False).get("/api/broken/")
+print(response.status_code, response.json())
+```
+
+```text title="Output"
+500 {'error': {'code': 'server_error', 'id_length': 12}}
+```
+
+API clients get JSON they can parse instead of an HTML error page, and the message reveals nothing
+about your code. The error id (shown here only by its length, since it's random) lets support find the
+full traceback in the logs.
+
+### Security headers from SecurityMiddleware
+
+```python
+from playground import setup
+
+setup(
+    DEBUG=False,
+    SECURE_HSTS_SECONDS=31536000,
+    SECURE_REFERRER_POLICY="strict-origin-when-cross-origin",
+    SECURE_CROSS_ORIGIN_OPENER_POLICY="same-origin",
+    middleware=[
+        "django.middleware.security.SecurityMiddleware",
+        "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    ],
+)
+
+from django.http import HttpResponse
+from django.test import Client
+from django.urls import path
+
+urlpatterns = [path("", lambda request: HttpResponse("hi"))]
+response = Client().get("/", secure=True)  # as if over HTTPS
+for header in ["Strict-Transport-Security", "X-Content-Type-Options", "Referrer-Policy",
+               "Cross-Origin-Opener-Policy", "X-Frame-Options"]:
+    print(f"{header}: {response.get(header)}")
+print("plain HTTP gets HSTS?", "Strict-Transport-Security" in Client().get("/"))
+```
+
+```text title="Output"
+Strict-Transport-Security: max-age=31536000
+X-Content-Type-Options: nosniff
+Referrer-Policy: strict-origin-when-cross-origin
+Cross-Origin-Opener-Policy: same-origin
+X-Frame-Options: DENY
+plain HTTP gets HSTS? False
+```
+
+HSTS tells browsers to use HTTPS for a year; it's only sent on secure responses, because over plain
+HTTP an attacker could strip it anyway. `nosniff` stops browsers guessing content types, and
+`X-Frame-Options: DENY` stops other sites framing yours (clickjacking).
+
+### Signals: reacting to saves you don't control
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.contrib.auth.models import User
+from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+
+class Profile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
+    bio = models.TextField(blank=True)
+
+
+@receiver(post_save, sender=User)  # in a project: connected in apps.py ready()
+def create_profile(sender, instance, created, **kwargs):
+    if created:
+        Profile.objects.create(user=instance)
+
+
+migrate()
+ada = User.objects.create_user("ada")
+print("profile created:", hasattr(ada, "profile"), Profile.objects.count())
+ada.first_name = "Ada"
+ada.save()  # created=False: no second profile
+print("after an update:", Profile.objects.count())
+User.objects.bulk_create([User(username="bob"), User(username="cy")])
+print("after bulk_create of 2 users:", Profile.objects.count(), "<- signals were not sent")
+```
+
+```text title="Output"
+profile created: True 1
+after an update: 1
+after bulk_create of 2 users: 1 <- signals were not sent
+```
+
+Creating a profile whenever Django's own `User` is created is a fair use: you don't own the code that
+saves users (admin, `createsuperuser`, signup forms). But `bulk_create` and `update()` skip
+`save()` and therefore the signal, so data created that way silently has no profile.
+
+## Putting it together
+
+ShopLite's real middleware: a request-ID layer that also feeds the logging system and times every
+request, and a security-headers layer for what `SecurityMiddleware` doesn't cover. Its settings list
+them in this order, with CORS for a separate front end:
+
+<ProjectFiles project="shoplite" paths="core/middleware.py core/log.py" />
+
+The same stack, runnable, including an explicit service call instead of a signal for the work your
+own code triggers:
+
+```python title="middleware_stack.py"
+import uuid
+
+from playground import migrate, setup
+
+events = []
+
+
+class RequestID:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        request.request_id = uuid.uuid4().hex
+        response = self.get_response(request)
+        response["X-Request-ID"] = request.request_id
+        return response
+
+
+class APIKeyRequired:
+    """Short-circuits /api/ requests without a valid key, before routing and views."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        from django.http import JsonResponse
+
+        if request.path.startswith("/api/") and request.headers.get("X-API-Key") != "fake-key-123":
+            return JsonResponse({"error": "missing or invalid API key"}, status=401)
+        return self.get_response(request)
+
+
+setup(middleware=["__main__.RequestID", "__main__.APIKeyRequired"])
+
+from django.db import models
+from django.http import JsonResponse
+from django.test import Client
+from django.urls import path
+from django.views.decorators.csrf import csrf_exempt
+
+
+class Signup(models.Model):
+    email = models.EmailField()
+
+
+def register(email):  # an explicit service: everything that happens is visible here
+    signup = Signup.objects.create(email=email)
+    events.append(f"welcome email queued for {email}")
+    return signup
+
+
+@csrf_exempt
+def signups(request):
+    signup = register(request.POST["email"])
+    return JsonResponse({"id": signup.pk}, status=201)
+
+
+urlpatterns = [path("api/signups/", signups)]
+migrate()
+client = Client()
+denied = client.post("/api/signups/", {"email": "ada@example.com"})
+print(denied.status_code, denied.json(), "| has request id:", len(denied["X-Request-ID"]) == 32)
+ok = client.post("/api/signups/", {"email": "ada@example.com"}, headers={"X-API-Key": "fake-key-123"})
+print(ok.status_code, ok.json(), "| rows:", Signup.objects.count())
+print(events)
+```
+
+```text title="Output"
+401 {'error': 'missing or invalid API key'} | has request id: True
+201 {'id': 1} | rows: 1
+['welcome email queued for ada@example.com']
+```
+
+The rejected request still got a request ID, because `RequestID` sits above `APIKeyRequired` and wraps
+its early response too; swap their order and rejected requests would have none. The welcome email is
+queued by the `register()` service right where the signup happens, easy to read and to test, instead
+of in a `post_save` receiver in another file.
+
+## Common mistakes
+
+<Callout type="warning" title="Wrong middleware order">
+  `AuthenticationMiddleware` above `SessionMiddleware` fails on the first request with
+  `ImproperlyConfigured` (it needs `request.session`); subtler mistakes (CORS below
+  `CommonMiddleware`, request-ID last) silently miss requests. Keep Django's documented order and
+  add your own layers where their dependencies are ready.
+</Callout>
+
+- **Heavy work in middleware.** It runs on **every** request, including static files and health
+  checks. Keep it fast; skip paths that don't need it.
+- **Reading `request.body` in middleware** for every request: big uploads end up in memory, and
+  later code may not be able to read the stream.
+- **Business logic in signals.** Hidden side effects, skipped by bulk operations, run inside the
+  same transaction: prefer explicit services, and `transaction.on_commit` for external effects.
+- **`CORS_ALLOW_ALL_ORIGINS = True` with cookies.** List the exact front-end origins instead.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: MIDDLEWARE = [A, B, C]. B returns a response without calling get_response. Which layers see that response?"
+>
+  Only A (on the way out). C and the view never run, and B's own code after the early return doesn't
+  exist.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: where do you put middleware that adds X-Request-ID to every response and log line?"
+>
+  First (top of `MIDDLEWARE`), so it wraps everything below, including responses produced early by
+  other middleware, and sets the ID before any other code logs.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: Product.objects.filter(...).update(price=0). Does a post_save receiver on Product run?"
+>
+  No. `QuerySet.update()` is a single SQL statement and sends no `pre_save`/`post_save` signals.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: when is a signal the right tool?">
+  When you need to react to events from code you don't control (Django's auth, a third-party app),
+  or to decouple a reusable app from the projects that install it. For your own workflows, call a
+  service function explicitly.
+</Reveal>
+
+<KeyTakeaways>
+
+- Middleware wraps every request: top to bottom in, bottom to top out; order matters.
+- A layer can modify the request, modify the response, or short-circuit with its own response.
+- Classic uses: request IDs and timing logs, security headers, auth/maintenance/rate limits, JSON
+  errors.
+- `SecurityMiddleware` + settings give HSTS, nosniff and referrer policy; django-cors-headers for
+  other origins.
+- Signals notify receivers of events; they skip bulk operations and hide control flow, so prefer
+  explicit services for your own logic.
+
+</KeyTakeaways>

@@ -1,0 +1,500 @@
+---
+title: Users, sessions & permissions
+summary: Django's authentication system end to end. The User model and why every project starts with a custom one, password hashing and validators, authenticate/login/logout, how sessions work (and protect against fixation), login_required, permissions and groups, object-level checks, and password reset tokens.
+estimatedMinutes: 25
+difficulty: medium
+section: The Django Toolbox
+objectives:
+  - Create users, check passwords and log users in and out with sessions
+  - Explain what a session stores, where, and how Django protects it
+  - Set up a custom user model on day one and reference it correctly
+  - Protect views with login_required and permission checks, including per object
+  - Validate passwords and implement password reset with signed tokens
+prerequisites:
+  - Authentication & authorization
+  - Forms & validation
+tags: [django, auth, users, sessions, permissions]
+---
+
+## Intuition: a coat check
+
+When you log in, Django works like a coat check. It checks your password once, keeps your "coat"
+(who you are, plus anything else worth remembering) on its own rack, the **session store**, and hands
+you a ticket: a random **session id** in a cookie. Every later request shows the ticket, and Django
+fetches your coat. Logging out throws the coat away; the old ticket is then worthless.
+
+**Permissions** are a separate question: now that we know who you are, which doors open?
+
+## See it
+
+<SessionVsTokenViz />
+
+## The precise rules
+
+**The User model** (`django.contrib.auth`): `username`, `email`, `password` (a hash),
+`first_name`, `last_name`, `is_active`, `is_staff` (may use the admin), `is_superuser` (all
+permissions), `last_login`, `date_joined`, plus `groups` and `user_permissions`.
+
+**Start every project with a custom user model**, even if it's empty, because switching later means
+rewriting migrations and foreign keys across the whole database. Set `AUTH_USER_MODEL` before the
+first `migrate`, and always refer to the user model indirectly: `settings.AUTH_USER_MODEL` in model
+fields, `get_user_model()` in code. The Auth starter project's version signs in with email:
+
+<ProjectFile project="auth-starter" path="accounts/models.py" />
+
+**Passwords:** `User.objects.create_user(..., password=...)` and `user.set_password()` hash with
+PBKDF2 (configurable: Argon2, bcrypt); `user.check_password()` verifies. `AUTH_PASSWORD_VALIDATORS`
+enforce length, common-password and similarity rules; `validate_password()` runs them.
+
+**Logging in:** `authenticate(request, username=..., password=...)` returns the user or `None`
+(it asks each backend in `AUTHENTICATION_BACKENDS`). `login(request, user)` stores the user's id
+in the session and **rotates the session key** (protection against session fixation).
+`logout(request)` flushes the session. Built-in views: `LoginView`, `LogoutView` (POST only),
+`PasswordChangeView`, `PasswordResetView` and friends.
+
+**Sessions:** `request.session` is a dict-like object saved by `SessionMiddleware` after the view.
+Data lives server-side (database by default; cache or signed cookies are options); the cookie holds
+only the key. Settings: `SESSION_COOKIE_AGE` (two weeks), `SESSION_COOKIE_SECURE`,
+`SESSION_COOKIE_HTTPONLY` (default on), `SESSION_COOKIE_SAMESITE` ("Lax").
+
+**Protecting views:** `@login_required` / `LoginRequiredMixin` redirect anonymous users to
+`LOGIN_URL?next=...`. Django 5.1 adds `LoginRequiredMiddleware` (everything private unless marked
+`@login_not_required`).
+
+**Permissions:** each model gets `add_`, `change_`, `delete_`, `view_` permissions. Check with
+`user.has_perm("app_label.change_product")`, `@permission_required(...)` or
+`PermissionRequiredMixin`. Group users into **groups** and give permissions to groups. These are
+**model-level**; "may edit **this** order" is **object-level**: filter by owner, or check in the
+view (or use a package such as django-guardian or django-rules).
+
+**Password reset:** Django emails a link containing the user's id and a **token** from
+`default_token_generator`. The token is an HMAC of the user's state (password hash, last login), so
+it stops working after the password changes or `PASSWORD_RESET_TIMEOUT` passes. No database table
+needed.
+
+## Worked example
+
+Creating a user, logging in through a real login view, using the session, and logging out.
+
+```python title="login_flow.py"
+from playground import migrate, setup
+
+setup(LOGIN_URL="/login/", templates={"login.html": "<form method='post'>{{ form }}</form>"})
+
+from django.contrib.auth import views as auth_views
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
+from django.http import HttpResponse
+from django.test import Client
+from django.urls import path
+
+
+@login_required
+def profile(request):
+    request.session["visits"] = request.session.get("visits", 0) + 1
+    return HttpResponse(f"{request.user.username}, visit {request.session['visits']}")
+
+
+urlpatterns = [
+    path("login/", auth_views.LoginView.as_view(template_name="login.html")),
+    path("logout/", auth_views.LogoutView.as_view(next_page="/login/")),
+    path("profile/", profile),
+]
+migrate()
+ada = User.objects.create_user("ada", email="ada@example.com", password="correct-horse-battery")
+print("stored password:", ada.password.split("$")[0], "| check:", ada.check_password("correct-horse-battery"))
+
+browser = Client()
+r = browser.get("/profile/")
+print("anonymous:", r.status_code, r["Location"])
+r = browser.post("/login/", {"username": "ada", "password": "correct-horse-battery", "next": "/profile/"})
+print("login:", r.status_code, r["Location"], "| session cookie:", "sessionid" in browser.cookies)
+print(browser.get("/profile/").content.decode(), "|", browser.get("/profile/").content.decode())
+browser.post("/logout/")
+print("after logout:", browser.get("/profile/").status_code)
+```
+
+```text title="Output"
+stored password: md5 | check: True
+anonymous: 302 /login/?next=/profile/
+login: 302 /profile/ | session cookie: True
+ada, visit 1 | ada, visit 2
+after logout: 302
+```
+
+- `create_user` hashed the password (the playground uses the fast MD5 hasher; real settings keep
+  PBKDF2). The raw password is never stored.
+- `login_required` redirected the anonymous request to `LOGIN_URL` with `?next=` so the user lands
+  back on the page they wanted.
+- `LoginView` called `authenticate()` and `login()`; from then on the `sessionid` cookie identifies
+  Ada, and `request.session` remembers her visit count between requests.
+- `LogoutView` only accepts POST (a GET could be triggered by any image tag on another site).
+
+## Variations
+
+### What's in a session, and why login rotates it
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.contrib.auth import authenticate, login
+from django.contrib.auth.models import User
+from django.contrib.sessions.models import Session
+from django.http import HttpResponse
+from django.test import Client
+from django.urls import path
+from django.views.decorators.csrf import csrf_exempt
+
+
+def add_to_cart(request):
+    request.session["cart"] = request.session.get("cart", []) + ["Dune"]
+    return HttpResponse(f"cart has {len(request.session['cart'])}")
+
+
+@csrf_exempt
+def do_login(request):
+    user = authenticate(request, username="ada", password="correct-horse-battery")
+    login(request, user)
+    return HttpResponse("logged in")
+
+
+urlpatterns = [path("cart/", add_to_cart), path("login/", do_login)]
+migrate()
+User.objects.create_user("ada", password="correct-horse-battery")
+browser = Client()
+browser.get("/cart/")
+before = browser.cookies["sessionid"].value
+browser.post("/login/")
+after = browser.cookies["sessionid"].value
+print("session key rotated on login:", before != after)
+data = Session.objects.get(session_key=after).get_decoded()
+print("stored server-side:", sorted(data))
+print("cart survived login:", data["cart"])
+print(browser.get("/cart/").content.decode())
+```
+
+```text title="Output"
+session key rotated on login: True
+stored server-side: ['_auth_user_backend', '_auth_user_hash', '_auth_user_id', 'cart']
+cart survived login: ['Dune']
+cart has 2
+```
+
+The browser only ever holds the key; the cart and the user id live in the `django_session` table.
+`login()` keeps the data but issues a **new key**, so an attacker who planted a session id before
+login (session fixation) is left holding a dead ticket.
+
+### Permissions and groups
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.contrib.auth.decorators import permission_required
+from django.contrib.auth.models import Group, Permission, User
+from django.db import models
+from django.http import HttpResponse
+from django.test import Client
+from django.urls import path
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=50)
+
+
+@permission_required("shop.change_product", raise_exception=True)
+def edit_product(request):
+    return HttpResponse("editing")
+
+
+urlpatterns = [path("products/edit/", edit_product)]
+migrate()
+editors = Group.objects.create(name="Catalogue editors")
+editors.permissions.add(Permission.objects.get(codename="change_product"))
+ana = User.objects.create_user("ana", password="x")
+ana.groups.add(editors)
+bob = User.objects.create_user("bob", password="x")
+
+print("ana:", ana.has_perm("shop.change_product"), "| bob:", bob.has_perm("shop.change_product"))
+print("ana's permissions:", sorted(ana.get_all_permissions()))
+for user in (ana, bob):
+    client = Client()
+    client.force_login(user)
+    print(user.username, client.get("/products/edit/").status_code)
+```
+
+```text title="Output"
+ana: True | bob: False
+ana's permissions: ['shop.change_product']
+ana 200
+bob 403
+```
+
+Permissions are named `<app_label>.<action>_<model>`. Assigning them to groups ("Catalogue editors",
+"Support") keeps access manageable as staff come and go. `raise_exception=True` answers `403` instead
+of redirecting a logged-in user to the login page.
+
+### Object-level checks: only your own data
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
+from django.db import models
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
+from django.test import Client
+from django.urls import path
+
+
+class Order(models.Model):
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    total = models.IntegerField()
+
+
+@login_required
+def order_detail(request, pk):
+    # Look the order up *within the user's own orders*: someone else's id is simply not found.
+    order = get_object_or_404(Order.objects.filter(owner=request.user), pk=pk)
+    return JsonResponse({"id": order.pk, "total": order.total})
+
+
+urlpatterns = [path("orders/<int:pk>/", order_detail)]
+migrate()
+ada, bob = User.objects.create_user("ada"), User.objects.create_user("bob")
+adas = Order.objects.create(owner=ada, total=25)
+client = Client()
+client.force_login(bob)
+print("bob reads ada's order:", client.get(f"/orders/{adas.pk}/").status_code)
+client.force_login(ada)
+print("ada reads her order:", client.get(f"/orders/{adas.pk}/").json())
+```
+
+```text title="Output"
+bob reads ada's order: 404
+ada reads her order: {'id': 1, 'total': 25}
+```
+
+Scoping the queryset is the simplest, safest object-level check: there's no code path that can
+return another user's order, and the `404` doesn't even confirm it exists. Forgetting this is the
+IDOR bug from lesson 4, and one of the most common real-world vulnerabilities.
+
+### Password validators
+
+```python
+from playground import setup
+
+setup(AUTH_PASSWORD_VALIDATORS=[
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 12}},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+])
+
+from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+
+user = User(username="adalovelace", email="ada@example.com")
+for candidate in ["123456789012", "password1234", "adalovelace1", "correct horse battery staple"]:
+    try:
+        validate_password(candidate, user=user)
+        print(f"{candidate!r}: ok")
+    except ValidationError as exc:
+        print(f"{candidate!r}: {' | '.join(exc.messages)}")
+```
+
+```text title="Output"
+'123456789012': This password is entirely numeric.
+'password1234': This password is too common.
+'adalovelace1': The password is too similar to the username.
+'correct horse battery staple': ok
+```
+
+The built-in validators reject short, all-digit, common (a list of 20,000 leaked passwords) and
+username-like passwords. Signup forms (`UserCreationForm`) and DRF serializers that call
+`validate_password` show these messages to users.
+
+### Password reset tokens
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.contrib.auth.models import User
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
+
+migrate()
+ada = User.objects.create_user("ada", password="old-password-123")
+uid = urlsafe_base64_encode(force_bytes(ada.pk))
+token = default_token_generator.make_token(ada)
+print("link: /reset/" + uid + "/<token>/", "| token looks like", len(token.split("-")), "parts")
+print("valid now:", default_token_generator.check_token(ada, token))
+print("wrong user:", default_token_generator.check_token(User.objects.create_user("bob"), token))
+
+ada.set_password("brand-new-password-456")
+ada.save()
+print("after the password changed:", default_token_generator.check_token(ada, token))
+```
+
+```text title="Output"
+link: /reset/MQ/<token>/ | token looks like 2 parts
+valid now: True
+wrong user: False
+after the password changed: False
+```
+
+The token is a signature over the user's current password hash and last login, made with your
+`SECRET_KEY`. Changing the password changes the hash, so the link is single-use without storing
+anything. This is why a leaked `SECRET_KEY` is so dangerous: it lets attackers forge these tokens.
+
+## Putting it together
+
+The Auth starter project combines everything: a custom email-based user, a signup view that logs the
+user in, Django's login/logout/password-reset views, and secure cookie settings when `DEBUG` is off.
+Its tests prove each piece (signup, wrong passwords, `next=` redirects, the full reset round trip,
+and that unknown emails get the same response):
+
+<ProjectFiles
+  project="auth-starter"
+  paths="accounts/views.py config/urls.py accounts/tests/test_web.py"
+/>
+
+A runnable version of the core flow: signup with validation, automatic login, a page only for
+logged-in users, staff-only reporting and logout.
+
+```python title="accounts_flow.py"
+from playground import migrate, setup
+
+setup(LOGIN_URL="/login/", AUTH_PASSWORD_VALIDATORS=[
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 10}},
+])
+
+from django.contrib.auth import login, logout
+from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.models import User
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import redirect
+from django.test import Client
+from django.urls import path
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+
+
+@csrf_exempt
+def signup(request):
+    form = UserCreationForm(request.POST)
+    if not form.is_valid():
+        return JsonResponse({"errors": {k: v[0] for k, v in form.errors.items()}}, status=400)
+    login(request, form.save())
+    return redirect("/me/")
+
+
+@login_required
+def me(request):
+    return HttpResponse(f"hello {request.user.username} (staff: {request.user.is_staff})")
+
+
+@user_passes_test(lambda u: u.is_staff, login_url="/login/")
+def report(request):
+    return HttpResponse(f"{User.objects.count()} users")
+
+
+@csrf_exempt
+@require_POST
+def do_logout(request):
+    logout(request)
+    return HttpResponse("bye")
+
+
+urlpatterns = [path("signup/", signup), path("me/", me), path("staff/report/", report),
+               path("logout/", do_logout)]
+migrate()
+browser = Client()
+weak = browser.post("/signup/", {"username": "ada", "password1": "short", "password2": "short"})
+print("weak password:", weak.status_code, weak.json()["errors"])
+ok = browser.post("/signup/", {"username": "ada", "password1": "a-long-passphrase", "password2": "a-long-passphrase"})
+print("signup:", ok.status_code, "->", ok["Location"])
+print(browser.get("/me/").content.decode())
+print("staff report as ada:", browser.get("/staff/report/").status_code)
+User.objects.filter(username="ada").update(is_staff=True)
+print("after promotion:", browser.get("/staff/report/").content.decode())
+browser.post("/logout/")
+print("me after logout:", browser.get("/me/").status_code)
+```
+
+```text title="Output"
+weak password: 400 {'password2': 'This password is too short. It must contain at least 10 characters.'}
+signup: 302 -> /me/
+hello ada (staff: False)
+staff report as ada: 302
+after promotion: 1 users
+me after logout: 302
+```
+
+`UserCreationForm` brought password confirmation and the validators for free, and `login()` right
+after signup saved the user a step. Note that promoting Ada to staff took effect on her **next
+request**: the session stores her id, and the user is loaded fresh each time.
+
+## Common mistakes
+
+<Callout type="warning" title="Starting with the default User and switching later">
+  Changing `AUTH_USER_MODEL` after the first migration touches every foreign key to users and the
+  migration history of several apps. Create `accounts.User(AbstractUser)` (even with no changes)
+  before your first `migrate`.
+</Callout>
+
+- **Importing `User` directly** in reusable code or model fields. Use `get_user_model()` and
+  `settings.AUTH_USER_MODEL`.
+- **Storing sensitive data in a cookie-based session** (`signed_cookies` backend): it's signed, not
+  encrypted, so users can read it.
+- **Checking `is_staff` everywhere instead of permissions.** Permissions and groups say _what_ someone
+  may do; flags are too coarse.
+- **Forgetting object-level checks.** `login_required` plus `Order.objects.get(pk=pk)` lets any user
+  read any order.
+- **Logout via GET.** Django's `LogoutView` requires POST; keep it that way.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: how should a model reference the user in a reusable app?">
+  `owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)`, and
+  `get_user_model()` in Python code.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why does login() change the session key?">
+  To defeat session fixation: an attacker who made the victim use a known session id before login
+  can't reuse it, because the logged-in session has a new key.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: support agents may view orders, editors may change products. How do you set that up?"
+>
+  Two groups: "Support" with `view_order`, "Catalogue editors" with `change_product` (and
+  `add_product`), then add users to groups. Check with `has_perm` or `permission_required`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why does a password reset link stop working once used?">
+  The token is an HMAC over the user's password hash (and last login). Resetting changes the hash,
+  so the old token no longer matches. No database row needs deleting.
+</Reveal>
+
+<KeyTakeaways>
+
+- Custom user model on day one; reference it with `settings.AUTH_USER_MODEL` / `get_user_model()`.
+- `create_user`/`set_password` hash; `authenticate` + `login` start a session; `logout` (POST) ends it.
+- Sessions keep data server-side behind a random cookie key; login rotates the key.
+- `login_required` for "who", permissions and groups for "what", scoped querysets for "which object".
+- Password validators and signed reset tokens come built in.
+
+</KeyTakeaways>
