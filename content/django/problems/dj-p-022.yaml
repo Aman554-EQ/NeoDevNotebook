@@ -1,0 +1,67 @@
+id: dj-p-022
+title: Throttle the login endpoint
+difficulty: medium
+tags:
+  - drf
+  - throttling
+  - security
+statement: |
+  `POST /login/` (an `APIView`) answers 401 for wrong credentials and 200 for right ones.
+  Limit it to **3 requests per minute per client** with a scoped throttle called `"login"`; the 4th
+  request must get 429 with a `Retry-After` header, whether or not the password is right.
+examples:
+  - input: 4 POSTs in a minute
+    output: "[401, 401, 401, 429]"
+hints:
+  - "`throttle_classes = [ScopedRateThrottle]` and `throttle_scope = 'login'`."
+  - Rates go in `REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']`.
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup(apps=["rest_framework"], REST_FRAMEWORK={
+        "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+        "DEFAULT_THROTTLE_RATES": {"login": "3/minute"},
+    })
+
+    from django.contrib.auth import authenticate
+    from django.urls import path
+    from rest_framework.response import Response
+    from rest_framework.throttling import ScopedRateThrottle
+    from rest_framework.views import APIView
+
+
+    class Login(APIView):
+        throttle_classes = [ScopedRateThrottle]
+        throttle_scope = "login"
+
+        def post(self, request):
+            user = authenticate(username=request.data.get("username"), password=request.data.get("password"))
+            if user is None:
+                return Response({"detail": "Invalid username or password."}, status=401)
+            return Response({"detail": f"welcome {user.username}"})
+
+
+    urlpatterns = [path("login/", Login.as_view())]
+    migrate()
+  explanation: |
+    DRF checks throttles before the view runs, so the 4th request is refused without even
+    trying the password: an attacker can't learn whether a guess was right once the limit is hit.
+    `ScopedRateThrottle` keys the counter by scope and client (IP for anonymous users) and stores it in the
+    cache, so production needs a shared cache such as Redis. The 429 response carries `Retry-After` in
+    seconds. Combine this with slow password hashing and the same error message for every failure.
+complexity:
+  time: O(1) per request (cache lookups)
+  space: O(clients)
+verify: |
+  from django.contrib.auth.models import User
+  from django.test import Client
+
+  User.objects.create_user("ada", password="correct-horse-battery")
+  c = Client()
+  codes = [c.post("/login/", {"username": "ada", "password": p}).status_code for p in ["a", "b", "c"]]
+  right = c.post("/login/", {"username": "ada", "password": "correct-horse-battery"})
+  assert codes == [401, 401, 401] and right.status_code == 429 and right.has_header("Retry-After")
+  other = Client(REMOTE_ADDR="198.51.100.9")
+  assert other.post("/login/", {"username": "ada", "password": "correct-horse-battery"}).status_code == 200

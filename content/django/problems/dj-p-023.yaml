@@ -1,0 +1,66 @@
+id: dj-p-023
+title: Cache with invalidation
+difficulty: medium
+tags:
+  - caching
+  - orm
+statement: |
+  `category_names()` must return the sorted category names from the cache when possible
+  (0 queries), and from the database otherwise (1 query). `rename_category(pk, new_name)` saves the
+  change and makes sure the **next** `category_names()` call sees it.
+examples:
+  - input: category_names(); category_names()
+    output: 1 query, then 0
+hints:
+  - "`cache.get_or_set(key, callable, timeout)`"
+  - Delete the key in the writing function.
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.core.cache import cache
+    from django.db import models
+
+    KEY = "categories:names:v1"
+
+
+    class Category(models.Model):
+        name = models.CharField(max_length=50)
+
+
+    def category_names():
+        return cache.get_or_set(KEY, lambda: list(Category.objects.order_by("name").values_list("name", flat=True)), 3600)
+
+
+    def rename_category(pk, new_name):
+        Category.objects.filter(pk=pk).update(name=new_name)
+        cache.delete(KEY)
+
+
+    migrate()
+  explanation: |
+    `get_or_set` returns the cached list or calls the function once, stores its result for an
+    hour and returns it, so repeated calls cost no queries. Caching is only correct with an invalidation
+    plan: the one function that changes names also deletes the key, and the next read rebuilds it. Passing
+    a callable (not an already-computed list) matters: otherwise the query would run on every call, even
+    on cache hits. In production this cache is Redis or Memcached, shared by all servers.
+complexity:
+  time: O(1) on hit, O(n) on miss
+  space: O(n) cached
+verify: |
+  from django.db import connection
+  from django.test.utils import CaptureQueriesContext
+
+  books = Category.objects.create(name="Books")
+  Category.objects.create(name="Games")
+  cache.clear()
+  with CaptureQueriesContext(connection) as first:
+      assert category_names() == ["Books", "Games"]
+  with CaptureQueriesContext(connection) as second:
+      assert category_names() == ["Books", "Games"]
+  assert (len(first), len(second)) == (1, 0)
+  rename_category(books.pk, "Novels")
+  assert category_names() == ["Games", "Novels"]

@@ -1,0 +1,26 @@
+id: dj-i-023
+question: How would you paginate a large, frequently changing list in an API?
+difficulty: medium
+tags:
+  - drf
+  - pagination
+  - api-design
+shortAnswer: |
+  Use cursor pagination (an opaque cursor encoding the last item's ordering value) with a stable, indexed ordering: no duplicates or skips when items are inserted, constant-time deep pages. Page-number/limit-offset are fine for small or stable data and when users need page jumps or totals.
+detailedAnswer: |
+  `OFFSET` pagination (`?page=500`) has two problems on big, busy tables: the database still scans and
+  discards all earlier rows (slow deep pages), and inserts or deletes shift items between pages
+  (duplicates or gaps while scrolling).
+
+  **Cursor pagination** (DRF's `CursorPagination`) continues "after this item": `WHERE created < <last
+  seen> ORDER BY created DESC LIMIT 20`. With an index on the ordering column, every page costs the same,
+  and new items don't disturb pages already seen. Trade-offs: no total count, no jumping to page N, and
+  the ordering must be unique (add the id as a tie-breaker) and match an index.
+
+  Whatever you choose: always order, cap the page size, return `next`/`previous` links, and document it.
+pitfalls:
+  - Unordered pagination.
+  - COUNT(*) on huge tables for every page.
+followUps:
+  - How do you make the cursor ordering unique?
+  - How do you show 'about 10,000 results' cheaply?

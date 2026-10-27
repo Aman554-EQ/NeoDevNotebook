@@ -1,0 +1,27 @@
+id: dj-i-019
+question: How would you add caching to a Django application, and how do you keep it correct?
+difficulty: medium
+tags:
+  - caching
+  - performance
+shortAnswer: |
+  Pick a shared backend (Redis/Memcached), cache at the right level (per-view, template fragment, low-level get_or_set), and plan invalidation: timeouts, deleting keys on write, or versioned keys. Never cache per-user data under shared keys.
+detailedAnswer: |
+  Levels, from coarse to fine:
+
+  - **HTTP caching**: `Cache-Control`, ETags/`If-None-Match` → 304, a CDN for anonymous pages.
+  - **Per-view**: `@cache_page(300)`; varies by URL and `Vary` headers.
+  - **Template fragments**: `{% cache 600 sidebar user.id %}`.
+  - **Low-level**: `cache.get_or_set(key, fn, timeout)` for expensive queries or API calls.
+
+  Correctness is about **invalidation**: short timeouts when slight staleness is fine; deleting the key in
+  the code that changes the data; versioned keys (`catalog:v7:...`) to abandon many keys at once. Guard
+  against stampedes on hot keys (locks or early refresh). Use Redis or Memcached so all servers share the
+  cache (LocMem is per process), include the user in keys for personalised data, and measure: cache what
+  is slow and frequently read, not everything.
+pitfalls:
+  - cache_page on personalised views.
+  - No invalidation plan.
+followUps:
+  - What is a cache stampede?
+  - Write-through vs cache-aside?

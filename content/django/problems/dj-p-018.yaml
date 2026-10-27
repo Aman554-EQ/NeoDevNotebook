@@ -1,0 +1,72 @@
+id: dj-p-018
+title: 🐞 Prefetched, yet still N+1
+difficulty: medium
+tags:
+  - debugging
+  - orm
+  - prefetch
+statement: |
+  This code was "optimised" with `prefetch_related`, yet the page still runs one query per
+  author. Make `recent_by_author()` return `{author name: [titles published since 2000, newest first]}`
+  in **2 queries**.
+
+  ```python
+  def recent_by_author():
+      authors = Author.objects.prefetch_related("books").order_by("name")
+      return {a.name: [b.title for b in a.books.filter(year__gte=2000).order_by("-year")]
+              for a in authors}
+  ```
+examples:
+  - input: recent_by_author()
+    output: "{'Ada': ['B3', 'B2'], 'Bob': []}"
+hints:
+  - "`.filter()` on a prefetched relation creates a new query."
+  - "`Prefetch('books', queryset=..., to_attr='recent')`."
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+    from django.db.models import Prefetch
+
+
+    class Author(models.Model):
+        name = models.CharField(max_length=50)
+
+
+    class Book(models.Model):
+        author = models.ForeignKey(Author, on_delete=models.CASCADE, related_name="books")
+        title = models.CharField(max_length=50)
+        year = models.IntegerField()
+
+
+    def recent_by_author():
+        recent = Prefetch("books", queryset=Book.objects.filter(year__gte=2000).order_by("-year"), to_attr="recent")
+        authors = Author.objects.prefetch_related(recent).order_by("name")
+        return {a.name: [b.title for b in a.recent] for a in authors}
+
+
+    migrate()
+  explanation: |
+    A prefetch caches the result of `a.books.all()` only. Calling `.filter()` or `.order_by()`
+    on the relation builds a **new** QuerySet, which ignores the cache and queries again: one query per
+    author, plus a useless prefetch. `Prefetch("books", queryset=..., to_attr="recent")` moves the filter
+    and ordering into the single prefetch query and stores the result as a plain list attribute, so the
+    loop reads memory only: 2 queries in total.
+complexity:
+  time: O(A + B), 2 queries
+  space: O(A + B)
+verify: |
+  from django.db import connection
+  from django.test.utils import CaptureQueriesContext
+
+  ada, bob, cy = (Author.objects.create(name=n) for n in ["Ada", "Bob", "Cy"])
+  for a, t, y in [(ada, "B1", 1999), (ada, "B2", 2005), (ada, "B3", 2020), (bob, "B4", 1990), (cy, "B5", 2001)]:
+      Book.objects.create(author=a, title=t, year=y)
+  with CaptureQueriesContext(connection) as ctx:
+      result = recent_by_author()
+  assert result == {"Ada": ["B3", "B2"], "Bob": [], "Cy": ["B5"]}, result
+  assert len(ctx) == 2, len(ctx)

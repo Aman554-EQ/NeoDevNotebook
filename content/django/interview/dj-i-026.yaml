@@ -1,0 +1,28 @@
+id: dj-i-026
+question: How would you scale a Django application that's getting slow under load?
+difficulty: hard
+tags:
+  - scaling
+  - architecture
+  - performance
+shortAnswer: |
+  Measure first (APM, slow-query logs, Debug Toolbar). Then: fix queries (N+1, indexes, only needed columns), cache hot reads, move slow work to background workers, scale stateless app servers horizontally behind a load balancer, pool database connections, add read replicas, and serve static/media from a CDN.
+detailedAnswer: |
+  1. **Measure**: request timings per endpoint, database time, query counts, slow-query logs,
+     `EXPLAIN ANALYZE`. Most Django slowness is in the database.
+  2. **Queries**: kill N+1 (`select_related`/`prefetch_related`), add the right indexes, fetch only needed
+     columns, paginate, move aggregation into SQL, avoid `COUNT(*)` on huge tables.
+  3. **Cache**: per-view or low-level caching in Redis with an invalidation plan; HTTP caching/CDN for
+     anonymous pages.
+  4. **Background work**: emails, reports, image processing, third-party calls via Celery/RQ.
+  5. **Horizontal scale**: Django is stateless if sessions and cache live in Redis/DB, so add gunicorn
+     workers and servers behind a load balancer.
+  6. **Database**: connection reuse/pooling (`CONN_MAX_AGE`, PgBouncer), read replicas with a database
+     router, partitioning or archiving for huge tables, and eventually splitting hot domains into services.
+  7. Keep load tests and query-budget tests in CI so regressions are caught.
+pitfalls:
+  - Adding servers when the database is the bottleneck.
+  - Caching before fixing queries.
+followUps:
+  - How do read replicas affect consistency (read-your-writes)?
+  - When would you split off a microservice?

@@ -1,0 +1,75 @@
+id: dj-p-013
+title: 🐞 The serializer that leaks passwords
+difficulty: simple
+tags:
+  - debugging
+  - drf
+  - security
+statement: |
+  A signup endpoint returns the new user, including the password hash, and lets clients
+  set `is_staff=true`. Fix the serializer so that it accepts only `username` and a write-only
+  `password`, hashes the password, and returns only `id` and `username`.
+
+  ```python
+  class SignupSerializer(serializers.ModelSerializer):
+      class Meta:
+          model = User
+          fields = "__all__"
+  ```
+examples:
+  - input: 'POST {"username": "eve", "password": "...", "is_staff": true}'
+    output: '201 {"id": 1, "username": "eve"} and eve is not staff'
+hints:
+  - List fields explicitly.
+  - "`extra_kwargs = {'password': {'write_only': True}}` and `create_user()` in `create()`."
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup(apps=["rest_framework"], REST_FRAMEWORK={
+        "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+        "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
+    })
+
+    from django.contrib.auth.models import User
+    from rest_framework import generics, serializers
+    from django.urls import path
+
+
+    class SignupSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = User
+            fields = ["id", "username", "password"]  # explicit: is_staff can't be set
+            extra_kwargs = {"password": {"write_only": True}}  # accepted, never returned
+
+        def create(self, validated_data):
+            return User.objects.create_user(**validated_data)  # hashes the password
+
+
+    class Signup(generics.CreateAPIView):
+        serializer_class = SignupSerializer
+
+
+    urlpatterns = [path("signup/", Signup.as_view())]
+    migrate()
+  explanation: |
+    `fields = "__all__"` made every column readable and writable: the response included the
+    password hash, and a client could send `is_staff: true` (mass assignment). Listing fields explicitly
+    removes `is_staff` and friends from what the serializer accepts; unknown keys in the input are simply
+    ignored. `write_only` keeps the password out of every response. The default `ModelSerializer.create()`
+    would store the password as plain text in the `password` column, so `create()` calls
+    `create_user()`, which hashes it.
+complexity:
+  time: O(1) (plus the password hash cost)
+  space: O(1)
+verify: |
+  from django.test import Client
+
+  r = Client().post("/signup/", {"username": "eve", "password": "correct-horse-1", "is_staff": True,
+                                 "is_superuser": True}, content_type="application/json")
+  assert r.status_code == 201, r.content
+  assert r.json() == {"id": 1, "username": "eve"}
+  eve = User.objects.get(username="eve")
+  assert not eve.is_staff and not eve.is_superuser
+  assert eve.check_password("correct-horse-1") and eve.password != "correct-horse-1"

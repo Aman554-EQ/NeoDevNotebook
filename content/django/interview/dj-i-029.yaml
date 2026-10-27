@@ -1,0 +1,28 @@
+id: dj-i-029
+question: A list endpoint takes 4 seconds. How do you investigate and fix it?
+difficulty: hard
+tags:
+  - orm
+  - sql
+  - performance
+shortAnswer: |
+  Reproduce with production-like data, count and time queries (Debug Toolbar, logging, APM), look for N+1, missing indexes (EXPLAIN ANALYZE), over-fetching and expensive counts; fix with select/prefetch_related, indexes, only(), pagination, annotations or caching; lock the fix in with query-count tests.
+detailedAnswer: |
+  1. **Reproduce** with realistic data volumes (a staging copy or generated data).
+  2. **Profile**: number of queries and their time (Debug Toolbar, `connection.queries`, APM traces),
+     Python time (serialization of huge pages is a common culprit).
+  3. **Typical causes and fixes**:
+     - N+1 from templates/serializers → `select_related`/`prefetch_related`/`Prefetch`;
+     - sequential scans → indexes matching the filter and order (`EXPLAIN ANALYZE` to confirm);
+     - over-fetching → `only()`/`values()`, smaller page sizes, a lighter list serializer;
+     - expensive `COUNT(*)` for pagination → cursor pagination or estimated counts;
+     - per-row Python computation → `annotate()`/aggregation in SQL;
+     - repeated identical work → caching with invalidation.
+  4. **Verify** with the same measurements, then add `assertNumQueries` and a timing budget to tests so it
+     doesn't regress.
+pitfalls:
+  - Guessing instead of measuring.
+  - Adding an index without checking the plan uses it.
+followUps:
+  - What does EXPLAIN ANALYZE show that EXPLAIN doesn't?
+  - When is denormalising the right fix?

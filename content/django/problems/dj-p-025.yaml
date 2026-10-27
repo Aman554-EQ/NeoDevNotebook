@@ -1,0 +1,94 @@
+id: dj-p-025
+title: Verify a signed webhook
+difficulty: hard
+tags:
+  - webhooks
+  - security
+  - hmac
+statement: |
+  Write `handle_webhook(body: bytes, header: str, now: int) -> str` for a provider that signs
+  as `t=<unix time>,v1=<hex HMAC-SHA256 of "<t>.<body>" with SECRET>`. Return:
+
+  - `"bad signature"` for a malformed header or wrong signature (compare in constant time),
+  - `"stale"` when `|now - t| > 300`,
+  - `"duplicate"` when the event `id` (in the JSON body) was already processed,
+  - `"processed"` otherwise (and remember the id in the `ProcessedEvent` table).
+
+  Verify **before** parsing the JSON.
+examples:
+  - input: valid header, new event
+    output: "'processed'"
+  - input: same event again
+    output: "'duplicate'"
+hints:
+  - "`hmac.new(SECRET, f'{t}.'.encode() + body, hashlib.sha256).hexdigest()`"
+  - "`hmac.compare_digest`; a unique field on the event id."
+solution:
+  language: python
+  code: |
+    import hashlib
+    import hmac
+    import json
+
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import IntegrityError, models, transaction
+
+    SECRET = b"whsec_fake_0123456789abcdefghijklmnopqrstuv"
+    TOLERANCE = 300
+
+
+    class ProcessedEvent(models.Model):
+        event_id = models.CharField(max_length=60, unique=True)
+
+
+    def sign(body: bytes, timestamp: int) -> str:
+        return f"t={timestamp},v1=" + hmac.new(SECRET, f"{timestamp}.".encode() + body, hashlib.sha256).hexdigest()
+
+
+    def handle_webhook(body: bytes, header: str, now: int) -> str:
+        try:
+            parts = dict(item.split("=", 1) for item in header.split(","))
+            timestamp, received = int(parts["t"]), parts["v1"]
+        except (KeyError, ValueError):
+            return "bad signature"
+        expected = sign(body, timestamp).split("v1=", 1)[1]
+        if not hmac.compare_digest(expected, received):
+            return "bad signature"
+        if abs(now - timestamp) > TOLERANCE:
+            return "stale"
+        event = json.loads(body)  # only now is the body trusted enough to parse
+        try:
+            with transaction.atomic():
+                ProcessedEvent.objects.create(event_id=event["id"])
+        except IntegrityError:
+            return "duplicate"
+        return "processed"
+
+
+    migrate()
+  explanation: |
+    The signature covers the timestamp **and** the exact bytes, so neither can be changed, and
+    an old delivery can't be replayed outside the tolerance window. `hmac.compare_digest` compares in time
+    independent of how many characters match, so response timing leaks nothing. Verification happens on
+    the raw body before `json.loads`, because re-serialised JSON rarely matches what was signed. Providers
+    deliver **at least once**, so a unique constraint on the event id makes repeats harmless: the second
+    insert fails and the handler reports a duplicate instead of, say, marking an order paid twice. A real
+    handler answers 2xx for duplicates too and does slow work in the background.
+complexity:
+  time: O(len(body))
+  space: O(events)
+verify: |
+  now = 1_767_225_600
+  body = json.dumps({"id": "evt_1", "type": "payment.succeeded"}).encode()
+  good = sign(body, now)
+  assert handle_webhook(body, good, now + 10) == "processed"
+  assert handle_webhook(body, good, now + 20) == "duplicate"
+  assert handle_webhook(body.replace(b"succeeded", b"failed"), good, now) == "bad signature"
+  assert handle_webhook(body, good, now + 301) == "stale"
+  assert handle_webhook(body, "t=1,v1=" + "0" * 64, now) == "bad signature"
+  assert handle_webhook(body, "garbage", now) == "bad signature"
+  other = json.dumps({"id": "evt_2"}).encode()
+  assert handle_webhook(other, sign(other, now), now) == "processed" and ProcessedEvent.objects.count() == 2

@@ -1,0 +1,74 @@
+id: dj-p-008
+title: Post/Redirect/Get with a message
+difficulty: easy
+tags:
+  - views
+  - forms
+  - messages
+statement: |
+  Write `note_create`: on a valid POST (non-empty `title`), save a `Note`, add the success
+  message `"Saved <title>."` and redirect to the URL named `note-list`. An empty title must re-render the
+  form with status **400** and `{"error": "title required"}` as JSON. CSRF is handled by the test client.
+examples:
+  - input: POST /notes/new/ title=Groceries
+    output: 302 -> /notes/
+hints:
+  - "`messages.success(request, ...)` then `redirect('note-list')`."
+  - Never redirect after an invalid submission.
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.contrib import messages
+    from django.db import models
+    from django.http import HttpResponse, JsonResponse
+    from django.shortcuts import redirect
+    from django.urls import path
+    from django.views.decorators.http import require_POST
+
+
+    class Note(models.Model):
+        title = models.CharField(max_length=100)
+
+
+    @require_POST
+    def note_create(request):
+        title = request.POST.get("title", "").strip()
+        if not title:
+            return JsonResponse({"error": "title required"}, status=400)
+        Note.objects.create(title=title)
+        messages.success(request, f"Saved {title}.")
+        return redirect("note-list")
+
+
+    def note_list(request):
+        shown = [m.message for m in messages.get_messages(request)]
+        return HttpResponse(" | ".join(shown))
+
+
+    urlpatterns = [path("notes/new/", note_create), path("notes/", note_list, name="note-list")]
+    migrate()
+  explanation: |
+    After a successful POST the view redirects (302) instead of rendering a page, so a browser
+    refresh repeats a harmless GET rather than submitting the form again: that's Post/Redirect/Get. The
+    message is stored (in the session) and shown once on the next page, then discarded. An invalid
+    submission must **not** redirect: it answers immediately with an error so the user can fix the input
+    (a 200 re-rendered form for HTML pages, a 400 for APIs). `require_POST` keeps GETs from creating
+    notes.
+complexity:
+  time: O(1)
+  space: O(1)
+verify: |
+  from django.test import Client
+
+  c = Client()
+  r = c.post("/notes/new/", {"title": " Groceries "})
+  assert r.status_code == 302 and r["Location"] == "/notes/"
+  assert c.get("/notes/").content.decode() == "Saved Groceries."
+  assert c.get("/notes/").content.decode() == ""  # shown once
+  bad = c.post("/notes/new/", {"title": "  "})
+  assert bad.status_code == 400 and bad.json() == {"error": "title required"}
+  assert Note.objects.count() == 1 and c.get("/notes/new/").status_code == 405

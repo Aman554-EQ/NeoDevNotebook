@@ -1,0 +1,59 @@
+id: dj-p-005
+title: A contact form with validation
+difficulty: easy
+tags:
+  - forms
+  - validation
+statement: |
+  Write `ContactForm` with `name` (max 50), `email` and `message` (at least 10
+  characters). `clean_email` must lower-case the email, and `clean` must reject messages that
+  contain `http://` with the non-field error `"Links must use https://."`.
+examples:
+  - input: "ContactForm({'name': 'Ada', 'email': 'ADA@X.COM', 'message': 'Hello there!'})"
+    output: valid, email 'ada@x.com'
+hints:
+  - "`clean_<field>()` returns the cleaned value."
+  - "`clean()` raises `forms.ValidationError` for non-field errors."
+solution:
+  language: python
+  code: |
+    from playground import setup
+
+    setup()
+
+    from django import forms
+
+
+    class ContactForm(forms.Form):
+        name = forms.CharField(max_length=50)
+        email = forms.EmailField()
+        message = forms.CharField(min_length=10)
+
+        def clean_email(self):
+            return self.cleaned_data["email"].lower()
+
+        def clean(self):
+            data = super().clean()
+            if "http://" in data.get("message", ""):
+                raise forms.ValidationError("Links must use https://.")
+            return data
+  explanation: |
+    Field validation runs first: `EmailField` checks the address format and `min_length=10`
+    the message length. `clean_email` then receives the already-validated value and returns the
+    normalised one, which ends up in `cleaned_data`. `clean()` runs last for rules that look at the whole
+    form; it uses `data.get(...)` because a field that failed earlier is missing from `cleaned_data`.
+    Raising `ValidationError` there produces a **non-field** error (stored under `__all__`), which templates
+    show above the form with `form.non_field_errors`.
+complexity:
+  time: O(len(message))
+  space: O(1)
+verify: |
+  ok = ContactForm({"name": "Ada", "email": "ADA@Example.COM", "message": "Hello there, Django!"})
+  assert ok.is_valid(), ok.errors
+  assert ok.cleaned_data["email"] == "ada@example.com"
+  short = ContactForm({"name": "Ada", "email": "ada@example.com", "message": "hi"})
+  assert not short.is_valid() and "message" in short.errors
+  link = ContactForm({"name": "Ada", "email": "ada@example.com", "message": "see http://example.com"})
+  assert not link.is_valid() and list(link.non_field_errors()) == ["Links must use https://."]
+  bad = ContactForm({"name": "", "email": "nope", "message": "x" * 20})
+  assert set(bad.errors) == {"name", "email"}

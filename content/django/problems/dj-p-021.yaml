@@ -1,0 +1,97 @@
+id: dj-p-021
+title: A filtered, paginated list endpoint
+difficulty: medium
+tags:
+  - drf
+  - pagination
+  - filtering
+statement: |
+  Build `GET /products/` with a `ReadOnlyModelViewSet` that supports `?category=`,
+  `?min_price=` / `?max_price=`, `?search=` (name), `?ordering=price|-price|name`, and page-number
+  pagination with `?page_size=` capped at 20 (default 5). Results are `{"name", "price"}` objects.
+examples:
+  - input: GET /products/?category=books&ordering=-price
+    output: books, most expensive first
+hints:
+  - A `FilterSet` with `NumberFilter(field_name='price', lookup_expr='gte')`.
+  - A `PageNumberPagination` subclass with `page_size_query_param` and `max_page_size`.
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup(apps=["rest_framework", "django_filters"], REST_FRAMEWORK={
+        "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    })
+
+    import django_filters
+    from django.db import models
+    from rest_framework import filters, pagination, routers, serializers, viewsets
+
+
+    class Product(models.Model):
+        name = models.CharField(max_length=50)
+        category = models.CharField(max_length=20)
+        price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+    class ProductFilter(django_filters.FilterSet):
+        min_price = django_filters.NumberFilter(field_name="price", lookup_expr="gte")
+        max_price = django_filters.NumberFilter(field_name="price", lookup_expr="lte")
+
+        class Meta:
+            model = Product
+            fields = ["category"]
+
+
+    class Pages(pagination.PageNumberPagination):
+        page_size, page_size_query_param, max_page_size = 5, "page_size", 20
+
+
+    class ProductSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = Product
+            fields = ["name", "price"]
+
+
+    class ProductViewSet(viewsets.ReadOnlyModelViewSet):
+        queryset = Product.objects.all()
+        serializer_class = ProductSerializer
+        pagination_class = Pages
+        filter_backends = [django_filters.rest_framework.DjangoFilterBackend, filters.SearchFilter,
+                           filters.OrderingFilter]
+        filterset_class = ProductFilter
+        search_fields = ["name"]
+        ordering_fields = ["price", "name"]
+        ordering = ["name"]
+
+
+    router = routers.DefaultRouter()
+    router.register("products", ProductViewSet)
+    urlpatterns = router.urls
+    migrate()
+  explanation: |
+    Each feature is a whitelist. The `FilterSet` maps `category` to an exact match and the two
+    price parameters to range lookups; `SearchFilter` does a case-insensitive contains on `search_fields`;
+    `OrderingFilter` accepts only `ordering_fields` and falls back to the default `ordering` (which also
+    keeps pagination stable). The pagination class lets clients pick a page size but caps it, so a request
+    for 10,000 rows returns 20. Combining backends in `filter_backends` applies them all, in order, to the
+    same QuerySet.
+complexity:
+  time: O(log n + page) with indexes
+  space: O(page)
+verify: |
+  from decimal import Decimal
+  from django.test import Client
+
+  for i in range(30):
+      Product.objects.create(name=f"item {i:02d}", category="books" if i % 2 else "games", price=Decimal(i))
+  c = Client()
+  first = c.get("/products/").json()
+  assert first["count"] == 30 and len(first["results"]) == 5 and first["results"][0]["name"] == "item 00"
+  assert len(c.get("/products/", {"page_size": 100}).json()["results"]) == 20
+  books = c.get("/products/", {"category": "books", "ordering": "-price", "page_size": 3}).json()
+  assert [r["name"] for r in books["results"]] == ["item 29", "item 27", "item 25"]
+  rng = c.get("/products/", {"min_price": 10, "max_price": 12}).json()
+  assert [r["name"] for r in rng["results"]] == ["item 10", "item 11", "item 12"]
+  assert c.get("/products/", {"search": "ITEM 07"}).json()["count"] == 1

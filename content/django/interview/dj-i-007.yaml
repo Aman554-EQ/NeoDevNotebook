@@ -1,0 +1,28 @@
+id: dj-i-007
+question: When should an API return 400, 401, 403, 404, 409 and 422?
+difficulty: easy
+tags:
+  - http
+  - status-codes
+  - api
+shortAnswer: |
+  400: malformed or invalid input. 401: not authenticated. 403: authenticated but not allowed. 404: resource doesn't exist (or is hidden). 409: conflicts with current state. 422: well-formed but semantically unprocessable (some APIs use it for validation).
+detailedAnswer: |
+  - **400 Bad Request**: the request is malformed or fails validation (DRF's default for serializer
+    errors).
+  - **401 Unauthorized**: no or invalid credentials ("who are you?"), with a `WWW-Authenticate` header.
+  - **403 Forbidden**: credentials are fine but the action isn't allowed ("I know you, and no").
+  - **404 Not Found**: no such resource; also commonly used instead of 403 to avoid revealing that
+    someone else's object exists.
+  - **409 Conflict**: the request conflicts with the resource's state (out of stock, already cancelled,
+    version mismatch).
+  - **422 Unprocessable Entity**: syntactically fine but semantically wrong, e.g. reusing an idempotency
+    key with a different body.
+
+  Consistency matters more than the exact choice: document it and use the same error envelope for all.
+pitfalls:
+  - 200 with an error in the body.
+  - 403 for unauthenticated users with JWT (should be 401).
+followUps:
+  - Why might you return 404 instead of 403?
+  - What does 429 need besides the status?

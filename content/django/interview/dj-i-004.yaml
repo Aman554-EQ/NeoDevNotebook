@@ -1,0 +1,25 @@
+id: dj-i-004
+question: What are migrations, and how do makemigrations and migrate differ?
+difficulty: easy
+tags:
+  - models
+  - migrations
+shortAnswer: |
+  Migrations are versioned, committed files describing schema changes. makemigrations compares your models with the last migration state and writes new files; migrate applies unapplied migrations to a database and records them in django_migrations.
+detailedAnswer: |
+  Changing a model doesn't change the database. `makemigrations` detects the difference between
+  your models and the state described by existing migrations, and writes a new numbered file with
+  operations such as `AddField` or `CreateModel`, plus dependencies on earlier migrations. You commit it
+  with the model change.
+
+  `migrate` runs, in dependency order, every migration the target database hasn't applied yet (each in a
+  transaction on PostgreSQL) and records it in the `django_migrations` table, so running it twice does
+  nothing. `sqlmigrate app 0002` prints the SQL, `showmigrations` lists what's applied, and `RunPython`
+  operations change data rather than schema. CI should run `makemigrations --check` to catch forgotten
+  migrations.
+pitfalls:
+  - Editing migrations that others have already applied.
+  - Importing models directly inside data migrations instead of apps.get_model().
+followUps:
+  - "Two branches both added 0005_...: what happens and how do you fix it?"
+  - How do you add a NOT NULL column to a huge table safely?

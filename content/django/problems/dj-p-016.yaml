@@ -1,0 +1,61 @@
+id: dj-p-016
+title: Chainable QuerySet methods
+difficulty: simple
+tags:
+  - orm
+  - managers
+  - querysets
+statement: |
+  Give `Article` (fields `title`, `status` = "draft"/"published", `views`) a custom QuerySet
+  with `published()` and `popular(min_views=100)`, usable in any order and from `Article.objects`:
+  `Article.objects.published().popular()` and `Article.objects.popular(50).published()` must both work.
+examples:
+  - input: Article.objects.published().popular()
+    output: articles published with >= 100 views
+hints:
+  - Subclass `models.QuerySet`.
+  - "`objects = ArticleQuerySet.as_manager()`."
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+
+
+    class ArticleQuerySet(models.QuerySet):
+        def published(self):
+            return self.filter(status="published")
+
+        def popular(self, min_views=100):
+            return self.filter(views__gte=min_views)
+
+
+    class Article(models.Model):
+        title = models.CharField(max_length=100)
+        status = models.CharField(max_length=10, default="draft")
+        views = models.PositiveIntegerField(default=0)
+
+        objects = ArticleQuerySet.as_manager()
+
+
+    migrate()
+  explanation: |
+    Methods defined on a custom `QuerySet` return QuerySets, so they chain with each other and
+    with built-ins (`.order_by()`, `.count()`) in any order. `as_manager()` builds a manager that exposes the
+    same methods on `Article.objects`. Defining them only on a `Manager` would make `objects.published()`
+    work but `objects.popular().published()` fail, because the QuerySet returned by the first call wouldn't
+    have the method. Named query methods keep filters consistent across views, the API and the admin.
+complexity:
+  time: O(1) to build; one query when evaluated
+  space: O(1)
+verify: |
+  for t, s, v in [("a", "published", 150), ("b", "published", 20), ("c", "draft", 500), ("d", "published", 60)]:
+      Article.objects.create(title=t, status=s, views=v)
+  names = lambda qs: sorted(qs.values_list("title", flat=True))
+  assert names(Article.objects.published().popular()) == ["a"]
+  assert names(Article.objects.popular(50).published()) == ["a", "d"]
+  assert names(Article.objects.popular()) == ["a", "c"]
+  assert Article.objects.published().count() == 3

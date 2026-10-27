@@ -1,0 +1,29 @@
+id: dj-i-020
+question: "Sessions or JWTs for authentication: how do you choose?"
+difficulty: medium
+tags:
+  - auth
+  - jwt
+  - sessions
+shortAnswer: |
+  Sessions: server-side state behind an HttpOnly cookie; simple, instantly revocable, need CSRF protection; ideal for same-site web apps. JWTs: signed, self-contained tokens in a header; no lookup per request, good for mobile/third-party clients, but revocation needs short lifetimes, refresh tokens and blacklists.
+detailedAnswer: |
+  **Sessions** store data server-side (database, cache) and give the browser a random id. Logout or
+  banning a user is instant (delete the session). Cookies are sent automatically, so you need CSRF
+  protection, `HttpOnly`, `Secure` and `SameSite`. Best for server-rendered sites and SPAs on the same
+  domain.
+
+  **JWTs** carry signed claims (user id, expiry). The server verifies the signature without a lookup,
+  which suits mobile apps, other services and clients on other domains. Downsides: they can't be revoked
+  before expiry without extra state, so keep access tokens short (minutes), use refresh tokens with
+  rotation and blacklisting, and don't put secrets in the payload (it's only base64). Storing them in
+  `localStorage` exposes them to XSS.
+
+  Many products use both: sessions for the website, JWTs for the API (as this module's Auth starter and
+  ShopLite do).
+pitfalls:
+  - Long-lived JWT access tokens.
+  - Claiming JWTs are 'more secure' by default.
+followUps:
+  - How do you log a user out everywhere with JWTs?
+  - Where should a SPA store tokens?

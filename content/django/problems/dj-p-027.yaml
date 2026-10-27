@@ -1,0 +1,67 @@
+id: dj-p-027
+title: Top seller per category with a window function
+difficulty: hard
+tags:
+  - orm
+  - window-functions
+  - reporting
+statement: |
+  Write `top_sellers()` returning `[(category, product, units)]`: the best-selling product
+  of each category by total units, ties broken by product name, categories in alphabetical order, using
+  the ORM (a window function), not Python grouping. Products with no sales don't count.
+examples:
+  - input: top_sellers()
+    output: "[('books', 'Dune', 6), ('games', 'Chess', 3)]"
+hints:
+  - Annotate units with `Sum`, then `Window(RowNumber(), partition_by=..., order_by=[...])`.
+  - Filter the window result in Python, or with `QuerySet.filter()` on the window alias (Django 4.2+).
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+    from django.db.models import F, Sum, Window
+    from django.db.models.functions import RowNumber
+
+
+    class Product(models.Model):
+        name = models.CharField(max_length=50)
+        category = models.CharField(max_length=20)
+
+
+    class Sale(models.Model):
+        product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="sales")
+        units = models.PositiveIntegerField()
+
+
+    def top_sellers():
+        ranked = (Product.objects.annotate(total=Sum("sales__units")).filter(total__gt=0)
+                  .annotate(pos=Window(RowNumber(), partition_by=F("category"),
+                                       order_by=[F("total").desc(), F("name").asc()]))
+                  .filter(pos=1)
+                  .order_by("category"))
+        return [(p.category, p.name, p.total) for p in ranked]
+
+
+    migrate()
+  explanation: |
+    `Sum("sales__units")` groups sales per product; `filter(total__gt=0)` (a HAVING) drops
+    products that never sold. `Window(RowNumber(), partition_by=category, order_by=[total desc, name])`
+    numbers products within each category from best to worst without collapsing the rows, which plain
+    `GROUP BY` can't do. Since Django 4.2 you can filter on a window alias (`filter(pos=1)`); Django wraps
+    the query in a subquery for you, because SQL doesn't allow window functions in `WHERE`. The name in
+    the ordering makes ties deterministic.
+complexity:
+  time: O(n log n) in the database
+  space: O(categories)
+verify: |
+  data = {("books", "Dune"): [2, 4], ("books", "Emma"): [5], ("books", "Persuasion"): [6],
+          ("games", "Chess"): [3], ("games", "Go"): [1, 2], ("music", "Vinyl"): []}
+  for (cat, name), sales in data.items():
+      p = Product.objects.create(name=name, category=cat)
+      for u in sales:
+          Sale.objects.create(product=p, units=u)
+  assert top_sellers() == [("books", "Dune", 6), ("games", "Chess", 3)], top_sellers()

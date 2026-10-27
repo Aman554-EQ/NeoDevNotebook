@@ -1,0 +1,59 @@
+id: dj-i-009
+question: What is the N+1 query problem and how do you fix it in Django?
+difficulty: simple
+tags:
+  - orm
+  - n-plus-one
+  - performance
+shortAnswer: |
+  Loading N objects with one query, then one more query per object when accessing a relation. Fix with select_related (ForeignKey/OneToOne, a JOIN) or prefetch_related (many-to-many and reverse FK, one extra query), and verify with assertNumQueries.
+detailedAnswer: |
+  `for b in Book.objects.all(): print(b.author.name)` runs 1 query for books and 1 per book for its
+  author: N+1. It hides in templates (`{{ order.customer.name }}`) and serializers
+  (`source="author.name"`, nested serializers).
+
+  Fixes:
+
+  - `select_related("author")` for forward ForeignKey/OneToOne: a JOIN, still one query.
+  - `prefetch_related("tags")` for many-to-many and reverse relations: one extra query
+    (`WHERE id IN (...)`), joined in Python.
+  - `Prefetch("books", queryset=..., to_attr=...)` for filtered/ordered prefetches.
+  - `annotate(Count(...))` when you only need numbers.
+
+  Detect it with the Debug Toolbar or logging, and **prevent regressions** with `assertNumQueries` /
+  `django_assert_num_queries` tests on list endpoints.
+code:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import connection, models
+    from django.test.utils import CaptureQueriesContext
+
+
+    class Author(models.Model):
+        name = models.CharField(max_length=50)
+
+
+    class Book(models.Model):
+        author = models.ForeignKey(Author, on_delete=models.CASCADE)
+
+
+    migrate()
+    for i in range(5):
+        Book.objects.create(author=Author.objects.create(name=f"a{i}"))
+    counts = []
+    for qs in (Book.objects.all(), Book.objects.select_related("author")):
+        with CaptureQueriesContext(connection) as ctx:
+            [b.author.name for b in qs]
+        counts.append(len(ctx))
+    print(counts)
+pitfalls:
+  - select_related on many-to-many (doesn't work).
+  - Filtering a prefetched relation in a loop.
+followUps:
+  - How do you find N+1 in production?
+  - When is prefetch_related better than a JOIN?
+verify: assert counts == [6, 1]

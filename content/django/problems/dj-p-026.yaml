@@ -1,0 +1,70 @@
+id: dj-p-026
+title: Race-free stock reservation
+difficulty: hard
+tags:
+  - orm
+  - concurrency
+  - f-expressions
+statement: |
+  Write `reserve(product_id, qty) -> bool` that decrements `Product.stock` by `qty` only if
+  enough stock remains, **in a single UPDATE statement** (no read-then-write), returning whether it
+  succeeded. Stock must never go negative, even if many requests call it at once.
+examples:
+  - input: stock=3; reserve(1, 2); reserve(1, 2)
+    output: True, False (stock 1)
+hints:
+  - "`filter(pk=..., stock__gte=qty).update(stock=F('stock') - qty)`"
+  - "`update()` returns the number of rows changed."
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+    from django.db.models import F
+
+
+    class Product(models.Model):
+        name = models.CharField(max_length=50)
+        stock = models.PositiveIntegerField()
+
+
+    def reserve(product_id, qty):
+        if qty < 1:
+            raise ValueError("qty must be at least 1")
+        changed = Product.objects.filter(pk=product_id, stock__gte=qty).update(stock=F("stock") - qty)
+        return changed == 1
+
+
+    migrate()
+  explanation: |
+    The condition and the decrement are one statement:
+    `UPDATE product SET stock = stock - 2 WHERE id = 1 AND stock >= 2`. The database evaluates the `WHERE`
+    and the `SET` atomically for that row, so two concurrent calls can't both see "3 left" and both
+    subtract 2; the second one's `WHERE` no longer matches and it updates zero rows. The return value of
+    `update()` (rows changed) tells you whether the reservation happened. A read-modify-write version
+    (`p = get(); if p.stock >= qty: p.stock -= qty; p.save()`) has a gap between the read and the write
+    where another request can slip in. For multi-row rules, use `select_for_update()` in a transaction
+    instead.
+complexity:
+  time: O(1) (one indexed UPDATE)
+  space: O(1)
+verify: |
+  from django.db import connection
+  from django.test.utils import CaptureQueriesContext
+
+  p = Product.objects.create(name="Dune", stock=3)
+  with CaptureQueriesContext(connection) as ctx:
+      assert reserve(p.pk, 2) is True
+  assert len(ctx) == 1 and ctx.captured_queries[0]["sql"].startswith("UPDATE")
+  assert reserve(p.pk, 2) is False
+  assert reserve(p.pk, 1) is True and reserve(p.pk, 1) is False
+  assert Product.objects.get(pk=p.pk).stock == 0
+  assert reserve(999, 1) is False
+  try:
+      reserve(p.pk, 0)
+      raise AssertionError("qty 0 accepted")
+  except ValueError:
+      pass

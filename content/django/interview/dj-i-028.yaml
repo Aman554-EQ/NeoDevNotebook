@@ -1,0 +1,30 @@
+id: dj-i-028
+question: What security issues would you look for in a Django/DRF code review?
+difficulty: hard
+tags:
+  - security
+  - access-control
+shortAnswer: |
+  Broken access control (unscoped querysets, missing object checks, IDOR), mass assignment (fields='__all__'), raw SQL with string formatting, |safe/mark_safe on user data, csrf_exempt on session views, DEBUG/secret/ALLOWED_HOSTS settings, secrets in code or logs, missing throttling on auth, unsafe uploads, and outdated dependencies.
+detailedAnswer: |
+  A checklist that catches most real bugs:
+
+  - **Access control**: every queryset scoped to the user where needed; object permissions on detail
+    actions; tests per role. IDOR is the most common API vulnerability.
+  - **Input**: serializers/forms with explicit fields and read-only server fields; no
+    `fields = "__all__"`; validation on every write path.
+  - **Injection**: ORM or `%s` parameters, never f-strings in `raw()`/`cursor.execute()`; no
+    `extra()` with user input.
+  - **Output**: no `|safe` on user content; `json_script` for data in `<script>`.
+  - **CSRF**: no `csrf_exempt` on cookie-authenticated views.
+  - **Configuration**: `DEBUG=False`, secret key and hosts from the environment, HTTPS/HSTS/secure
+    cookies (`check --deploy`), exact CORS origins.
+  - **Auth**: throttled login and signup, generic error messages, short tokens, MFA for staff.
+  - **Data**: secrets and personal data out of logs, uploads limited and stored outside the code.
+  - **Dependencies**: supported Django/DRF versions, `pip-audit` in CI.
+pitfalls:
+  - Trusting the front end to hide buttons.
+  - Reviewing only the diff, not the queryset it calls.
+followUps:
+  - How would you test for IDOR automatically?
+  - What does check --deploy not cover?

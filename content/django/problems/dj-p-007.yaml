@@ -1,0 +1,63 @@
+id: dj-p-007
+title: Cheap books, cheapest first
+difficulty: easy
+tags:
+  - orm
+  - queries
+statement: |
+  Write `cheap_titles(max_price)` returning a **list of titles** of active books priced
+  at most `max_price`, cheapest first, ties broken by title. Use one query and don't load whole model
+  instances.
+examples:
+  - input: cheap_titles(10)
+    output: "['Emma', 'Persuasion']"
+hints:
+  - "`filter(price__lte=..., active=True)`"
+  - "`values_list('title', flat=True)` returns plain values."
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+
+
+    class Book(models.Model):
+        title = models.CharField(max_length=100)
+        price = models.DecimalField(max_digits=6, decimal_places=2)
+        active = models.BooleanField(default=True)
+
+
+    def cheap_titles(max_price):
+        return list(
+            Book.objects.filter(price__lte=max_price, active=True)
+            .order_by("price", "title")
+            .values_list("title", flat=True)
+        )
+
+
+    migrate()
+  explanation: |
+    `price__lte` becomes `WHERE price <= %s`, `active=True` adds an `AND`, and
+    `order_by("price", "title")` sorts in the database with a deterministic tie-breaker. `values_list("title",
+    flat=True)` makes Django select only the `title` column and return strings instead of `Book` objects,
+    which is cheaper when you only need one field. Wrapping it in `list()` evaluates the QuerySet once, so
+    callers get a plain list.
+complexity:
+  time: O(n log n) in the database (or O(log n + k) with an index on price)
+  space: O(k) results
+verify: |
+  from decimal import Decimal
+  from django.db import connection
+  from django.test.utils import CaptureQueriesContext
+
+  for t, p, a in [("Dune", "12.50", True), ("Emma", "8.00", True), ("Persuasion", "8.00", True),
+                  ("Old", "1.00", False), ("Ulysses", "10.00", True)]:
+      Book.objects.create(title=t, price=Decimal(p), active=a)
+  with CaptureQueriesContext(connection) as ctx:
+      result = cheap_titles(10)
+  assert result == ["Emma", "Persuasion", "Ulysses"], result
+  assert len(ctx) == 1 and '"shop_book"."price"' not in ctx.captured_queries[0]["sql"].split("FROM")[0]
+  assert cheap_titles(5) == []

@@ -1,0 +1,31 @@
+id: dj-i-011
+question: Why should every Django project start with a custom user model?
+difficulty: simple
+tags:
+  - auth
+  - users
+shortAnswer: |
+  Changing AUTH_USER_MODEL after the first migration is very hard (foreign keys and migrations across apps reference the user table). A custom model from day one (even an empty AbstractUser subclass) lets you add fields or switch to email login later.
+detailedAnswer: |
+  The user table is referenced by many foreign keys and by the migrations of `auth`, `admin` and
+  your own apps. Swapping it after the first `migrate` means rewriting migration history and data. So the
+  Django docs recommend starting every project with:
+
+  ```python norun
+  class User(AbstractUser):
+      pass
+  ```
+
+  and `AUTH_USER_MODEL = "accounts.User"`. Later you can add fields (a display name, a phone number) or
+  change login to email (`USERNAME_FIELD = "email"`, `username = None`, a custom manager), as this
+  module's Auth starter does.
+
+  Always reference it indirectly: `settings.AUTH_USER_MODEL` in `ForeignKey`s and `get_user_model()` in
+  code, so reusable apps work with any user model. Use a separate profile model only for optional data
+  that isn't needed on every request.
+pitfalls:
+  - Importing django.contrib.auth.models.User directly in apps.
+  - Adding a profile OneToOne for data that belongs on the user.
+followUps:
+  - AbstractUser vs AbstractBaseUser?
+  - How would you migrate an existing project to a custom user?

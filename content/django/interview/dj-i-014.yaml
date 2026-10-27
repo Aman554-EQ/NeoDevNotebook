@@ -1,0 +1,25 @@
+id: dj-i-014
+question: What are ViewSets and routers in DRF, and when would you not use them?
+difficulty: simple
+tags:
+  - drf
+  - viewsets
+  - routers
+shortAnswer: |
+  A ViewSet groups a resource's actions (list, create, retrieve, update, partial_update, destroy) in one class; a router generates the URLs. Skip them for endpoints that aren't resource-shaped (webhooks, login, reports), where an APIView or function is clearer.
+detailedAnswer: |
+  `ModelViewSet` implements six actions using `get_queryset()`, `get_serializer_class()` and the
+  `perform_*` hooks; a `DefaultRouter` maps them to `/books/` and `/books/{pk}/` and names the routes
+  (`book-list`, `book-detail`). Extra routes come from `@action(detail=True|False)`.
+  `ReadOnlyModelViewSet` or `GenericViewSet` + mixins give subsets.
+
+  They shine for CRUD resources: consistent URLs, pagination, filtering and permissions with little code.
+  They're a poor fit for RPC-like or one-off endpoints: a payment webhook, a login, a CSV report, a
+  multi-step workflow. There, an `APIView` or `@api_view` function states exactly what happens, without
+  overriding many hooks.
+pitfalls:
+  - Class-level queryset = Model.objects.all() for per-user data.
+  - Forcing non-CRUD flows into ViewSet hooks.
+followUps:
+  - How do you give list and detail different serializers?
+  - What does basename do on a router?

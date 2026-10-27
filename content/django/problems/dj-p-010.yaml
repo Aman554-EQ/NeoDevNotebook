@@ -1,0 +1,61 @@
+id: dj-p-010
+title: Prolific authors
+difficulty: simple
+tags:
+  - orm
+  - annotate
+  - having
+statement: |
+  Write `prolific(min_books)` returning `[(author name, book count)]` for authors with at
+  least `min_books` **published** books, most books first, then by name.
+examples:
+  - input: prolific(2)
+    output: "[('Austen', 3), ('Le Guin', 2)]"
+hints:
+  - "`Count('books', filter=Q(books__published=True))`"
+  - Filtering on the annotation becomes HAVING.
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+    from django.db.models import Count, Q
+
+
+    class Author(models.Model):
+        name = models.CharField(max_length=50)
+
+
+    class Book(models.Model):
+        author = models.ForeignKey(Author, on_delete=models.CASCADE, related_name="books")
+        published = models.BooleanField(default=True)
+
+
+    def prolific(min_books):
+        rows = (Author.objects.annotate(n=Count("books", filter=Q(books__published=True)))
+                .filter(n__gte=min_books).order_by("-n", "name"))
+        return [(a.name, a.n) for a in rows]
+
+
+    migrate()
+  explanation: |
+    `Count("books", filter=Q(...))` is a conditional aggregate: it counts only published
+    books per author. Filtering on the annotation (`n__gte`) runs **after** grouping, so Django emits it
+    as `HAVING`. Ordering by `-n` then `name` makes ties deterministic. Writing
+    `.filter(books__published=True).annotate(Count(...))` would also work, but it drops authors with zero
+    published books before counting, which matters if you ever want to show them.
+complexity:
+  time: O(n) books
+  space: O(authors)
+verify: |
+  for name, flags in [("Austen", [True, True, True, False]), ("Le Guin", [True, True]),
+                      ("Herbert", [True, False, False]), ("Nobody", [])]:
+      a = Author.objects.create(name=name)
+      for f in flags:
+          Book.objects.create(author=a, published=f)
+  assert prolific(2) == [("Austen", 3), ("Le Guin", 2)], prolific(2)
+  assert prolific(1)[-1] == ("Herbert", 1)
+  assert prolific(4) == []

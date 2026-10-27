@@ -1,0 +1,69 @@
+id: dj-i-024
+question: How would you make a POST endpoint (like creating an order or a payment) idempotent?
+difficulty: hard
+tags:
+  - api-design
+  - idempotency
+shortAnswer: |
+  Require a client-generated Idempotency-Key per attempt; store (user, key) with a fingerprint of the body and the response, in the same transaction as the work, behind a unique constraint. Replay the stored response for repeats, return 422 for the same key with a different body, expire keys after a while.
+detailedAnswer: |
+  Clients retry after timeouts without knowing whether the first attempt succeeded. Design:
+
+  1. The client sends `Idempotency-Key: <uuid>` (new per user action, reused on its retries).
+  2. The server looks up (user, key). If found and the body's fingerprint matches, return the **stored
+     status and body** (optionally `Idempotent-Replayed: true`); if the fingerprint differs, `422`.
+  3. Otherwise do the work and store key, fingerprint and response **in the same transaction**, so there's
+     never work without a record.
+  4. A **unique constraint** on (user, key) resolves concurrent retries: the loser gets `IntegrityError`,
+     its transaction rolls back, and it replays the winner's response.
+  5. Decide what to store: usually only successful (and permanent-failure) responses, so transient errors
+     can be retried. Expire records (e.g. 24 h).
+
+  Downstream calls (payment providers) need idempotency too: pass the key along. ShopLite's
+  `orders/idempotency.py` implements this design.
+code:
+  language: python
+  code: |
+    import hashlib
+    import json
+
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import IntegrityError, models, transaction
+
+
+    class Order(models.Model):
+        item = models.CharField(max_length=20)
+
+
+    class Key(models.Model):
+        key = models.CharField(max_length=50, unique=True)
+        digest = models.CharField(max_length=64)
+        order_id = models.IntegerField()
+
+
+    def create_order(key, body):
+        digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+        seen = Key.objects.filter(key=key).first()
+        if seen:
+            return (seen.order_id, "replayed") if seen.digest == digest else (None, "422")
+        try:
+            with transaction.atomic():
+                order = Order.objects.create(**body)
+                Key.objects.create(key=key, digest=digest, order_id=order.pk)
+        except IntegrityError:
+            return create_order(key, body)
+        return order.pk, "created"
+
+
+    migrate()
+    print(create_order("k1", {"item": "Dune"}), create_order("k1", {"item": "Dune"}), create_order("k1", {"item": "Emma"}))
+pitfalls:
+  - Storing the key outside the transaction.
+  - Global keys instead of per-user keys.
+followUps:
+  - What if the first request is still running when the retry arrives?
+  - How long do you keep keys?
+verify: assert Order.objects.count() == 1

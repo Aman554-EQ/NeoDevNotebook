@@ -1,0 +1,95 @@
+id: dj-p-030
+title: 🐞 Anyone can read anyone's invoices
+difficulty: hard
+tags:
+  - debugging
+  - security
+  - drf
+  - permissions
+statement: |
+  A security review found that any logged-in customer can list every invoice and open any
+  invoice by id, although an object permission is in place. Fix the ViewSet so customers only ever see
+  their own invoices (others' ids give 404), while staff see all.
+
+  ```python
+  class InvoiceViewSet(viewsets.ReadOnlyModelViewSet):
+      queryset = Invoice.objects.all()
+      serializer_class = InvoiceSerializer
+      permission_classes = [IsAuthenticated, IsOwner]
+  ```
+examples:
+  - input: bob GET /invoices/
+    output: only bob's invoices
+  - input: bob GET /invoices/1/ (ada's)
+    output: "404"
+hints:
+  - Object permissions are never checked for list views.
+  - Override `get_queryset()` using `self.request.user`.
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup(apps=["rest_framework"], REST_FRAMEWORK={
+        "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
+    })
+
+    from django.contrib.auth.models import User
+    from django.db import models
+    from rest_framework import permissions, routers, serializers, viewsets
+
+
+    class Invoice(models.Model):
+        owner = models.ForeignKey(User, on_delete=models.CASCADE)
+        amount = models.IntegerField()
+
+
+    class IsOwner(permissions.BasePermission):
+        def has_object_permission(self, request, view, obj):
+            return request.user.is_staff or obj.owner_id == request.user.id
+
+
+    class InvoiceSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = Invoice
+            fields = ["id", "amount"]
+
+
+    class InvoiceViewSet(viewsets.ReadOnlyModelViewSet):
+        serializer_class = InvoiceSerializer
+        permission_classes = [permissions.IsAuthenticated, IsOwner]
+
+        def get_queryset(self):  # the fix: scope every action to the caller
+            invoices = Invoice.objects.order_by("id")
+            return invoices if self.request.user.is_staff else invoices.filter(owner=self.request.user)
+
+
+    router = routers.DefaultRouter()
+    router.register("invoices", InvoiceViewSet, basename="invoice")
+    urlpatterns = router.urls
+    migrate()
+  explanation: |
+    Two problems hid behind the object permission. `has_object_permission` only runs inside
+    `get_object()`, so the **list** endpoint returned every invoice. And the detail endpoint returned 403,
+    which confirms the invoice exists. Scoping `get_queryset()` to the current user fixes both: the list
+    contains only the caller's invoices, and someone else's id isn't in the queryset, so `get_object()`
+    raises 404. Staff get the unscoped queryset. Keep the object permission as a second layer, and add a
+    test per role: this bug (an IDOR) is one of the most common real-world API vulnerabilities.
+complexity:
+  time: O(k) for k of the user's invoices
+  space: O(k)
+verify: |
+  from django.test import Client
+
+  ada, bob = User.objects.create_user("ada"), User.objects.create_user("bob")
+  staff = User.objects.create_user("sam", is_staff=True)
+  Invoice.objects.create(owner=ada, amount=120)
+  Invoice.objects.create(owner=bob, amount=30)
+  c = Client()
+  c.force_login(bob)
+  assert c.get("/invoices/").json() == [{"id": 2, "amount": 30}]
+  assert c.get("/invoices/1/").status_code == 404
+  assert c.get("/invoices/2/").status_code == 200
+  c.force_login(staff)
+  assert len(c.get("/invoices/").json()) == 2 and c.get("/invoices/1/").status_code == 200
+  assert Client().get("/invoices/").status_code == 403

@@ -1,0 +1,63 @@
+id: dj-p-014
+title: Paginate with a capped page size
+difficulty: simple
+tags:
+  - pagination
+  - orm
+statement: |
+  Write `paginate(queryset, page, size)` returning
+  `{"count", "page", "pages", "results"}` where `results` is a list of the items' `title`s. Pages start
+  at 1. `size` is capped at 50; a page beyond the end returns an empty `results` list (not an error);
+  an invalid page (`"abc"`, `0`) is treated as 1. Use Django's `Paginator`.
+examples:
+  - input: paginate(Book.objects.order_by('id'), 2, 3)
+    output: "{'count': 7, 'page': 2, 'pages': 3, 'results': [...3 titles]}"
+hints:
+  - "`Paginator(qs, min(size, 50))`"
+  - Catch `PageNotAnInteger` / `EmptyPage`, or validate the number yourself.
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.core.paginator import Paginator
+    from django.db import models
+
+    MAX_PAGE_SIZE = 50
+
+
+    class Book(models.Model):
+        title = models.CharField(max_length=50)
+
+
+    def paginate(queryset, page, size):
+        paginator = Paginator(queryset, max(1, min(int(size), MAX_PAGE_SIZE)))
+        try:
+            number = int(page)
+        except (TypeError, ValueError):
+            number = 1
+        number = max(number, 1)
+        results = [] if number > paginator.num_pages else [b.title for b in paginator.page(number)]
+        return {"count": paginator.count, "page": number, "pages": paginator.num_pages, "results": results}
+
+
+    migrate()
+  explanation: |
+    `Paginator` turns the QuerySet into `LIMIT`/`OFFSET` queries plus one `COUNT`, so only one
+    page of rows is loaded. Capping the size protects the database from `?size=1000000`. Invalid input is
+    normalised instead of crashing: a non-numeric or non-positive page becomes 1, and a page past the end
+    returns an empty list (some APIs return 404 instead; both are fine if documented). The QuerySet must be
+    **ordered**, or pages can overlap between requests.
+complexity:
+  time: O(size) rows per page + a COUNT
+  space: O(size)
+verify: |
+  Book.objects.bulk_create(Book(title=f"b{i}") for i in range(1, 8))
+  qs = Book.objects.order_by("id")
+  assert paginate(qs, 2, 3) == {"count": 7, "page": 2, "pages": 3, "results": ["b4", "b5", "b6"]}
+  assert paginate(qs, 3, 3)["results"] == ["b7"]
+  assert paginate(qs, 9, 3)["results"] == []
+  assert paginate(qs, "abc", 3)["page"] == 1 and paginate(qs, 0, 3)["page"] == 1
+  assert len(paginate(qs, 1, 1000)["results"]) == 7 and paginate(qs, 1, 1000)["pages"] == 1

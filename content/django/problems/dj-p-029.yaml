@@ -1,0 +1,63 @@
+id: dj-p-029
+title: Optimistic locking with a version number
+difficulty: hard
+tags:
+  - concurrency
+  - orm
+  - api-design
+statement: |
+  `Document(title, body, version)`. Write `save_edit(doc_id, new_body, seen_version) -> bool`
+  that saves the edit and increments `version` **only if** the document is still at `seen_version`, in one
+  statement; otherwise it changes nothing and returns `False` (the API would answer 409 or 412, "someone
+  else edited it").
+examples:
+  - input: two editors load version 1; both save
+    output: first True, second False
+hints:
+  - "`filter(pk=..., version=seen).update(body=..., version=F('version') + 1)`"
+  - Check the number of updated rows.
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+    from django.db.models import F
+
+
+    class Document(models.Model):
+        title = models.CharField(max_length=50)
+        body = models.TextField()
+        version = models.PositiveIntegerField(default=1)
+
+
+    def save_edit(doc_id, new_body, seen_version):
+        updated = Document.objects.filter(pk=doc_id, version=seen_version).update(
+            body=new_body, version=F("version") + 1
+        )
+        return updated == 1
+
+
+    migrate()
+  explanation: |
+    Each editor remembers the version they loaded. The save is a single conditional update:
+    `UPDATE ... SET body = ..., version = version + 1 WHERE id = ... AND version = <seen>`. The first save
+    matches and bumps the version; the second editor's `WHERE version = 1` no longer matches, so zero rows
+    change and the function returns `False` instead of silently overwriting the first edit (a **lost
+    update**). No locks are held while people type, which is why it's called optimistic. ETags with
+    `If-Match` (lesson 21) expose the same idea over HTTP.
+complexity:
+  time: O(1)
+  space: O(1)
+verify: |
+  doc = Document.objects.create(title="FAQ", body="v1")
+  ada_sees = bob_sees = Document.objects.get(pk=doc.pk).version
+  assert save_edit(doc.pk, "edited by ada", ada_sees) is True
+  assert save_edit(doc.pk, "edited by bob", bob_sees) is False
+  fresh = Document.objects.get(pk=doc.pk)
+  assert (fresh.body, fresh.version) == ("edited by ada", 2)
+  assert save_edit(doc.pk, "bob merged", fresh.version) is True
+  assert Document.objects.get(pk=doc.pk).version == 3
+  assert save_edit(12345, "x", 1) is False
