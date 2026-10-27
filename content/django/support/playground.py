@@ -33,11 +33,13 @@ class PlaygroundApp(AppConfig):
         self.models_module = self.module
 
 
-def setup(*, apps=(), templates=None, middleware=None, **overrides):
+def setup(*, apps=(), templates=None, middleware=None, script_tags=False, **overrides):
     """Configure Django in memory: an SQLite database, the script's urlpatterns, optional templates.
 
     apps:       extra INSTALLED_APPS, e.g. ["rest_framework"]
     templates:  {"name.html": "template source"} served by an in-memory template loader
+    script_tags: True if the script defines custom template filters/tags
+                (register = template.Library()); they become available in every template
     middleware: replaces the default MIDDLEWARE list
     overrides:  any other setting, e.g. DEBUG=False or REST_FRAMEWORK={...}
     """
@@ -71,6 +73,7 @@ def setup(*, apps=(), templates=None, middleware=None, **overrides):
                 "BACKEND": "django.template.backends.django.DjangoTemplates",
                 "OPTIONS": {
                     "loaders": [("django.template.loaders.locmem.Loader", templates or {})],
+                    "builtins": ["__main__"] if script_tags else [],
                     "context_processors": [
                         "django.template.context_processors.request",
                         "django.contrib.auth.context_processors.auth",

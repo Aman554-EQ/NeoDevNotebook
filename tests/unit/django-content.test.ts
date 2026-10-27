@@ -79,5 +79,8 @@ describe("django module content", () => {
     const verified = fs.readFileSync(path.join("content", "django", "support", "playground.py"))
     const download = fs.readFileSync(path.join("public", "downloads", "django", "playground.py"))
     expect(download.equals(verified)).toBe(true)
+    // Lesson 7 prints the whole file; it must be the same code.
+    const lesson = django.lessons.find((l) => l.slug === "setup-commands-and-settings")!
+    expect(lesson.body).toContain(verified.toString("utf8").trimEnd())
   })
 })

@@ -1,0 +1,481 @@
+---
+title: Templates & static files
+summary: Django's template language from the ground up. Variables and lookups, filters and tags, template inheritance and includes, autoescaping and XSS, custom filters and tags, context processors and messages, and how static files (CSS, JS, images) are served in development and production.
+estimatedMinutes: 22
+difficulty: easy
+section: Django Core
+objectives:
+  - Render templates with variables, dot lookups, filters and tags
+  - Share one layout across pages with extends/block and reuse fragments with include
+  - Explain autoescaping and when (rarely) to mark content safe
+  - Write a custom filter and a simple tag
+  - Reference static files correctly and explain collectstatic
+prerequisites:
+  - URLs & views
+tags: [django, templates, dtl, static-files, xss]
+---
+
+## Intuition: a form letter with blanks
+
+A template is a **form letter**: fixed text with blanks (`{{ name }}`) and a few simple instructions
+(`{% for %}`, `{% if %}`). The view fills in the blanks with a **context** dictionary. The template
+language is deliberately limited: it can display data and make small decisions, but it can't run
+arbitrary Python. That keeps business logic in views and models where it can be tested.
+
+## See it
+
+<MvtFlowViz />
+
+## The precise rules
+
+**Variables** `{{ order.customer.name }}`: the dot tries, in order, a dictionary key, an attribute
+or method (called without arguments), then a list index (`{{ items.0 }}`). Missing values render as
+an empty string instead of crashing.
+
+**Filters** transform a value: `{{ name|title }}`, `{{ created|date:"j M Y" }}`,
+`{{ total|floatformat:2 }}`, `{{ bio|truncatewords:20 }}`, `{{ tags|join:", " }}`,
+`{{ count }} item{{ count|pluralize }}`, `{{ note|default:"(none)" }}`, `{{ text|linebreaksbr }}`.
+
+**Tags** do logic and structure: `{% if %}{% elif %}{% else %}{% endif %}`,
+`{% for x in items %}…{% empty %}…{% endfor %}` (with `forloop.counter`, `forloop.first`,
+`forloop.last`), `{% url "name" arg %}`, `{% with total=order.total %}`, `{% csrf_token %}`,
+`{% include "partial.html" %}`, `{% load static %}`, `{% comment %}`.
+
+**Inheritance:** a base template defines named `{% block %}`s; a child starts with
+`{% extends "base.html" %}` and overrides only the blocks it needs. `{{ block.super }}` keeps the
+parent's content.
+
+**Autoescaping:** every `{{ variable }}` is HTML-escaped (`<` → `&lt;`, `"` → `&quot;`...), so data
+from users can't inject scripts (XSS). `|safe`, `mark_safe()` and `{% autoescape off %}` switch
+it off: use them only for HTML **you** produced, never for user input. `format_html()` builds
+small HTML snippets safely in Python.
+
+**Where templates live:** `<app>/templates/<app>/page.html` (with `APP_DIRS: True`), referenced as
+`"<app>/page.html"`. The app-name folder prevents two apps' `list.html` from clashing.
+
+**Context processors** add variables to every template rendered with a request: `request`, `user`,
+`perms`, `messages`. The **messages framework** shows one-time notices ("Saved!") after a redirect.
+
+**Static files** (your CSS, JS, images) live in `<app>/static/<app>/...`. In templates:
+`{% load static %}` then `{% static "notes/site.css" %}`. In development `runserver` serves them;
+in production `collectstatic` copies everything into `STATIC_ROOT`, which a web server, CDN or
+WhiteNoise serves. `ManifestStaticFilesStorage` adds content hashes to file names
+(`site.3f2a9c.css`) so browsers can cache them forever.
+
+## Worked example
+
+A base layout and a child page that fills its blocks, rendered by a real view.
+
+```python title="inheritance.py"
+from playground import migrate, setup
+
+setup(templates={
+    "base.html": (
+        "<title>{% block title %}Shop{% endblock %}</title>\n"
+        "<nav>{% if user.is_authenticated %}Hi {{ user.username }}{% else %}Guest{% endif %}</nav>\n"
+        "<main>{% block content %}{% endblock %}</main>"
+    ),
+    "products.html": (
+        '{% extends "base.html" %}'
+        "{% block title %}Products · {{ block.super }}{% endblock %}"
+        "{% block content %}"
+        "{% for p in products %}\n  {{ forloop.counter }}. {{ p.name }} {{ p.price|floatformat:2 }}"
+        "{% if forloop.last %}\n  ({{ products|length }} product{{ products|length|pluralize }}){% endif %}"
+        "{% empty %}\n  Nothing for sale.{% endfor %}"
+        "{% endblock %}"
+    ),
+})
+
+from django.db import models
+from django.shortcuts import render
+from django.test import Client
+from django.urls import path
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=100)
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+def product_list(request):
+    return render(request, "products.html", {"products": Product.objects.order_by("name")})
+
+
+urlpatterns = [path("products/", product_list)]
+migrate()
+client = Client()
+print(client.get("/products/").content.decode())
+print("---")
+Product.objects.create(name="Dune", price=12.5)
+Product.objects.create(name="Chess set", price=30)
+print(client.get("/products/").content.decode())
+```
+
+```text title="Output"
+<title>Products · Shop</title>
+<nav>Guest</nav>
+<main>
+  Nothing for sale.</main>
+---
+<title>Products · Shop</title>
+<nav>Guest</nav>
+<main>
+  1. Chess set 30.00
+  2. Dune 12.50
+  (2 products)</main>
+```
+
+- The child only overrides `title` and `content`; the navigation comes from the base. Every page
+  that extends `base.html` changes when the base does.
+- `{{ block.super }}` inserted the parent's title text after "Products · ".
+- `user` is available without the view passing it, thanks to the `auth` context processor.
+- `{% empty %}` handles the no-data case inside the loop: no separate `{% if %}` needed.
+
+## Variations
+
+### Dot lookups and handy filters
+
+```python
+from datetime import date
+
+from playground import setup
+
+setup()
+
+from django.template import Context, Template
+
+template = Template(
+    "{{ order.customer.name|upper }} | {{ order.items.0 }} | {{ order.items|length }} items\n"
+    "{{ order.placed|date:'j M Y' }} | {{ order.total|floatformat:2 }} | {{ order.note|default:'(no note)' }}\n"
+    "{{ order.items|join:', '|truncatechars:20 }} | {{ order.missing.anything }}|"
+)
+order = {
+    "customer": {"name": "Ada"},
+    "items": ["Dune", "Emma", "Chess set"],
+    "placed": date(2026, 3, 9),
+    "total": 50.5,
+    "note": "",
+}
+print(template.render(Context({"order": order})))
+```
+
+```text title="Output"
+ADA | Dune | 3 items
+9 Mar 2026 | 50.50 | (no note)
+Dune, Emma, Chess s… | |
+```
+
+Dots work the same on dicts, objects and lists, so a template doesn't care whether `order` is a model
+instance or a dictionary. A missing attribute (`order.missing.anything`) quietly renders nothing:
+convenient, but it can also hide typos, so test your templates.
+
+### Autoescaping, safe and format_html
+
+```python
+from playground import setup
+
+setup()
+
+from django.template import Context, Template
+from django.utils.html import format_html
+from django.utils.safestring import mark_safe
+
+comment = '<img src=x onerror="alert(1)">Nice!'
+t = Template("escaped: {{ c }}\nunsafe:  {{ c|safe }}\nlink:    {{ link }}")
+link = format_html('<a href="/users/{}/">{}</a>', 7, "<b>bob</b>")  # values are escaped
+print(t.render(Context({"c": comment, "link": link})))
+print(mark_safe("<em>trusted, written by us</em>"))
+```
+
+```text title="Output"
+escaped: &lt;img src=x onerror=&quot;alert(1)&quot;&gt;Nice!
+unsafe:  <img src=x onerror="alert(1)">Nice!
+link:    <a href="/users/7/">&lt;b&gt;bob&lt;/b&gt;</a>
+<em>trusted, written by us</em>
+```
+
+The escaped line is safe to show anywhere. The `|safe` line would run the attacker's JavaScript in
+every visitor's browser. `format_html` is the right tool when you build HTML in Python: it escapes
+the values while keeping your own tags.
+
+### include and with
+
+```python
+from playground import setup
+
+setup(templates={
+    "badge.html": "[{{ label }}: {{ value }}]",
+    "card.html": (
+        "{{ product.name }} "
+        '{% include "badge.html" with label="price" value=product.price %} '
+        '{% include "badge.html" with label="stock" value=product.stock only %}'
+    ),
+})
+
+from django.template.loader import render_to_string
+
+for product in [{"name": "Dune", "price": "12.50", "stock": 3}, {"name": "Emma", "price": "8.00", "stock": 0}]:
+    print(render_to_string("card.html", {"product": product}))
+```
+
+```text title="Output"
+Dune [price: 12.50] [stock: 3]
+Emma [price: 8.00] [stock: 0]
+```
+
+`{% include %}` reuses a fragment; `with` passes it variables; `only` gives it **nothing** but those
+variables. In the second badge `value=product.stock` was passed explicitly, so it still renders.
+
+### A custom filter and a simple tag
+
+```python
+from playground import setup
+
+setup(script_tags=True, templates={
+    "invoice.html": "{{ amount|money }} · {{ amount|money:'USD' }} · {% greeting user_name %}",
+})
+
+from django import template
+
+register = template.Library()  # in a project: <app>/templatetags/shop_tags.py
+
+
+@register.filter
+def money(value, currency="EUR"):
+    symbol = {"EUR": "€", "USD": "$"}.get(currency, currency + " ")
+    return f"{symbol}{value:,.2f}"
+
+
+@register.simple_tag
+def greeting(name):
+    return f"Hello, {name}!"
+
+
+from django.template.loader import render_to_string
+
+print(render_to_string("invoice.html", {"amount": 1234.5, "user_name": "Ada"}))
+```
+
+```text title="Output"
+€1,234.50 · $1,234.50 · Hello, Ada!
+```
+
+In a project you'd put this in `shop/templatetags/shop_tags.py` (with an empty `__init__.py`) and
+write `{% load shop_tags %}` at the top of the templates that use it. Filters take one value and at
+most one argument; `simple_tag` takes any arguments. Keep them small and pure.
+
+### Static file URLs
+
+```python
+from playground import setup
+
+setup(STATIC_URL="static/", templates={
+    "head.html": '{% load static %}<link rel="stylesheet" href="{% static "shop/site.css" %}">'
+                 '<img src="{% static "shop/logo 2026.png" %}" alt="ShopLite">',
+})
+
+from django.template.loader import render_to_string
+from django.templatetags.static import static
+
+print(render_to_string("head.html"))
+print(static("shop/app.js"))
+```
+
+```text title="Output"
+<link rel="stylesheet" href="/static/shop/site.css"><img src="/static/shop/logo%202026.png" alt="ShopLite">
+/static/shop/app.js
+```
+
+`{% static %}` builds the URL from `STATIC_URL`, quoting unsafe characters. With
+`ManifestStaticFilesStorage` in production, the same tag returns hashed names like
+`/static/shop/site.3f2a9c41d0e8.css`, so never hard-code `/static/...` paths.
+
+### Messages after a redirect
+
+```python
+from playground import setup
+
+setup(templates={
+    "page.html": "{% for m in messages %}[{{ m.level_tag }}] {{ m }}\n{% empty %}(no messages){% endfor %}",
+})
+
+from django.contrib import messages
+from django.shortcuts import redirect, render
+from django.test import Client
+from django.urls import path
+from django.views.decorators.csrf import csrf_exempt
+
+
+@csrf_exempt
+def save(request):
+    messages.success(request, "Note saved.")
+    messages.warning(request, "You have 1 note left in your free plan.")
+    return redirect("page")
+
+
+def page(request):
+    return render(request, "page.html")
+
+
+urlpatterns = [path("save/", save), path("page/", page, name="page")]
+client = Client()
+print(client.post("/save/", follow=True).content.decode().strip())
+print(client.get("/page/").content.decode())
+```
+
+```text title="Output"
+[success] Note saved.
+[warning] You have 1 note left in your free plan.
+(no messages)
+```
+
+Messages are stored (in the session or a cookie) until the next page displays them, then they're
+gone, which is why the second visit shows none. This is the Post/Redirect/Get pattern the Notes
+project uses after saving a note.
+
+## Putting it together
+
+The Notes project's real templates: a base layout with navigation and messages, and a list page
+with search, an empty state, pagination links and CSRF-protected delete forms.
+
+<ProjectFiles
+  project="notes"
+  paths="notes/templates/notes/base.html notes/templates/notes/note_list.html notes/templates/notes/note_form.html"
+/>
+
+The same ideas, runnable in one file: a page that extends a base, loops with an empty state, escapes
+user content, uses a custom filter, builds links with `{% url %}` and paginates.
+
+```python title="notes_page.py"
+from playground import migrate, setup
+
+setup(script_tags=True, templates={
+    "base.html": "<h1>{% block heading %}Notes{% endblock %}</h1>\n{% block content %}{% endblock %}",
+    "list.html": (
+        '{% extends "base.html" %}'
+        "{% block heading %}{{ block.super }} ({{ page.paginator.count }}){% endblock %}"
+        "{% block content %}"
+        '{% for n in page %}- <a href="{% url "edit" n.pk %}">{{ n.title }}</a> {{ n.body|excerpt }}\n'
+        "{% empty %}No notes match.\n{% endfor %}"
+        "{% if page.has_next %}more: ?page={{ page.next_page_number }}{% endif %}"
+        "{% endblock %}"
+    ),
+})
+
+from django import template
+from django.core.paginator import Paginator
+from django.db import models
+from django.http import HttpResponse
+from django.shortcuts import render
+from django.test import Client
+from django.urls import path
+
+register = template.Library()
+
+
+@register.filter
+def excerpt(text, words=4):
+    parts = text.split()
+    return " ".join(parts[:words]) + (" …" if len(parts) > words else "")
+
+
+class Note(models.Model):
+    title = models.CharField(max_length=100)
+    body = models.TextField()
+
+
+def note_list(request):
+    notes = Note.objects.order_by("id")
+    if q := request.GET.get("q"):
+        notes = notes.filter(title__icontains=q)
+    page = Paginator(notes, 2).get_page(request.GET.get("page"))
+    return render(request, "list.html", {"page": page})
+
+
+urlpatterns = [
+    path("", note_list),
+    path("<int:pk>/edit/", lambda request, pk: HttpResponse(), name="edit"),
+]
+migrate()
+Note.objects.create(title="Groceries", body="milk eggs bread butter jam")
+Note.objects.create(title="<b>Ideas</b>", body="write a Django course")
+Note.objects.create(title="Trip", body="tickets")
+
+client = Client()
+print(client.get("/").content.decode())
+print("====")
+print(client.get("/?page=2").content.decode())
+print("====")
+print(client.get("/?q=zzz").content.decode())
+```
+
+```text title="Output"
+<h1>Notes (3)</h1>
+- <a href="/1/edit/">Groceries</a> milk eggs bread butter …
+- <a href="/2/edit/">&lt;b&gt;Ideas&lt;/b&gt;</a> write a Django course
+more: ?page=2
+====
+<h1>Notes (3)</h1>
+- <a href="/3/edit/">Trip</a> tickets
+
+====
+<h1>Notes (0)</h1>
+No notes match.
+```
+
+`Paginator.get_page()` never raises: a missing or invalid page number gives the first or last page,
+which is what you want for user-facing links. The note titled `<b>Ideas</b>` is shown as text,
+because autoescaping protects every page by default.
+
+## Common mistakes
+
+<Callout type="warning" title="|safe on user input">
+  `{{ comment.text|safe }}` lets any user run JavaScript in every visitor's browser (stored XSS).
+  Only mark HTML safe if your own code produced it, or sanitise it with a vetted library first.
+</Callout>
+
+- **Logic in templates.** Long `{% if %}` chains and calculations belong in the view, a model method
+  or a template tag, where they can be tested.
+- **Queries in loops.** `{% for o in orders %}{{ o.customer.name }}{% endfor %}` runs one query per
+  order unless the view used `select_related("customer")` (lesson 12).
+- **Templates without the app-name folder.** Two apps with `templates/list.html` clash; use
+  `templates/<app>/list.html`.
+- **Hard-coded links and static paths** (`href="/notes/3/edit/"`, `/static/site.css`). Use
+  `{% url %}` and `{% static %}`.
+- **Forgetting `{% csrf_token %}`** in a POST form: Django answers `403 Forbidden (CSRF token
+missing)`.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: what does {{ user.get_full_name }} do?">
+  Django finds `get_full_name` on the user object and **calls** it (no arguments allowed), printing
+  the result. Methods that need arguments can't be called from templates: use a filter or tag.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: show 'Nothing here' when a list is empty, without an extra if.">
+  `{% for item in items %}...{% empty %}Nothing here{% endfor %}`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: a child template wants the base's title plus ' · Orders'. How?">
+  `{% block title %}{{ block.super }} · Orders{% endblock %}`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why does production need collectstatic, if runserver serves static files fine?"
+>
+  `runserver` serves them only in development. In production a web server/CDN/WhiteNoise serves the
+  files from one folder (`STATIC_ROOT`), and `collectstatic` gathers every app's static files there
+  (with hashed names when using the manifest storage).
+</Reveal>
+
+<KeyTakeaways>
+
+- `{{ }}` prints (with filters), `{% %}` runs logic; dots look up keys, attributes and indexes.
+- `extends` + `block` share a layout; `include` reuses fragments; `block.super` keeps parent content.
+- Autoescaping blocks XSS by default; `|safe` only for HTML you wrote; `format_html` in Python.
+- Custom filters and tags live in `<app>/templatetags/`; keep them small.
+- `{% url %}` and `{% static %}` instead of hard-coded paths; `collectstatic` for production.
+- Messages + redirect = Post/Redirect/Get with a friendly notice.
+
+</KeyTakeaways>
