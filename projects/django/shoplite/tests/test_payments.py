@@ -95,3 +95,36 @@ def test_verify_unit():
     provider.verify(body, header, "s" * 32, tolerance=300, now=1_100)
     with pytest.raises(provider.SignatureError):
         provider.verify(body, header, "s" * 32, tolerance=300, now=2_000)
+
+
+def test_simulate_payment_command_sends_a_signed_event(payment):
+    """The local provider simulator posts a correctly signed event (the network call is mocked)."""
+    from io import StringIO
+    from unittest import mock
+
+    from django.core.management import call_command
+
+    sent = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b'{"status": "order paid"}'
+
+    def fake_urlopen(request, timeout):
+        sent["body"], sent["signature"] = request.data, request.get_header("Fakepay-signature")
+        return FakeResponse()
+
+    out = StringIO()
+    with mock.patch("urllib.request.urlopen", fake_urlopen):
+        call_command("simulate_payment", payment.provider_ref, stdout=out)
+    provider.verify(sent["body"], sent["signature"], settings.PAYMENTS_WEBHOOK_SECRET, tolerance=300)
+    assert json.loads(sent["body"])["type"] == "payment.succeeded"
+    assert out.getvalue().startswith("200 ")

@@ -3,7 +3,8 @@
 For each project with a pytest.ini:
   1. its test suite (pytest, warnings are errors, fake values from .env.example)
   2. `makemigrations --check`: models and committed migrations agree (Django projects)
-Then the Postman collections and OpenAPI files must be up to date (scripts/gen_postman.py --check).
+Then the Postman collections and OpenAPI files must be up to date (scripts/gen_postman.py --check),
+and every <Checkpoint> command on the project pages must pass (scripts/check_checkpoints.py).
 
 Set SHOPLITE_TEST_DATABASE_URL to also run ShopLite against PostgreSQL (CI does).
 usage: python scripts/test_projects.py [name ...]
@@ -60,10 +61,12 @@ def main() -> int:
             if not ok:
                 failed.append(f"{label} (migrations)")
                 print(f"✗ {label}: models changed without a migration\n{out}")
-    ok, out = run([python, str(ROOT / "scripts" / "gen_postman.py"), "--check"], ROOT, base_env)
-    print(out)
-    if not ok:
-        failed.append("postman/openapi")
+    for script, label in [("gen_postman.py", "postman/openapi"), ("check_checkpoints.py", "checkpoints")]:
+        ok, out = run([python, str(ROOT / "scripts" / script), *(["--check"] if label == "postman/openapi" else [])],
+                      ROOT, base_env)
+        print(out)
+        if not ok:
+            failed.append(label)
     if failed:
         print(f"✗ failed: {', '.join(failed)}")
         return 1

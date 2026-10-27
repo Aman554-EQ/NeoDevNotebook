@@ -1,0 +1,228 @@
+---
+title: Notes, a server-rendered app
+summary: Your first complete Django app. Write a small PRD, design the model and URLs, then build list, search, create, edit, pin and delete for notes with templates, ModelForms, messages and pagination, and prove it works with tests.
+kind: guided
+difficulty: easy
+estimatedHours: 3
+code: notes
+skills:
+  [
+    PRD,
+    models and migrations,
+    URLs and views,
+    templates,
+    ModelForm,
+    messages,
+    pagination,
+    CSRF,
+    pytest-django,
+  ]
+---
+
+## How this project works
+
+Each milestone says what to build, gives hints if you get stuck, and then shows the solution: the
+real files of a finished project whose test suite passes in CI. Build it yourself first, in your own
+folder. When you're done with a milestone, run its checkpoint and tick it off; your progress is saved
+in this browser.
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate     macOS/Linux: source .venv/bin/activate
+python -m pip install "Django>=5.2,<5.3" pytest pytest-django
+django-admin startproject config .
+python manage.py startapp notes
+```
+
+## The brief (PRD)
+
+A **product requirements document** answers: what problem, for whom, what exactly, and how we'll know
+it's done. Writing it first stops you building the wrong thing. Here is the one for this project.
+
+**Problem.** People jot quick notes in many places and can't find them later.
+
+**Users.** One person, on their own computer (no accounts yet; the Auth starter adds them).
+
+**User stories.**
+
+- As a user I can **create** a note with a title and an optional body.
+- I can **see all notes**, pinned ones first, then the most recently edited.
+- I can **search** titles and bodies.
+- I can **edit** and **pin** a note, and **delete** it.
+- I see a short confirmation after every change.
+
+**Acceptance criteria.**
+
+- Titles are 3–120 characters after trimming spaces; a shorter title shows an error on the form.
+- The list shows 10 notes per page.
+- Delete only works with POST (a link or prefetch can't delete).
+- Every form is CSRF-protected.
+- `GET /health/` returns `{"status": "ok"}`.
+
+**Out of scope.** Users and sharing, rich text, attachments, an API.
+
+## Design
+
+**Data model.** One table:
+
+| Field                       | Type             | Rules                             |
+| --------------------------- | ---------------- | --------------------------------- |
+| `id`                        | big auto         | primary key                       |
+| `title`                     | `CharField(120)` | required, 3+ chars after trimming |
+| `body`                      | `TextField`      | optional (`blank=True`)           |
+| `pinned`                    | `BooleanField`   | default `False`                   |
+| `created_at` / `updated_at` | `DateTimeField`  | `auto_now_add` / `auto_now`       |
+
+Default ordering: `-pinned`, `-updated_at`.
+
+**URLs.**
+
+| URL             | Name           | View                                 | Methods   |
+| --------------- | -------------- | ------------------------------------ | --------- |
+| `/`             | `notes:list`   | `note_list` (search `?q=`, `?page=`) | GET       |
+| `/new/`         | `notes:create` | `note_create`                        | GET, POST |
+| `/<pk>/edit/`   | `notes:edit`   | `note_edit`                          | GET, POST |
+| `/<pk>/delete/` | `notes:delete` | `note_delete`                        | POST      |
+| `/health/`      | `health`       | `health`                             | GET       |
+
+**Layout.** A `config` project package and one `notes` app:
+
+<ProjectTree />
+
+## Milestone 1: the model
+
+<Callout type="tip" title="Your turn">
+  Create the `Note` model with the fields and ordering from the design, add `__str__` (the title)
+  and `get_absolute_url()` (its edit page), register the app in `INSTALLED_APPS`, then run
+  `makemigrations` and `migrate`.
+</Callout>
+
+<Reveal kind="hint" label="Hint: ordering and timestamps">
+  `class Meta: ordering = ["-pinned", "-updated_at"]`. `auto_now_add=True` sets a date once on
+  creation; `auto_now=True` updates it on every `save()`.
+</Reveal>
+
+<Reveal label="Solution: notes/models.py and the migration Django generated">
+  <ProjectFiles paths="notes/models.py notes/migrations/0001_initial.py" />
+</Reveal>
+
+<Checkpoint id="model" command="python -m pytest notes/tests/test_models.py">
+  The model tests check `__str__`, the pinned-first ordering and the edit URL.
+</Checkpoint>
+
+## Milestone 2: list, search and pagination
+
+<Callout type="tip" title="Your turn">
+  Write `note_list`: read `q` from the query string, filter title **or** body case-insensitively,
+  paginate 10 per page with `Paginator.get_page()`, and render `notes/note_list.html`. Add the URL
+  with an `app_name = "notes"` namespace and include it from `config/urls.py`.
+</Callout>
+
+<Reveal kind="hint" label="Hint: OR across two fields">
+  `Q(title__icontains=q) | Q(body__icontains=q)`. `Paginator(notes,
+  10).get_page(request.GET.get("page"))` never raises for a bad page number.
+</Reveal>
+
+<Reveal label="Solution: the list view and URLs">
+  <ProjectFiles paths="notes/views.py notes/urls.py config/urls.py" />
+</Reveal>
+
+## Milestone 3: templates
+
+<Callout type="tip" title="Your turn">
+  Create a `base.html` with navigation and a messages area, and a `note_list.html` that extends it:
+  a search box that keeps the current query, each note with a link to edit and a delete **form**, an
+  empty state, and previous/next page links that keep `q`.
+</Callout>
+
+<Reveal kind="hint" label="Hint: keeping the query in page links">
+  `?q={{ query|urlencode }}&page={{ page.next_page_number }}`, and `{% empty %}` inside the loop for
+  the no-results message.
+</Reveal>
+
+<Reveal label="Solution: templates">
+  <ProjectFiles paths="notes/templates/notes/base.html notes/templates/notes/note_list.html" />
+</Reveal>
+
+<Checkpoint
+  id="list"
+  command='python -m pytest notes/tests/test_views.py -k "list or search or paginated"'
+>
+  Checks the empty state, search across title and body, 10 + 2 pagination and the query budget.
+</Checkpoint>
+
+## Milestone 4: create, edit and delete
+
+<Callout type="tip" title="Your turn">
+  Write a `NoteForm` (ModelForm) whose `clean_title` trims spaces and requires 3+ characters. Write
+  `note_create` and `note_edit` (one template, `note_form.html`), each redirecting to the list with
+  a success message, and `note_delete` that accepts POST only.
+</Callout>
+
+<Reveal kind="hint" label="Hint: one view for GET and POST">
+  `form = NoteForm(request.POST or None, instance=note)`; if it's a POST and `form.is_valid()`,
+  save, add a message and `redirect("notes:list")`; otherwise render the form (with its errors).
+  Decorate delete with `@require_POST`.
+</Reveal>
+
+<Reveal label="Solution: form, views and template">
+  <ProjectFiles paths="notes/forms.py notes/views.py notes/templates/notes/note_form.html" />
+</Reveal>
+
+<Checkpoint
+  id="crud"
+  command='python -m pytest notes/tests/test_views.py -k "create or edit or delete or csrf"'
+>
+  Checks Post/Redirect/Get with the message, the title validation error, editing, 404 for a missing
+  note, POST-only delete and CSRF enforcement.
+</Checkpoint>
+
+## Milestone 5: admin and health check
+
+<Callout type="tip" title="Your turn">
+  Register `Note` in the admin with columns, a filter and search. Add `/health/` returning
+  `{"status": "ok"}` without touching the database.
+</Callout>
+
+<Reveal label="Solution: admin and health">
+  <ProjectFiles paths="notes/admin.py config/urls.py" />
+</Reveal>
+
+<Checkpoint id="health" command='python -m pytest notes/tests/test_views.py -k health'>
+  The health endpoint answers `{"status": "ok"}`.
+</Checkpoint>
+
+## Harden
+
+- `SECRET_KEY` and `DEBUG` come from the environment; the app refuses to start in production
+  without a key:
+
+<ProjectFile path="config/settings.py" />
+
+- Delete is POST-only and every form has `{% csrf_token %}` (a test checks a POST without a token gets
+  403).
+- Templates escape note content, so a note titled `<script>` is harmless.
+- `fields = ["title", "body", "pinned"]` in the form: nothing else can be set from a request.
+
+## Test
+
+The whole suite (14 tests, under a second), with the fake values from `.env.example`:
+
+<ProjectFiles paths="notes/tests/test_models.py notes/tests/test_views.py pytest.ini" />
+
+<Checkpoint id="all" command="python -m pytest" />
+
+## Ship
+
+```bash
+cp .env.example .env   # then set DJANGO_DEBUG=false and a real DJANGO_SECRET_KEY for production
+python manage.py check --deploy
+python manage.py collectstatic --noinput
+gunicorn config.wsgi --bind 0.0.0.0:8000
+```
+
+The project's README sums it up:
+
+<ProjectFile path="README.md" />
+
+**Next:** the Library project turns this kind of CRUD into a JSON API with DRF.

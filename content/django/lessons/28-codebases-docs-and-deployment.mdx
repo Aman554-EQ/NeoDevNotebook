@@ -247,7 +247,7 @@ Django's `LOGGING` setting wires formatters, filters and handlers the same way.
 ```python
 steps = [
     ("build", "docker build -t shoplite:41 .", "image with pinned deps + code"),
-    ("test", "python -m pytest", "57 passed"),
+    ("test", "python -m pytest", "58 passed"),
     ("check", "python manage.py check --deploy --fail-level WARNING", "no issues"),
     ("migrate", "python manage.py migrate --noinput", "run once, before new code takes traffic"),
     ("static", "python manage.py collectstatic --noinput", "hashed files into STATIC_ROOT / CDN"),
@@ -263,7 +263,7 @@ for n, (name, command, note) in enumerate(steps, 1):
 1. build     $ docker build -t shoplite:41 .
              -> image with pinned deps + code
 2. test      $ python -m pytest
-             -> 57 passed
+             -> 58 passed
 3. check     $ python manage.py check --deploy --fail-level WARNING
              -> no issues
 4. migrate   $ python manage.py migrate --noinput
