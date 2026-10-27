@@ -1,0 +1,598 @@
+---
+title: Relationships & efficient queries
+summary: Connect models with ForeignKey, ManyToManyField (including through models) and OneToOneField, choose what happens on delete, and make related data fast. The N+1 problem and its cures (select_related, prefetch_related, Prefetch), only/defer, indexes, transactions, row locks with select_for_update, and raw SQL done safely.
+estimatedMinutes: 30
+difficulty: medium
+section: Django Core
+objectives:
+  - Model one-to-many, many-to-many (with extra data) and one-to-one relations
+  - Pick the right on_delete behaviour and navigate relations in both directions
+  - Spot N+1 queries and fix them with select_related, prefetch_related and Prefetch
+  - Group writes with transaction.atomic and prevent races with F() and select_for_update
+  - Run raw SQL safely when the ORM isn't enough
+prerequisites:
+  - "The ORM: querying"
+tags: [django, orm, relationships, performance, n-plus-one, transactions]
+---
+
+## Intuition: following arrows without walking back and forth
+
+Related rows are like files that point at each other: every book points at its author. Following one
+arrow is cheap. Following one arrow **per row**, one database round trip each, is how a page with 100
+books makes 101 queries: the **N+1 problem**, the most common Django performance bug.
+
+The cure is to tell the ORM in advance which arrows you'll follow, so it fetches the related rows in
+the same query (a JOIN) or in one extra query for all of them.
+
+## See it
+
+<OrmToSql
+  recording="n-plus-one"
+  caption="The same output, very different costs: 1 + N queries when each loop iteration fetches its own author or tags, 1 with select_related (a JOIN), 2 with prefetch_related (one extra query for all tags)."
+/>
+
+## The precise rules
+
+**Relations:**
+
+| Field                                         | Shape                           | Example             | Reverse access                                     |
+| --------------------------------------------- | ------------------------------- | ------------------- | -------------------------------------------------- |
+| `ForeignKey(Author, on_delete=...)`           | many-to-one                     | book → author       | `author.books.all()` (with `related_name="books"`) |
+| `ManyToManyField(Tag)`                        | many-to-many (join table)       | book ↔ tags         | `tag.books.all()`                                  |
+| `ManyToManyField(User, through="Membership")` | many-to-many with extra columns | team ↔ users + role | `membership_set` / `related_name`                  |
+| `OneToOneField(User, on_delete=...)`          | one-to-one                      | user ↔ profile      | `user.profile`                                     |
+
+**`on_delete`** (what happens to books when their author is deleted): `CASCADE` (delete them too),
+`PROTECT` (refuse with `ProtectedError`), `RESTRICT` (like PROTECT, but allows deletion through
+another cascade), `SET_NULL` (needs `null=True`), `SET_DEFAULT`, `DO_NOTHING` (leave it to the
+database). Use `PROTECT` for data you must keep (orders → products), `CASCADE` for parts that can't
+exist alone (order → order lines).
+
+**Making related data fast:**
+
+- `select_related("author", "author__agent")`: follows **ForeignKey/OneToOne** with a JOIN, in the
+  same query.
+- `prefetch_related("tags", "books")`: follows **many-to-many and reverse ForeignKey** with one extra
+  query per relation (`WHERE id IN (...)`), joined in Python.
+- `Prefetch("books", queryset=Book.objects.filter(...), to_attr="recent_books")`: prefetch a
+  filtered or ordered subset.
+- `only()`/`defer()` limit columns; `annotate(Count(...))` computes numbers in SQL instead of loading
+  rows to count them.
+- Add indexes (`db_index=True`, `Meta.indexes`) on columns you filter, join and sort by. Foreign keys
+  get an index automatically.
+
+**Transactions:** `transaction.atomic()` (decorator or `with`) makes a block all-or-nothing; nested
+blocks create **savepoints**. `transaction.on_commit(fn)` runs `fn` only after a successful commit
+(send the email after the order is really saved).
+
+**Races:** two requests that read a value, change it in Python and save can overwrite each other.
+Use `F()` updates for simple arithmetic, or lock the rows with
+`select_for_update()` inside `atomic()` (PostgreSQL/MySQL; SQLite has no row locks and ignores it).
+
+**Raw SQL:** `Model.objects.raw("SELECT ... WHERE id = %s", [value])` or
+`connection.cursor().execute(sql, params)`. Always pass parameters separately, never by string
+formatting.
+
+## Worked example
+
+Authors, books and tags: one-to-many and many-to-many, navigated in both directions.
+
+```python title="relations.py"
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+
+
+class Author(models.Model):
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return self.name
+
+
+class Tag(models.Model):
+    name = models.CharField(max_length=30, unique=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    author = models.ForeignKey(Author, on_delete=models.CASCADE, related_name="books")
+    tags = models.ManyToManyField(Tag, related_name="books", blank=True)
+
+    def __str__(self):
+        return self.title
+
+
+migrate()
+herbert = Author.objects.create(name="Frank Herbert")
+austen = Author.objects.create(name="Jane Austen")
+scifi, classic = Tag.objects.create(name="sci-fi"), Tag.objects.create(name="classic")
+
+dune = Book.objects.create(title="Dune", author=herbert)
+dune.tags.add(scifi, classic)  # many-to-many: rows in the join table
+emma = Book.objects.create(title="Emma", author=austen)
+emma.tags.set([classic])
+
+print(dune.author, "|", list(herbert.books.all()))  # forward and reverse ForeignKey
+print(list(dune.tags.order_by("name")), "|", list(classic.books.order_by("title")))
+print(list(Book.objects.filter(tags__name="classic", author__name__startswith="Jane")))
+print(list(Author.objects.filter(books__tags=scifi).distinct()))
+print(Book.tags.through._meta.db_table)
+```
+
+```text title="Output"
+Frank Herbert | [<Book: Dune>]
+[<Tag: classic>, <Tag: sci-fi>] | [<Book: Dune>, <Book: Emma>]
+[<Book: Emma>]
+[<Author: Frank Herbert>]
+shop_book_tags
+```
+
+- `related_name="books"` names the reverse side: `herbert.books.all()` instead of the default
+  `herbert.book_set.all()`.
+- Many-to-many links are managed with `add()`, `remove()`, `set()` and `clear()`; Django keeps a
+  hidden join table (`shop_book_tags`) for you.
+- Lookups follow relations in both directions (`tags__name`, `books__tags`). Filtering across a
+  "many" relation can return duplicates, hence `distinct()`.
+
+## Variations
+
+### What on_delete does
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+from django.db.models import ProtectedError
+
+
+class Customer(models.Model):
+    name = models.CharField(max_length=50)
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=50)
+
+
+class Order(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True)
+
+
+class OrderLine(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="lines")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+
+
+migrate()
+ada, dune = Customer.objects.create(name="Ada"), Product.objects.create(name="Dune")
+order = Order.objects.create(customer=ada)
+OrderLine.objects.create(order=order, product=dune)
+
+try:
+    dune.delete()
+except ProtectedError as exc:
+    print("PROTECT:", type(exc).__name__, "- still sold in", len(exc.protected_objects), "order line")
+ada.delete()
+order.refresh_from_db()
+print("SET_NULL: order kept, customer is", order.customer)
+print("CASCADE:", order.delete())
+```
+
+```text title="Output"
+PROTECT: ProtectedError - still sold in 1 order line
+SET_NULL: order kept, customer is None
+CASCADE: (2, {'shop.OrderLine': 1, 'shop.Order': 1})
+```
+
+Products that appear in orders are protected (you'd mark them inactive instead); deleting a customer
+keeps their orders for the accounts; deleting an order removes its lines. `delete()` reports
+everything it removed, including cascades.
+
+### Many-to-many with extra data: a through model
+
+```python
+from datetime import date
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+
+
+class Person(models.Model):
+    name = models.CharField(max_length=50)
+
+
+class Team(models.Model):
+    name = models.CharField(max_length=50)
+    members = models.ManyToManyField(Person, through="Membership", related_name="teams")
+
+
+class Membership(models.Model):
+    person = models.ForeignKey(Person, on_delete=models.CASCADE)
+    team = models.ForeignKey(Team, on_delete=models.CASCADE)
+    role = models.CharField(max_length=20, default="member")
+    joined = models.DateField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["person", "team"], name="one_membership")]
+
+
+migrate()
+ada, bob = Person.objects.create(name="Ada"), Person.objects.create(name="Bob")
+core = Team.objects.create(name="Core")
+core.members.add(ada, through_defaults={"role": "owner", "joined": date(2026, 1, 5)})
+Membership.objects.create(person=bob, team=core, joined=date(2026, 2, 1))
+
+for m in Membership.objects.filter(team=core).select_related("person").order_by("joined"):
+    print(m.person.name, m.role, m.joined)
+print(list(ada.teams.values_list("name", flat=True)))
+print(list(core.members.filter(membership__role="owner").values_list("name", flat=True)))
+```
+
+```text title="Output"
+Ada owner 2026-01-05
+Bob member 2026-02-01
+['Core']
+['Ada']
+```
+
+When the link itself has data (a role, a date, a quantity), make it a model and point the
+`ManyToManyField` at it with `through=`. Order lines are the same idea: an order ↔ product link with
+a quantity and a price.
+
+### Fixing N+1, measured
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import connection, models
+from django.db.models import Count, Prefetch
+from django.test.utils import CaptureQueriesContext
+
+
+class Author(models.Model):
+    name = models.CharField(max_length=50)
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=50)
+    year = models.IntegerField()
+    author = models.ForeignKey(Author, on_delete=models.CASCADE, related_name="books")
+
+
+migrate()
+for n in range(10):
+    author = Author.objects.create(name=f"author {n}")
+    Book.objects.bulk_create(Book(title=f"book {n}.{i}", year=1990 + i * 10, author=author) for i in range(3))
+
+
+def queries(fn):
+    with CaptureQueriesContext(connection) as ctx:
+        fn()
+    return len(ctx)
+
+
+print("books + author, naive:  ", queries(lambda: [b.author.name for b in Book.objects.all()]))
+print("with select_related:    ", queries(lambda: [b.author.name for b in Book.objects.select_related("author")]))
+print("authors + books, naive: ", queries(lambda: [len(a.books.all()) for a in Author.objects.all()]))
+print("with prefetch_related:  ", queries(lambda: [len(a.books.all()) for a in Author.objects.prefetch_related("books")]))
+print("just the counts:        ", queries(lambda: list(Author.objects.annotate(n=Count("books")).values_list("n", flat=True))))
+recent = Prefetch("books", queryset=Book.objects.filter(year__gte=2000).order_by("-year"), to_attr="recent")
+authors = list(Author.objects.prefetch_related(recent)[:2])
+print("Prefetch with a filter: ", [(a.name, [b.title for b in a.recent]) for a in authors])
+```
+
+```text title="Output"
+books + author, naive:   31
+with select_related:     1
+authors + books, naive:  11
+with prefetch_related:   2
+just the counts:         1
+Prefetch with a filter:  [('author 0', ['book 0.2', 'book 0.1']), ('author 1', ['book 1.2', 'book 1.1'])]
+```
+
+30 books cost 31 queries naively and 1 with `select_related`; 10 authors cost 11 naively and 2 with
+`prefetch_related`. When you only need a number, `annotate(Count(...))` is a single query.
+`Prefetch(..., to_attr=...)` loads a filtered, ordered subset into a plain list attribute.
+
+### Transactions and savepoints
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import models, transaction
+
+
+class Account(models.Model):
+    name = models.CharField(max_length=20)
+    balance = models.IntegerField()
+
+
+class Log(models.Model):
+    text = models.CharField(max_length=100)
+
+
+migrate()
+Account.objects.bulk_create([Account(name="ada", balance=100), Account(name="bob", balance=10)])
+
+
+def transfer(sender, receiver, amount):
+    with transaction.atomic():
+        Log.objects.create(text=f"{sender} -> {receiver}: {amount}")
+        try:
+            with transaction.atomic():  # a savepoint: only this inner part can roll back
+                Account.objects.filter(name=receiver).update(balance=models.F("balance") + amount)
+                src = Account.objects.get(name=sender)
+                if src.balance < amount:
+                    raise ValueError("insufficient funds")
+                src.balance -= amount
+                src.save()
+        except ValueError as exc:
+            Log.objects.create(text=f"refused: {exc}")
+
+
+transfer("ada", "bob", 30)
+transfer("bob", "ada", 500)
+print(dict(Account.objects.values_list("name", "balance")))
+print(list(Log.objects.order_by("id").values_list("text", flat=True)))
+```
+
+```text title="Output"
+{'ada': 70, 'bob': 40}
+['ada -> bob: 30', 'bob -> ada: 500', 'refused: insufficient funds']
+```
+
+The inner `atomic()` is a savepoint: when the transfer fails, Bob's credit is rolled back but the log
+lines (outside the savepoint) are kept. Catch exceptions **outside** an atomic block, never inside
+it, or Django can't roll back correctly.
+
+### on_commit: side effects only after success
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import models, transaction
+
+sent = []
+
+
+class Order(models.Model):
+    email = models.EmailField()
+
+
+migrate()
+
+
+def place(email, fail=False):
+    try:
+        with transaction.atomic():
+            order = Order.objects.create(email=email)
+            transaction.on_commit(lambda: sent.append(f"confirmation for order {order.pk}"))
+            if fail:
+                raise RuntimeError("payment step failed")
+    except RuntimeError:
+        pass
+
+
+place("ada@example.com")
+place("bob@example.com", fail=True)
+print(Order.objects.count(), "order saved")
+print(sent)
+```
+
+```text title="Output"
+1 order saved
+['confirmation for order 1']
+```
+
+Sending the email directly inside the block would have confirmed Bob's order, which was rolled back.
+`on_commit` callbacks run only after the outermost transaction commits, and are dropped on rollback.
+Queue background jobs (lesson 17) the same way.
+
+### Raw SQL, safely
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import connection, models
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=50)
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+migrate()
+Product.objects.bulk_create([Product(name="Dune", price="12.50"), Product(name="Chess set", price="30.00")])
+search = "Dune' OR '1'='1"  # hostile input
+
+rows = Product.objects.raw("SELECT * FROM shop_product WHERE name = %s", [search])
+print("raw():", list(rows))
+with connection.cursor() as cursor:
+    cursor.execute("SELECT name, price FROM shop_product WHERE price > %s ORDER BY price", ["20"])
+    print("cursor:", cursor.fetchall())
+```
+
+```text title="Output"
+raw(): []
+cursor: [('Chess set', 30)]
+```
+
+`%s` placeholders (whatever the database) send values separately, so the injection attempt matches
+nothing. `raw()` maps rows back to model instances; a cursor returns tuples. Reach for raw SQL for
+database-specific features or a hand-tuned report, and keep it in one well-tested function.
+
+## Putting it together
+
+Placing an order the way ShopLite does: all-or-nothing, with stock that can't be oversold, and a
+query budget checked at the end. Here is the real service from the capstone:
+
+<ProjectFile project="shoplite" path="orders/services.py" />
+
+The same pattern, runnable in one file:
+
+```python title="place_order.py"
+from decimal import Decimal
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import connection, models, transaction
+from django.db.models import F, Prefetch
+from django.test.utils import CaptureQueriesContext
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=50)
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    stock = models.PositiveIntegerField()
+
+
+class Order(models.Model):
+    total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+
+class Line(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="lines")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+    qty = models.PositiveIntegerField()
+    unit_price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+class OutOfStock(Exception):
+    pass
+
+
+def place_order(items):
+    with transaction.atomic():
+        products = {p.pk: p for p in Product.objects.select_for_update().filter(pk__in=items).order_by("pk")}
+        for pk, qty in items.items():
+            if products[pk].stock < qty:
+                raise OutOfStock(f"only {products[pk].stock} x {products[pk].name}")
+        order = Order.objects.create(total=sum(products[pk].price * q for pk, q in items.items()))
+        Line.objects.bulk_create(Line(order=order, product=products[pk], qty=q,
+                                      unit_price=products[pk].price) for pk, q in items.items())
+        for pk, qty in items.items():
+            Product.objects.filter(pk=pk).update(stock=F("stock") - qty)
+    return order
+
+
+migrate()
+dune = Product.objects.create(name="Dune", price=Decimal("12.50"), stock=5)
+chess = Product.objects.create(name="Chess set", price=Decimal("30.00"), stock=1)
+
+order = place_order({dune.pk: 2, chess.pk: 1})
+print("order", order.pk, "total", order.total)
+try:
+    place_order({dune.pk: 1, chess.pk: 1})
+except OutOfStock as exc:
+    print("refused:", exc)
+print("stock:", dict(Product.objects.values_list("name", "stock")))
+print("orders:", Order.objects.count(), "| lines:", Line.objects.count())
+
+with CaptureQueriesContext(connection) as ctx:
+    lines = Prefetch("lines", queryset=Line.objects.select_related("product"))
+    for o in Order.objects.prefetch_related(lines):
+        summary = [(line.product.name, line.qty) for line in o.lines.all()]
+print("order page:", summary, "in", len(ctx), "queries")
+```
+
+```text title="Output"
+order 1 total 55.00
+refused: only 0 x Chess set
+stock: {'Dune': 3, 'Chess set': 0}
+orders: 1 | lines: 2
+order page: [('Dune', 2), ('Chess set', 1)] in 2 queries
+```
+
+The refused order changed nothing: the check ran inside the transaction, and the exception rolled
+everything back. On PostgreSQL, `select_for_update()` makes a second checkout for the same products
+wait until the first commits, so two buyers can never both take the last chess set (ShopLite's
+concurrency test proves it with 8 threads). The order page loads orders, lines and products in two
+queries, however many orders there are.
+
+## Common mistakes
+
+<Callout type="warning" title="N+1 hiding in templates and serializers">
+  `{{ order.customer.name }}` in a loop, or a serializer field `source="author.name"`, triggers one
+  query per row unless the view's queryset has `select_related("customer")`. Check pages with the
+  Debug Toolbar and lock the count in with `assertNumQueries` tests.
+</Callout>
+
+- **`select_related` on a many-to-many.** It only follows ForeignKey/OneToOne; use
+  `prefetch_related` for many-to-many and reverse relations.
+- **Filtering a prefetched relation** (`author.books.filter(...)` in a loop) runs a new query each
+  time; use `Prefetch(queryset=...)` instead.
+- **`CASCADE` everywhere.** Deleting one product shouldn't silently delete years of orders; use
+  `PROTECT` and soft deletes (an `is_active` flag) for important data.
+- **Catching exceptions inside `atomic()`** and continuing: the transaction may be broken. Catch
+  outside, or use a nested `atomic()` (savepoint) around the risky part.
+- **Side effects inside a transaction** (emails, HTTP calls, queue messages). Use
+  `transaction.on_commit`.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: a list of 50 orders shows each order's customer name and item count. Which query?"
+>
+  `Order.objects.select_related("customer").annotate(items=Count("lines"))`: the customer with a
+  JOIN and the count in SQL, one query in total.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: Product ← OrderLine. Which on_delete for OrderLine.product, and why?"
+>
+  `PROTECT`: an order line must keep pointing at what was sold. Retire products with
+  `is_active=False` instead of deleting them.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: select_related or prefetch_related for author.books?">
+  `prefetch_related("books")`: it's a reverse ForeignKey (one author, many books), so a JOIN would
+  repeat the author per book. From the book side, `select_related("author")`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why lock products 'in id order' in place_order?">
+  If two transactions lock the same rows in different orders, each can hold one lock and wait for
+  the other forever (a deadlock). A consistent order prevents that.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: you send a welcome email right after User.objects.create() inside atomic(), and the transaction later rolls back. What went wrong, and the fix?"
+>
+  The user got an email for an account that doesn't exist. Register the email with
+  `transaction.on_commit(...)` so it only goes out after the commit.
+</Reveal>
+
+<KeyTakeaways>
+
+- ForeignKey = many-to-one, ManyToMany = join table (`through=` for extra data), OneToOne = one-to-one;
+  name reverse sides with `related_name`.
+- Choose `on_delete` deliberately: PROTECT for history, CASCADE for parts, SET_NULL for optional links.
+- N+1 is one query per row; fix it with `select_related` (FK/O2O, JOIN) or `prefetch_related`
+  (M2M/reverse, one extra query), and `Prefetch` for subsets.
+- `transaction.atomic()` for all-or-nothing writes; `on_commit` for side effects.
+- Prevent races with `F()` updates and `select_for_update()` row locks (PostgreSQL/MySQL).
+- Raw SQL is fine with `%s` parameters; never format values into SQL.
+
+</KeyTakeaways>

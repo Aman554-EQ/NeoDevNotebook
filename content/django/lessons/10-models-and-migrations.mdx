@@ -1,0 +1,554 @@
+---
+title: Models & migrations
+summary: Describe your data as Python classes and let Django manage the tables. Field types and options, null vs blank, choices, Meta options, constraints and indexes, model methods and managers, validation with full_clean, and migrations from makemigrations to data migrations and team workflows.
+estimatedMinutes: 25
+difficulty: simple
+section: Django Core
+objectives:
+  - Define models with the right field types and options (null, blank, default, unique, choices)
+  - Add constraints and indexes in Meta and know which layer enforces what
+  - Validate model instances with full_clean and add model methods and custom managers
+  - Create, inspect and apply migrations, including data migrations
+  - Handle migrations safely in a team and on a live database
+prerequisites:
+  - Django in one picture
+  - Databases for backend developers
+tags: [django, models, orm, migrations, constraints]
+---
+
+## Intuition: the blueprint and the building log
+
+A **model** is the blueprint of one kind of thing your app stores: its fields, their rules, and the
+behaviour that belongs to it. Django builds the database table from the blueprint.
+
+Blueprints change: you add a field, rename one, add a rule. **Migrations** are the building log:
+numbered, committed files that describe each change, so every database (yours, your colleague's, CI,
+production) can be brought to exactly the same shape, in the same order.
+
+## See it
+
+<MigrationTimelineViz />
+
+## The precise rules
+
+**Common fields:**
+
+| Field                                                     | Stores            | Notes                                                  |
+| --------------------------------------------------------- | ----------------- | ------------------------------------------------------ |
+| `CharField(max_length=…)`                                 | short text        | `max_length` is required                               |
+| `TextField()`                                             | long text         |                                                        |
+| `IntegerField`, `PositiveIntegerField`, `BigIntegerField` | whole numbers     |                                                        |
+| `DecimalField(max_digits, decimal_places)`                | exact decimals    | money, never `FloatField`                              |
+| `BooleanField(default=False)`                             | true/false        |                                                        |
+| `DateField`, `DateTimeField`                              | dates, timestamps | `auto_now_add` (on create), `auto_now` (on every save) |
+| `EmailField`, `URLField`, `SlugField`                     | validated text    |                                                        |
+| `JSONField`, `UUIDField`                                  | JSON, UUIDs       |                                                        |
+| `ForeignKey`, `ManyToManyField`, `OneToOneField`          | relations         | lesson 12                                              |
+
+**Options:** `null=True` lets the **database** store NULL; `blank=True` lets **validation/forms**
+accept an empty value. Text fields usually use `blank=True` without `null=True` (empty string, not
+two kinds of "empty"). Also `default`, `unique`, `db_index`, `choices`, `help_text`, `verbose_name`,
+`validators=[...]`.
+
+**`Meta`:** `ordering`, `verbose_name_plural`, `constraints` (`UniqueConstraint`, including
+conditional ones, and `CheckConstraint`), `indexes`, `db_table`.
+
+**Who enforces what:**
+
+- `max_length`, `unique`, `null`, constraints: the **database**, on every write.
+- `blank`, `choices`, `validators`, `EmailField` format: **validation** only, which runs in forms,
+  DRF serializers and `full_clean()`, but **not** on a plain `save()`.
+
+**Model methods:** `__str__` (shown in the admin and shell), `get_absolute_url()`, properties for
+derived values, and methods for behaviour ("fat models"). **Managers** (`objects`) and custom
+**QuerySet** methods give names to common queries: `Post.objects.published()`.
+
+**Migrations:**
+
+```bash
+python manage.py makemigrations          # write migration files from model changes
+python manage.py sqlmigrate notes 0002   # print the SQL, change nothing
+python manage.py migrate                 # apply what this database hasn't applied yet
+python manage.py showmigrations          # [X] applied, [ ] pending
+python manage.py migrate notes 0001      # roll back to an earlier migration
+```
+
+A migration lists its **dependencies** and **operations** (`CreateModel`, `AddField`,
+`AlterField`, `RunPython`...). Here is the Library project's real first migration, with an index and
+a conditional unique constraint:
+
+<ProjectFile project="library" path="catalog/migrations/0001_initial.py" />
+
+**Data migrations** use `RunPython` to change rows, not just schema (always with a reverse function
+so they can be rolled back):
+
+```python norun title="notes/migrations/0003_title_case.py"
+from django.db import migrations
+
+
+def title_case(apps, schema_editor):
+    Note = apps.get_model("notes", "Note")  # the historical model, not an import
+    for note in Note.objects.all():
+        note.title = note.title.title()
+        note.save(update_fields=["title"])
+
+
+class Migration(migrations.Migration):
+    dependencies = [("notes", "0002_note_pinned")]
+    operations = [migrations.RunPython(title_case, migrations.RunPython.noop)]
+```
+
+**Teams and live databases:** commit migrations with the model change; never edit a migration that
+others have applied; two branches adding `0002_...` produce a conflict that `makemigrations --merge`
+resolves. On big production tables, change schemas in safe steps (add a nullable column, backfill,
+then add the constraint) so the site keeps running.
+
+## Worked example
+
+A model with the common field types, choices, a default, a constraint and methods, then a few rows.
+
+```python title="product_model.py"
+from decimal import Decimal
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+from django.db.models import Q
+
+
+class Product(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        ACTIVE = "active", "On sale"
+        RETIRED = "retired", "Retired"
+
+    name = models.CharField(max_length=120)
+    slug = models.SlugField(unique=True)
+    description = models.TextField(blank=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    stock = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [models.CheckConstraint(condition=Q(price__gte=0), name="price_not_negative")]
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def in_stock(self):
+        return self.stock > 0
+
+
+migrate()
+dune = Product.objects.create(name="Dune", slug="dune", price=Decimal("12.50"), stock=3,
+                              status=Product.Status.ACTIVE)
+Product.objects.create(name="Chess set", slug="chess", price=Decimal("30.00"))
+
+print(list(Product.objects.all()))
+print(dune.status, "->", dune.get_status_display(), "| in stock:", dune.in_stock)
+print(Product.objects.get(slug="chess").status, repr(Product.objects.get(slug="chess").description))
+print(dune.created_at is not None, type(dune.price).__name__)
+print([f.name for f in Product._meta.get_fields()])
+```
+
+```text title="Output"
+[<Product: Chess set>, <Product: Dune>]
+active -> On sale | in stock: True
+draft ''
+True Decimal
+['id', 'name', 'slug', 'description', 'price', 'stock', 'status', 'created_at']
+```
+
+- `TextChoices` gives you named constants (`Product.Status.ACTIVE`), the stored value (`"active"`)
+  and a human label available as `get_status_display()`.
+- `Meta.ordering` applies whenever a query has no explicit `order_by()`, which is why the list
+  comes out sorted by name.
+- `default=0` and `default=Status.DRAFT` filled in what wasn't given; `blank=True` text defaults to
+  an empty string.
+- `DecimalField` values are `Decimal`, never `float`. `auto_now_add` set `created_at` on creation.
+
+## Variations
+
+### null vs blank, and validation that save() skips
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.core.exceptions import ValidationError
+from django.db import models
+
+
+class Contact(models.Model):
+    name = models.CharField(max_length=50)
+    email = models.EmailField()
+    nickname = models.CharField(max_length=50, blank=True)  # may be "" (empty string)
+    age = models.PositiveIntegerField(null=True, blank=True)  # may be NULL ("unknown")
+
+
+migrate()
+bad = Contact(name="", email="not-an-email", age=None)
+bad.save()  # save() does NOT validate: the row is stored
+print("saved with id", bad.pk)
+
+try:
+    bad.full_clean()  # what forms and serializers call for you
+except ValidationError as exc:
+    for field, errors in sorted(exc.message_dict.items()):
+        print(f"{field}: {errors}")
+
+ok = Contact(name="Ada", email="ada@example.com")
+ok.full_clean()
+print("valid:", repr(ok.nickname), ok.age)
+```
+
+```text title="Output"
+saved with id 1
+email: ['Enter a valid email address.']
+name: ['This field cannot be blank.']
+valid: '' None
+```
+
+`blank` is a **validation** rule, `null` a **database** rule. Because `save()` doesn't run
+validation, code that creates objects outside forms and serializers must call `full_clean()` itself
+when it accepts untrusted input, or rely on database constraints.
+
+### Database constraints can't be bypassed
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import IntegrityError, models, transaction
+from django.db.models import Q
+
+
+class Booking(models.Model):
+    room = models.CharField(max_length=10)
+    night = models.DateField()
+    guests = models.PositiveIntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["room", "night"], name="one_booking_per_room_night"),
+            models.CheckConstraint(condition=Q(guests__lte=4), name="max_four_guests"),
+        ]
+
+
+migrate()
+Booking.objects.create(room="101", night="2026-05-01", guests=2)
+for data in [dict(room="101", night="2026-05-01", guests=1), dict(room="102", night="2026-05-01", guests=9)]:
+    try:
+        with transaction.atomic():
+            Booking.objects.create(**data)
+    except IntegrityError as exc:
+        print("IntegrityError:", exc)
+print(Booking.objects.count(), "booking stored")
+```
+
+```text title="Output"
+IntegrityError: UNIQUE constraint failed: shop_booking.room, shop_booking.night
+IntegrityError: CHECK constraint failed: max_four_guests
+1 booking stored
+```
+
+Two requests that both "check the room is free" before saving can still double-book it; the
+`UniqueConstraint` makes the database refuse the second one, whatever the code did. Wrapping each
+attempt in `transaction.atomic()` keeps a failed insert from breaking the rest of the transaction
+(required on PostgreSQL).
+
+### The SQL Django writes for a model
+
+```python
+from playground import setup
+
+setup()
+
+from django.db import connection, models
+
+
+class Author(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    born = models.DateField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["born"], name="author_born_idx")]
+
+
+with connection.schema_editor(collect_sql=True) as editor:
+    editor.create_model(Author)
+for statement in editor.collected_sql:
+    print(statement)
+```
+
+```text title="Output"
+CREATE TABLE "shop_author" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "name" varchar(100) NOT NULL UNIQUE, "born" date NULL);
+CREATE INDEX "author_born_idx" ON "shop_author" ("born");
+```
+
+This is what `sqlmigrate` shows for a `CreateModel` on SQLite. Note the 64-bit auto-increment `id`
+added for you, `NOT NULL` on every column except `born`, `UNIQUE` from `unique=True`, and the index
+from `Meta.indexes`. On PostgreSQL the same model produces `bigint GENERATED BY DEFAULT AS IDENTITY`
+and `varchar(100)`.
+
+### Custom managers and QuerySet methods
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+
+
+class PostQuerySet(models.QuerySet):
+    def published(self):
+        return self.filter(status="published")
+
+    def by(self, author):
+        return self.filter(author=author)
+
+
+class Post(models.Model):
+    title = models.CharField(max_length=100)
+    author = models.CharField(max_length=50)
+    status = models.CharField(max_length=10, default="draft")
+
+    objects = PostQuerySet.as_manager()
+
+
+migrate()
+Post.objects.bulk_create([
+    Post(title="Hello", author="ada", status="published"),
+    Post(title="Draft idea", author="ada"),
+    Post(title="Tips", author="bob", status="published"),
+])
+print(list(Post.objects.published().values_list("title", flat=True)))
+print(list(Post.objects.published().by("ada").values_list("title", flat=True)))
+print(Post.objects.by("ada").count())
+```
+
+```text title="Output"
+['Hello', 'Tips']
+['Hello']
+2
+```
+
+Named query methods remove repeated filters from views and chain like built-in ones. Defining them
+on a `QuerySet` (not just the manager) is what makes `published().by(...)` possible.
+
+### auto_now, auto_now_add and update_fields
+
+```python
+import time
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+
+
+class Doc(models.Model):
+    title = models.CharField(max_length=50)
+    views = models.PositiveIntegerField(default=0)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+
+migrate()
+doc = Doc.objects.create(title="Spec")
+first_update = doc.updated
+time.sleep(0.01)
+doc.title = "Spec v2"
+doc.save()
+print("save() bumps updated:", doc.updated > first_update)
+before = doc.updated
+time.sleep(0.01)
+Doc.objects.filter(pk=doc.pk).update(views=5)  # bulk update: skips save() and auto_now
+doc.refresh_from_db()
+print("queryset.update() bumps updated:", doc.updated > before, "| views:", doc.views)
+print("created never changes:", doc.created < doc.updated)
+```
+
+```text title="Output"
+save() bumps updated: True
+queryset.update() bumps updated: False | views: 5
+created never changes: True
+```
+
+`auto_now` runs inside `save()`, so `QuerySet.update()` (one SQL `UPDATE`, no `save()`) leaves it
+alone. Set the timestamp yourself in bulk updates if it matters.
+
+## Putting it together
+
+A small blog domain modelled carefully: choices for status, a unique slug, a rule that published
+posts must have a publish date (checked by both validation and the database), a custom QuerySet and
+a method that changes state.
+
+```python title="blog_models.py"
+from datetime import datetime, timezone
+
+from playground import migrate, setup
+
+setup()
+
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, models, transaction
+from django.db.models import Q
+
+
+class PostQuerySet(models.QuerySet):
+    def live(self, now):
+        return self.filter(status=Post.Status.PUBLISHED, published_at__lte=now)
+
+
+class Post(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft"
+        PUBLISHED = "published"
+
+    title = models.CharField(max_length=120)
+    slug = models.SlugField(unique=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    objects = PostQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-published_at", "title"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(status="draft") | Q(published_at__isnull=False),
+                name="published_posts_have_a_date",
+            )
+        ]
+
+    def clean(self):  # model-level validation, called by full_clean()
+        if self.status == self.Status.PUBLISHED and self.published_at is None:
+            raise ValidationError({"published_at": "Published posts need a publish date."})
+
+    def publish(self, when):
+        self.status, self.published_at = self.Status.PUBLISHED, when
+        self.full_clean()
+        self.save(update_fields=["status", "published_at"])
+
+    def __str__(self):
+        return self.title
+
+
+migrate()
+jan = datetime(2026, 1, 15, tzinfo=timezone.utc)
+mar = datetime(2026, 3, 1, tzinfo=timezone.utc)
+now = datetime(2026, 2, 1, tzinfo=timezone.utc)
+
+hello = Post.objects.create(title="Hello", slug="hello")
+hello.publish(jan)
+later = Post.objects.create(title="Coming soon", slug="soon")
+later.publish(mar)  # scheduled for the future
+Post.objects.create(title="Idea", slug="idea")
+
+print("live now:", list(Post.objects.live(now)))
+print("all:", [(p.title, p.status) for p in Post.objects.all()])
+
+broken = Post(title="Oops", slug="oops", status="published")
+try:
+    broken.full_clean()
+except ValidationError as exc:
+    print("validation:", exc.message_dict)
+try:
+    with transaction.atomic():
+        broken.save()  # skipping validation doesn't help: the database refuses
+except IntegrityError as exc:
+    print("database:", exc)
+```
+
+```text title="Output"
+live now: [<Post: Hello>]
+all: [('Coming soon', 'published'), ('Hello', 'published'), ('Idea', 'draft')]
+validation: {'published_at': ['Published posts need a publish date.']}
+database: CHECK constraint failed: published_posts_have_a_date
+```
+
+The same rule lives in two places on purpose: `clean()` gives a friendly, field-specific message to
+forms and APIs, and the `CheckConstraint` guarantees it even for code that skips validation. With
+`Meta.ordering = ["-published_at", ...]`, drafts (NULL dates) sort last on SQLite; PostgreSQL puts
+NULLs first in descending order, so order explicitly when it matters.
+
+## Common mistakes
+
+<Callout type="warning" title="Expecting save() to validate">
+  `Product(price=-5).save()` happily writes `-5` unless a database constraint stops it. `blank`,
+  `choices` and `validators` run only in `full_clean()`, forms and serializers.
+</Callout>
+
+- **`null=True` on text fields.** You get two empty values (`NULL` and `""`). Use `blank=True` with
+  the default empty string.
+- **`FloatField` for money.** Use `DecimalField`.
+- **Changing a model without a migration.** Queries fail with `no such column` /
+  `column ... does not exist`. Run `makemigrations` and commit the file. CI can run
+  `makemigrations --check` to catch it (this module's projects do).
+- **Editing or deleting applied migrations.** Other databases already ran them; add a new migration
+  instead.
+- **Importing models inside data migrations.** Use `apps.get_model(...)`, which matches the schema
+  at that point in history.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: an optional 'middle name' text field: null=True, blank=True, or both?"
+>
+  `blank=True` only: forms accept empty input and the database stores `""`. Adding `null=True` would
+  allow both `NULL` and `""` to mean "none".
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: how do you make (user, product) unique in a Wishlist model?"
+>
+  `class Meta: constraints = [models.UniqueConstraint(fields=["user", "product"],
+  name="unique_wish")]`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: what does 'makemigrations --check' do in CI?">
+  It exits with an error if any model change has no migration yet, without writing files, so a
+  forgotten migration fails the build instead of the deployment.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: you need to fill a new 'slug' column for 2 million existing rows. Where?"
+>
+  In a data migration (`RunPython`) after the migration that adds the column (nullable first),
+  processing rows in batches; add `unique=True`/`NOT NULL` in a later migration once every row has a
+  value.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why does Post.objects.published().by('ada') work only when published() is defined on a QuerySet?"
+>
+  A manager method returns a QuerySet; if `by()` exists only on the manager, the QuerySet returned
+  by `published()` doesn't have it. Methods on a custom QuerySet (`as_manager()`) chain in any
+  order.
+</Reveal>
+
+<KeyTakeaways>
+
+- A model is a class, a field is a column; pick precise types (Decimal for money) and options.
+- `null` is for the database, `blank` for validation; `save()` doesn't validate, `full_clean()`
+  does.
+- Put rules that must never break in `Meta.constraints`; keep friendly checks in `clean()` too.
+- Custom QuerySet methods name your common queries and chain.
+- Migrations are committed history: makemigrations → (sqlmigrate) → migrate; RunPython for data;
+  never edit applied ones.
+
+</KeyTakeaways>

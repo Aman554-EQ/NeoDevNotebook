@@ -1,0 +1,540 @@
+---
+title: Forms & validation
+summary: Turn untrusted input into clean, typed, validated data. Django Form and ModelForm, the validation order (conversion, validators, clean_<field>, clean), showing errors, saving with commit=False, CSRF protection explained, file uploads with limits, and formsets.
+estimatedMinutes: 22
+difficulty: simple
+section: Django Core
+objectives:
+  - Build Forms and ModelForms and read only cleaned_data
+  - Add field-level and cross-field validation, and attach errors to the right field
+  - Explain how CSRF protection works and when it applies
+  - Accept file uploads with type and size limits
+  - Handle the GET / invalid POST / valid POST cycle with Post/Redirect/Get
+prerequisites:
+  - URLs & views
+  - Models & migrations
+tags: [django, forms, validation, csrf, uploads]
+---
+
+## Intuition: customs at the border
+
+Everything a browser sends is a string from a stranger. A **form** is the customs desk: it converts
+each value to the right type, checks it against the rules, and either lets a clean, typed bundle
+through (`cleaned_data`) or hands back a precise list of what's wrong, field by field. Your view only
+ever touches what passed customs.
+
+## See it
+
+<ValidationFlowViz />
+
+## The precise rules
+
+**Form vs ModelForm:** a `Form` declares its fields; a `ModelForm` generates them from a model
+(`Meta.model`, `Meta.fields`) and can `save()` an instance. Always list `fields` explicitly; never
+`"__all__"` for user-facing forms (a new model field such as `is_staff` would become editable).
+
+**A form is bound or unbound:** `Form()` is empty (for displaying); `Form(request.POST,
+request.FILES)` is bound to data. Only bound forms validate.
+
+**Validation order** when you call `is_valid()` (or access `errors`):
+
+1. each field's `to_python()` converts the string (`"3"` → `3`), then `validate()` and its
+   `validators` run;
+2. `clean_<fieldname>()` methods run, in field order, and may return a changed value;
+3. `clean()` runs once for cross-field rules (it runs even if some fields failed, so use `.get()`);
+4. for ModelForms, model validation (`full_clean`, including unique checks) runs too.
+
+Errors are collected, not raised: `form.errors` (dict of lists), `form.non_field_errors()` (from
+`clean()`), `form.add_error("field", "message")` to attach a cross-field problem to one field.
+
+**Saving:** `form.save()` creates or updates the instance. `form.save(commit=False)` returns an
+unsaved instance so you can set fields the user must not control (`owner = request.user`), then
+`instance.save()` (and `form.save_m2m()` for many-to-many fields).
+
+**CSRF (cross-site request forgery):** a malicious site can make your browser submit a form to your
+bank, and the browser attaches your cookies. Django blocks this: `CsrfViewMiddleware` requires every
+unsafe request (POST, PUT, PATCH, DELETE) to carry a secret token that only pages from your site
+know: `{% csrf_token %}` in forms, or the `X-CSRFToken` header for JavaScript. A missing or wrong
+token gives `403 Forbidden`. Token-authenticated APIs (no cookies) don't need it; that's why DRF only
+enforces CSRF for session authentication.
+
+**Uploads:** the form needs `enctype="multipart/form-data"`; files arrive in `request.FILES`. Limit
+size and type yourself (`FileExtensionValidator`, a `clean_<field>` size check), never trust the
+file name, and store user files outside your code (`MEDIA_ROOT` or object storage).
+
+**Formsets** manage several copies of a form on one page (`formset_factory`,
+`modelformset_factory`, `inlineformset_factory`).
+
+## Worked example
+
+A form converting and validating raw POST data, including your own rules.
+
+```python title="contact_form.py"
+from playground import setup
+
+setup()
+
+from django import forms
+
+
+class ContactForm(forms.Form):
+    name = forms.CharField(max_length=50)
+    email = forms.EmailField()
+    age = forms.IntegerField(min_value=13, required=False)
+    topic = forms.ChoiceField(choices=[("bug", "Bug report"), ("idea", "Feature idea")])
+    message = forms.CharField(min_length=10)
+
+    def clean_name(self):
+        return self.cleaned_data["name"].strip().title()
+
+    def clean_message(self):
+        message = self.cleaned_data["message"]
+        if "http://" in message:
+            raise forms.ValidationError("Links must use https://.")
+        return message
+
+
+good = ContactForm({"name": "  ada lovelace ", "email": "ada@example.com", "age": "36",
+                    "topic": "idea", "message": "Please add dark mode."})
+print(good.is_valid(), good.cleaned_data)
+
+bad = ContactForm({"name": "", "email": "nope", "age": "12", "topic": "spam",
+                   "message": "see http://x"})
+print(bad.is_valid())
+for field, errors in bad.errors.items():
+    print(f"  {field}: {errors[0]}")
+```
+
+```text title="Output"
+True {'name': 'Ada Lovelace', 'email': 'ada@example.com', 'age': 36, 'topic': 'idea', 'message': 'Please add dark mode.'}
+False
+  name: This field is required.
+  email: Enter a valid email address.
+  age: Ensure this value is greater than or equal to 13.
+  topic: Select a valid choice. spam is not one of the available choices.
+  message: Links must use https://.
+```
+
+- Every value arrived as a string; `cleaned_data` holds converted values (`age` is the int `36`) after
+  your `clean_name` tidied the name.
+- `required=False` made `age` optional; left out, it would be `None`.
+- All problems are reported together, each under its field: the user can fix everything in one go.
+- `ChoiceField` only accepts the listed values, so a hand-crafted POST with `topic=spam` fails.
+
+## Variations
+
+### A ModelForm, saved with commit=False
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django import forms
+from django.contrib.auth.models import User
+from django.db import models
+
+
+class Note(models.Model):
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    title = models.CharField(max_length=100)
+    body = models.TextField(blank=True)
+
+
+class NoteForm(forms.ModelForm):
+    class Meta:
+        model = Note
+        fields = ["title", "body"]  # owner is NOT editable by the user
+
+
+migrate()
+ada = User.objects.create_user("ada")
+mallory = User.objects.create_user("mallory")
+
+form = NoteForm({"title": "Groceries", "body": "milk", "owner": mallory.pk})  # injected owner ignored
+print(form.is_valid(), list(form.fields))
+note = form.save(commit=False)
+note.owner = ada  # set server-side fields before saving
+note.save()
+print(Note.objects.get().owner.username, Note.objects.get().title)
+
+edit = NoteForm({"title": "Groceries for Sunday", "body": ""}, instance=note)
+edit.save()
+print(Note.objects.get().title, repr(Note.objects.get().body))
+```
+
+```text title="Output"
+True ['title', 'body']
+ada Groceries
+Groceries for Sunday ''
+```
+
+Fields not listed in `Meta.fields` can't be set through the form, even if an attacker adds them to
+the POST. Passing `instance=` turns the same form into an edit form.
+
+### Cross-field rules and add_error
+
+```python
+from datetime import date
+
+from playground import setup
+
+setup()
+
+from django import forms
+
+
+class BookingForm(forms.Form):
+    start = forms.DateField()
+    end = forms.DateField()
+    guests = forms.IntegerField(min_value=1, max_value=8)
+    coupon = forms.CharField(required=False)
+
+    def clean(self):
+        data = super().clean()
+        start, end = data.get("start"), data.get("end")  # .get(): they may have failed already
+        if start and end and end <= start:
+            self.add_error("end", "Must be after the start date.")
+        if data.get("coupon") == "FAMILY" and data.get("guests", 0) < 3:
+            raise forms.ValidationError("The FAMILY coupon needs at least 3 guests.")
+        return data
+
+
+form = BookingForm({"start": "2026-05-10", "end": "2026-05-08", "guests": "2", "coupon": "FAMILY"})
+print(form.is_valid())
+print("end:", list(form.errors["end"]))
+print("non-field:", list(form.non_field_errors()))
+ok = BookingForm({"start": "2026-05-10", "end": "2026-05-12", "guests": "4", "coupon": "FAMILY"})
+print(ok.is_valid(), ok.cleaned_data["start"] == date(2026, 5, 10), ok.cleaned_data["guests"])
+```
+
+```text title="Output"
+False
+end: ['Must be after the start date.']
+non-field: ['The FAMILY coupon needs at least 3 guests.']
+True True 4
+```
+
+`add_error("end", ...)` shows the message next to the field that needs fixing; raising
+`ValidationError` in `clean()` produces a form-wide (non-field) error shown above the form.
+
+### Errors as data, for APIs and JavaScript
+
+```python
+import json
+
+from playground import setup
+
+setup()
+
+from django import forms
+
+
+class SignupForm(forms.Form):
+    email = forms.EmailField()
+    password = forms.CharField(min_length=12)
+
+
+form = SignupForm({"email": "ada@", "password": "short"})
+form.is_valid()
+print(json.dumps(form.errors.get_json_data(), indent=1))
+print(form["email"].errors.as_text())
+print(form.errors.as_data()["password"][0].code)
+```
+
+```text title="Output"
+{
+ "email": [
+  {
+   "message": "Enter a valid email address.",
+   "code": "invalid"
+  }
+ ],
+ "password": [
+  {
+   "message": "Ensure this value has at least 12 characters (it has 5).",
+   "code": "min_length"
+  }
+ ]
+}
+* Enter a valid email address.
+min_length
+```
+
+`get_json_data()` gives structured errors with machine-readable `code`s (`invalid`, `min_length`,
+`required`), the same idea DRF serializers use for API responses.
+
+### CSRF in action
+
+```python
+import re
+
+from playground import setup
+
+setup(templates={"form.html": '<form method="post">{% csrf_token %}<input name="q"></form>'})
+
+from django.http import HttpResponse
+from django.shortcuts import render
+from django.test import Client
+from django.urls import path
+
+
+def search(request):
+    if request.method == "POST":
+        return HttpResponse(f"searched for {request.POST['q']}")
+    return render(request, "form.html")
+
+
+urlpatterns = [path("search/", search)]
+browser = Client(enforce_csrf_checks=True)  # the default test client skips CSRF checks
+
+print("POST without token:", browser.post("/search/", {"q": "dune"}).status_code)
+page = browser.get("/search/").content.decode()
+token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', page).group(1)
+print("token in the page and cookie:", len(token) == 64, "csrftoken" in browser.cookies)
+response = browser.post("/search/", {"q": "dune", "csrfmiddlewaretoken": token})
+print("POST with token:", response.status_code, response.content.decode())
+```
+
+```text title="Output"
+POST without token: 403
+token in the page and cookie: True True
+POST with token: 200 searched for dune
+```
+
+The page your site served contains the token; a page on another site can't read it, so its forged
+POST fails with `403`. JavaScript on your own pages reads the `csrftoken` cookie and sends it as the
+`X-CSRFToken` header.
+
+### File uploads with limits
+
+```python
+from playground import setup
+
+setup()
+
+from django import forms
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.validators import FileExtensionValidator
+
+MAX_BYTES = 1024 * 1024  # 1 MB
+
+
+class AvatarForm(forms.Form):
+    avatar = forms.FileField(validators=[FileExtensionValidator(["png", "jpg", "jpeg"])])
+
+    def clean_avatar(self):
+        file = self.cleaned_data["avatar"]
+        if file.size > MAX_BYTES:
+            raise forms.ValidationError(f"Max 1 MB (this file is {file.size // 1024} KB).")
+        return file
+
+
+tests = {
+    "ok": SimpleUploadedFile("me.png", b"\x89PNG..." * 10, content_type="image/png"),
+    "too big": SimpleUploadedFile("me.jpg", b"x" * (MAX_BYTES + 1), content_type="image/jpeg"),
+    "wrong type": SimpleUploadedFile("me.exe", b"MZ...", content_type="application/octet-stream"),
+}
+for label, upload in tests.items():
+    form = AvatarForm(files={"avatar": upload})
+    print(f"{label:<10}", form.is_valid(), form.errors.get("avatar", ["accepted"])[0])
+```
+
+```text title="Output"
+ok         True accepted
+too big    False Max 1 MB (this file is 1024 KB).
+wrong type False File extension “exe” is not allowed. Allowed extensions are: png, jpg, jpeg.
+```
+
+Uploaded files arrive in `request.FILES` (pass it as the form's second argument). The extension check
+is a first filter only: a real image field (`ImageField`, which needs Pillow) also checks that the
+content decodes as an image. Configure `DATA_UPLOAD_MAX_MEMORY_SIZE` and your web server's body limit
+too.
+
+### Several rows at once: a formset
+
+```python
+from playground import setup
+
+setup()
+
+from django import forms
+
+
+class LineForm(forms.Form):
+    product = forms.CharField()
+    qty = forms.IntegerField(min_value=1)
+
+
+LineFormSet = forms.formset_factory(LineForm, extra=0)
+data = {
+    "form-TOTAL_FORMS": "2", "form-INITIAL_FORMS": "0",
+    "form-0-product": "Dune", "form-0-qty": "2",
+    "form-1-product": "Emma", "form-1-qty": "0",
+}
+formset = LineFormSet(data)
+print(formset.is_valid())
+print([f.errors for f in formset])
+data["form-1-qty"] = "1"
+formset = LineFormSet(data)
+print(formset.is_valid(), [f.cleaned_data for f in formset])
+```
+
+```text title="Output"
+False
+[{}, {'qty': ['Ensure this value is greater than or equal to 1.']}]
+True [{'product': 'Dune', 'qty': 2}, {'product': 'Emma', 'qty': 1}]
+```
+
+The management fields (`TOTAL_FORMS`, `INITIAL_FORMS`) tell Django how many forms were submitted;
+`{{ formset.management_form }}` renders them. Each form validates independently.
+
+## Putting it together
+
+The complete form workflow in a view: GET shows an empty form, an invalid POST re-renders it with
+errors (status 200), a valid POST saves, adds a message and **redirects** (Post/Redirect/Get), all
+with CSRF enforced like a real browser. This is the Notes project's create view:
+
+<ProjectFiles project="notes" paths="notes/forms.py notes/views.py" />
+
+The same cycle, runnable:
+
+```python title="note_form_view.py"
+import re
+
+from playground import migrate, setup
+
+setup(templates={
+    "form.html": '<form method="post">{% csrf_token %}{{ form.title.errors }}{{ form.title }}</form>',
+    "list.html": "{% for m in messages %}{{ m }} {% endfor %}| {{ notes|join:', ' }}",
+})
+
+from django import forms
+from django.contrib import messages
+from django.db import models
+from django.shortcuts import redirect, render
+from django.test import Client
+from django.urls import path
+
+
+class Note(models.Model):
+    title = models.CharField(max_length=60)
+
+    def __str__(self):
+        return self.title
+
+
+class NoteForm(forms.ModelForm):
+    class Meta:
+        model = Note
+        fields = ["title"]
+
+    def clean_title(self):
+        title = self.cleaned_data["title"].strip()
+        if len(title) < 3:
+            raise forms.ValidationError("Use at least 3 characters.")
+        return title
+
+
+def note_create(request):
+    form = NoteForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        note = form.save()
+        messages.success(request, f"Saved {note}.")
+        return redirect("note-list")
+    return render(request, "form.html", {"form": form})
+
+
+def note_list(request):
+    return render(request, "list.html", {"notes": Note.objects.order_by("id")})
+
+
+urlpatterns = [path("new/", note_create), path("", note_list, name="note-list")]
+migrate()
+browser = Client(enforce_csrf_checks=True)
+
+
+def csrf(page):
+    return re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', page.content.decode()).group(1)
+
+
+page = browser.get("/new/")
+print("GET:", page.status_code, "| title input shown:", 'name="title"' in page.content.decode())
+bad = browser.post("/new/", {"title": " a ", "csrfmiddlewaretoken": csrf(page)})
+print("invalid POST:", bad.status_code, "| error shown:", "at least 3 characters" in bad.content.decode())
+good = browser.post("/new/", {"title": "Groceries", "csrfmiddlewaretoken": csrf(bad)}, follow=True)
+print("valid POST:", good.redirect_chain, "->", good.content.decode())
+print("refresh after redirect:", browser.get("/").content.decode(), "(no duplicate, no repeated message)")
+```
+
+```text title="Output"
+GET: 200 | title input shown: True
+invalid POST: 200 | error shown: True
+valid POST: [('/', 302)] -> Saved Groceries. | Groceries
+refresh after redirect: | Groceries (no duplicate, no repeated message)
+```
+
+The invalid POST answered `200` with the form and its error, not a redirect, so the user's input is
+kept. The valid POST redirected, so refreshing the page repeats a harmless GET instead of creating a
+second note.
+
+## Common mistakes
+
+<Callout type="warning" title="Using request.POST instead of cleaned_data">
+  `Note.objects.create(title=request.POST["title"])` skips every check (types, lengths, your rules)
+  and crashes on a missing key. Validate with a form (or a DRF serializer) and read
+  `form.cleaned_data`.
+</Callout>
+
+- **`fields = "__all__"`** on a ModelForm: a new sensitive model field becomes editable. List fields
+  explicitly.
+- **Redirecting after an invalid POST.** The errors and the user's input are lost; re-render the form
+  instead.
+- **`@csrf_exempt` to "fix" a 403.** Add `{% csrf_token %}` (or the header for JavaScript). Exempt
+  only endpoints authenticated by something else, such as signed webhooks.
+- **Indexing `cleaned_data["x"]` in `clean()`.** A field that failed earlier is missing; use `.get()`.
+- **Trusting upload names, types and sizes.** Check size and content; never use the user's file name
+  as a path.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: in which method do you check that 'password' and 'confirm' match?"
+>
+  In `clean()` (cross-field), reading both with `.get()` and calling `self.add_error("confirm",
+  "Passwords don't match.")`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: how do you save a ModelForm but set the author to the logged-in user?"
+>
+  `obj = form.save(commit=False); obj.author = request.user; obj.save()` (and `form.save_m2m()` if
+  the form has many-to-many fields).
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why don't token-authenticated APIs need CSRF tokens?">
+  CSRF abuses cookies the browser attaches automatically. A token in the `Authorization` header is
+  only sent when your code adds it, which another site can't make the browser do.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what status should an invalid form submission return, and why not a redirect?"
+>
+  `200` with the re-rendered form and errors (APIs use `400`). A redirect would drop the errors and
+  the user's input.
+</Reveal>
+
+<KeyTakeaways>
+
+- Bind forms to `request.POST` (and `request.FILES`), call `is_valid()`, use only `cleaned_data`.
+- Order: convert + validators → `clean_<field>()` → `clean()` → model validation; errors are
+  collected per field.
+- ModelForm with explicit `fields`; `save(commit=False)` to set server-side values.
+- CSRF tokens protect cookie-authenticated unsafe requests; `{% csrf_token %}` in every POST form.
+- Validate uploads (type, size, content) and store them outside your code.
+- GET → form; invalid POST → same form with errors; valid POST → save, message, redirect.
+
+</KeyTakeaways>
