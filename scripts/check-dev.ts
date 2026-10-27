@@ -19,19 +19,23 @@ const routes = [
   "/interview",
   "/progress",
   "/bookmarks",
-  ...content.flatMap(({ module: m, lessons, problems, interview }) => [
+  "/projects",
+  ...content.flatMap(({ module: m, lessons, problems, interview, projects }) => [
     `/learn/${m.slug}`,
     `/practice/${m.slug}`,
     `/interview/${m.slug}`,
     ...lessons.map((l) => `/learn/${m.slug}/${l.slug}`),
     ...problems.map((p) => `/practice/${m.slug}/${p.id}`),
     ...interview.map((q) => `/interview/${m.slug}/${q.id}`),
+    ...(projects.length ? [`/projects/${m.slug}`] : []),
+    ...projects.map((p) => `/projects/${m.slug}/${p.slug}`),
   ]),
 ]
 const sequenceStarts = content.flatMap(
-  ({ module: m, lessons, problems, interview }) =>
+  ({ module: m, lessons, problems, interview, projects }) =>
     [
       lessons[0] && `/learn/${m.slug}/${lessons[0].slug}`,
+      projects[0] && `/projects/${m.slug}/${projects[0].slug}`,
       problems[0] && `/practice/${m.slug}/${problems[0].id}`,
       interview[0] && `/interview/${m.slug}/${interview[0].id}`,
     ].filter(Boolean) as string[],
@@ -78,6 +82,11 @@ for (const route of routes) {
   }
   const issues = await overlayIssues(page)
   if (issues) problems.push(`${route} [next-overlay] ${issues}`)
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  )
+  if (overflow > 0)
+    problems.push(`${route} [horizontal scroll] ${overflow}px wider than the viewport`)
   process.stdout.write(".")
 }
 

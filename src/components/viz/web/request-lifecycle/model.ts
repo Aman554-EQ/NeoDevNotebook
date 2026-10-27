@@ -20,25 +20,25 @@ export type Frame = {
 
 export const STACKS: Record<Framework, Layer[]> = {
   django: [
-    { id: "client", label: "Client", detail: "browser / app" },
+    { id: "client", label: "Client", detail: "browser, app" },
     { id: "server", label: "gunicorn", detail: "WSGI server" },
-    { id: "middleware", label: "Middleware", detail: "settings.MIDDLEWARE" },
+    { id: "middleware", label: "Middleware", detail: "MIDDLEWARE" },
     { id: "router", label: "URLconf", detail: "urls.py" },
     { id: "view", label: "View", detail: "views.py" },
     { id: "orm", label: "ORM", detail: "models.py" },
     { id: "db", label: "Database", detail: "PostgreSQL" },
   ],
   fastapi: [
-    { id: "client", label: "Client", detail: "browser / app" },
+    { id: "client", label: "Client", detail: "browser, app" },
     { id: "server", label: "uvicorn", detail: "ASGI server" },
-    { id: "middleware", label: "Middleware", detail: "app.add_middleware" },
+    { id: "middleware", label: "Middleware", detail: "add_middleware" },
     { id: "router", label: "Router", detail: "APIRouter" },
     { id: "deps", label: "Dependencies", detail: "Depends()" },
     { id: "view", label: "Endpoint", detail: "path function" },
     { id: "db", label: "Database", detail: "SQLAlchemy" },
   ],
   flask: [
-    { id: "client", label: "Client", detail: "browser / app" },
+    { id: "client", label: "Client", detail: "browser, app" },
     { id: "server", label: "gunicorn", detail: "WSGI server" },
     { id: "middleware", label: "before_request", detail: "hooks" },
     { id: "router", label: "URL map", detail: "@app.route" },

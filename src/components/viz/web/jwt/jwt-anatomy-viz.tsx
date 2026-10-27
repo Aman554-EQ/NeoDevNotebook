@@ -112,32 +112,36 @@ function Scene() {
         className="bg-code-bg border-rule rounded-lg border px-3 py-2 font-mono text-xs break-all sm:text-sm"
         data-testid="jwt-token"
       >
-        <span className={cn("text-[var(--series-1)]", step === 1 && "font-bold underline")}>
+        <span className={cn("border-b-[3px] border-[var(--series-1)]", step === 1 && "font-bold")}>
           {h}
         </span>
         .
         <span
           className={cn(
-            "text-[var(--series-2)]",
-            (step === 2 || tampered) && "font-bold underline",
+            "border-b-[3px] border-[var(--series-2)]",
+            (step === 2 || tampered) && "font-bold",
           )}
         >
           {p}
         </span>
         .
-        <span className={cn("text-[var(--series-3)]", step === 3 && "font-bold underline")}>
+        <span className={cn("border-b-[3px] border-[var(--series-3)]", step === 3 && "font-bold")}>
           {s}
         </span>
       </p>
 
       <div className="grid gap-3 md:grid-cols-3">
-        <Part title="Header" tone="text-[var(--series-1)]" active={step === 1}>
+        <Part title="Header" tone="border-b-[3px] border-[var(--series-1)]" active={step === 1}>
           {JSON.stringify(HEADER, null, 2)}
         </Part>
-        <Part title="Payload" tone="text-[var(--series-2)]" active={step === 2 || tampered}>
+        <Part
+          title="Payload"
+          tone="border-b-[3px] border-[var(--series-2)]"
+          active={step === 2 || tampered}
+        >
           {decoded ? JSON.stringify(decoded, null, 2) : "…"}
         </Part>
-        <Part title="Signature" tone="text-[var(--series-3)]" active={step === 3}>
+        <Part title="Signature" tone="border-b-[3px] border-[var(--series-3)]" active={step === 3}>
           {"HMACSHA256(\n  secret,\n  header + '.' + payload\n)"}
         </Part>
       </div>
@@ -187,7 +191,9 @@ function Part({
       <h4 className={cn("border-rule border-b px-3 py-1 text-xs font-semibold uppercase", tone)}>
         {title}
       </h4>
-      <pre className="overflow-x-auto px-3 py-2 font-mono text-xs leading-relaxed">{children}</pre>
+      <pre tabIndex={0} className="overflow-x-auto px-3 py-2 font-mono text-xs leading-relaxed">
+        {children}
+      </pre>
     </section>
   )
 }

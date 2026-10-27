@@ -8,6 +8,22 @@ import { SceneStage, TextFace, useNarrow, useThemeColors } from "../../_shared/t
 import { useViz } from "../../_shared/viz-frame"
 import { STACKS, type Frame, type Framework } from "./model"
 
+/** Blend two hex colours (#rgb or #rrggbb): t=0 gives a, t=1 gives b. */
+function mix(a: string, b: string, t: number) {
+  const full = (hex: string) =>
+    /^#[0-9a-f]{3}$/i.test(hex) ? `#${[...hex.slice(1)].map((d) => d + d).join("")}` : hex
+  const [x, y] = [full(a), full(b)]
+  if (!/^#[0-9a-f]{6}$/i.test(x) || !/^#[0-9a-f]{6}$/i.test(y)) return a
+  const ch = (hex: string, i: number) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16)
+  return `#${[0, 1, 2]
+    .map((i) =>
+      Math.round(ch(x, i) * (1 - t) + ch(y, i) * t)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`
+}
+
 const WIDE_GAP = 1.6
 const NARROW_GAP = 0.82
 
@@ -46,19 +62,21 @@ export default function RequestLifecycleScene3D({
     >
       {layers.map((layer, i) => {
         const active = i === f.at
+        // Passed layers: a light tint of the accent; layers not reached yet: plain surface.
         const color = active
           ? f.tone === "error"
             ? c.hard
             : c.accent
           : visited(i)
-            ? c.accentSoft
+            ? mix(c.accent, c.surface, 0.72)
             : c.surface
         const ink = active ? c.accentInk : c.ink
         const [x, y] = pos(i)
         return (
           <group key={layer.id} position={[x, y, 0]}>
             <RoundedBox args={slab} radius={0.06}>
-              <meshStandardMaterial color={color} />
+              {/* A little emission keeps light colours light (and dark ones visible) under the lights. */}
+              <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.35} />
             </RoundedBox>
             {narrow ? (
               <>

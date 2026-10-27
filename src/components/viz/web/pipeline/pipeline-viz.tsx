@@ -67,7 +67,8 @@ function Scene({ nodes, steps }: { nodes: PipelineNode[]; steps: PipelineStep[] 
                   active && !error && "border-accent bg-accent-soft",
                   active && error && "border-hard bg-hard-soft",
                   !active && done && "border-accent/40 bg-surface",
-                  !active && !done && "border-rule bg-surface opacity-70",
+                  // Not reached yet: a quieter border, but full-contrast text (no opacity).
+                  !active && !done && "border-rule bg-surface border-dashed",
                 )}
               >
                 <span className="block text-sm font-semibold">{n.label}</span>
@@ -89,7 +90,10 @@ function Scene({ nodes, steps }: { nodes: PipelineNode[]; steps: PipelineStep[] 
           <p className="text-muted border-rule border-b px-3 py-1 text-xs font-semibold tracking-wide uppercase">
             {s.panel.title}
           </p>
-          <pre className="bg-code-bg overflow-x-auto px-3 py-2 font-mono text-xs leading-relaxed sm:text-[0.8rem]">
+          <pre
+            tabIndex={0}
+            className="bg-code-bg overflow-x-auto px-3 py-2 font-mono text-xs leading-relaxed sm:text-[0.8rem]"
+          >
             {s.panel.lines.join("\n")}
           </pre>
         </div>

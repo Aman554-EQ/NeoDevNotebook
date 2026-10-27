@@ -62,7 +62,11 @@ function Scene({ steps, code }: { steps: OrmStep[]; code: Code }) {
         <CodeHtml key={i} html={html} label={`SQL query ${i + 1}`} />
       ))}
       <p className="text-muted pt-1 text-xs font-semibold tracking-wide uppercase">Result</p>
-      <pre className="bg-surface-2 overflow-x-auto rounded-md px-3 py-2 font-mono text-xs">
+      <pre
+        tabIndex={0}
+        aria-label="Query result"
+        className="bg-surface-2 overflow-x-auto rounded-md px-3 py-2 font-mono text-xs"
+      >
         {s.result}
       </pre>
     </div>

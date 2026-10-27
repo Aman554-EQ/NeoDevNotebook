@@ -156,7 +156,10 @@ function CommandScene({ commands, steps }: { commands: Command[]; steps: Command
           </section>
         ))}
       </div>
-      <pre className="bg-code-bg border-rule overflow-x-auto rounded-lg border px-3 py-2 font-mono text-xs leading-relaxed sm:text-[0.8rem]">
+      <pre
+        tabIndex={0}
+        className="bg-code-bg border-rule overflow-x-auto rounded-lg border px-3 py-2 font-mono text-xs leading-relaxed sm:text-[0.8rem]"
+      >
         {s.terminal.join("\n")}
       </pre>
     </div>
@@ -192,7 +195,10 @@ function TwoColumns({
           <h4 className="border-rule bg-surface-2 border-b px-3 py-1.5 text-sm font-semibold">
             {col.title}
           </h4>
-          <pre className="overflow-x-auto px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap sm:text-[0.8rem]">
+          <pre
+            tabIndex={0}
+            className="overflow-x-auto px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap sm:text-[0.8rem]"
+          >
             {col.lines.join("\n")}
           </pre>
         </section>
@@ -460,7 +466,10 @@ function PyramidScene() {
           </div>
         ))}
       </div>
-      <pre className="bg-code-bg border-rule mx-auto max-w-2xl overflow-x-auto rounded-lg border px-3 py-2 font-mono text-xs leading-relaxed sm:text-[0.8rem]">
+      <pre
+        tabIndex={0}
+        className="bg-code-bg border-rule mx-auto max-w-2xl overflow-x-auto rounded-lg border px-3 py-2 font-mono text-xs leading-relaxed sm:text-[0.8rem]"
+      >
         {s.example.join("\n")}
       </pre>
     </div>
@@ -536,7 +545,26 @@ function CompareScene() {
   const { step } = useViz()
   return (
     <div className="p-4" data-testid="framework-compare">
-      <div tabIndex={0} role="region" aria-label="Comparison table" className="overflow-x-auto">
+      {/* Phones: the current aspect as three stacked cards, so nothing is cut off. */}
+      <div className="sm:hidden">
+        <p className="mb-2 font-semibold">{ROWS[step]!.aspect}</p>
+        <dl className="space-y-2">
+          {(["django", "fastapi", "flask"] as const).map((fw) => (
+            <div key={fw} className="border-rule rounded-lg border px-3 py-2">
+              <dt className="text-sm font-semibold">
+                {{ django: "Django", fastapi: "FastAPI", flask: "Flask" }[fw]}
+              </dt>
+              <dd className="text-sm">{ROWS[step]![fw]}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label="Comparison table"
+        className="hidden overflow-x-auto sm:block"
+      >
         <table className="w-full min-w-[36rem] text-left text-xs sm:text-sm">
           <thead>
             <tr className="border-rule border-b">

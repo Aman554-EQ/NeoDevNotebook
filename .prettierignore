@@ -11,3 +11,5 @@ content/**/recordings/*.json
 projects/**/openapi.yaml
 public/postman
 .venv-verify
+# Django templates: Prettier does not understand {% %} tags
+projects/**/templates/**
