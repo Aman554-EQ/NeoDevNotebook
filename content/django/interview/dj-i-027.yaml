@@ -1,0 +1,29 @@
+id: dj-i-027
+question: How do you change a database schema with zero downtime?
+difficulty: hard
+tags:
+  - migrations
+  - deployment
+shortAnswer: |
+  Make every step compatible with both the old and new code: expand (add nullable columns/tables), backfill in batches, switch the code, then contract (add constraints, drop old columns) in a later release. Avoid long locks: create indexes concurrently, split big data migrations.
+detailedAnswer: |
+  During a rolling deploy, old and new code run against the same database. A rename or drop in one step
+  breaks whichever version doesn't expect it. The **expand/contract** pattern:
+
+  1. **Expand**: add the new column as nullable (or with a default that doesn't rewrite the table), new
+     tables, new indexes (`AddIndexConcurrently` on PostgreSQL, in a non-atomic migration). New code
+     writes both old and new fields.
+  2. **Backfill**: a data migration or management command copies data in batches, with no long
+     transactions.
+  3. **Switch**: code reads the new field; add `NOT NULL` / constraints (on PostgreSQL, a `NOT VALID`
+     constraint then `VALIDATE` avoids long locks).
+  4. **Contract**: remove the old field from code; drop the column in a later release.
+
+  Also: run migrations before the new code takes traffic, check generated SQL with `sqlmigrate`, set
+  `lock_timeout`, and remember MySQL can't roll back DDL.
+pitfalls:
+  - RenameField on a live table in one release.
+  - Adding a NOT NULL column with a default on a huge table on old PostgreSQL/MySQL versions.
+followUps:
+  - How do you run a long backfill safely?
+  - What about removing a model?

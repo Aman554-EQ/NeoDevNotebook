@@ -1,0 +1,237 @@
+{
+  "kind": "sql",
+  "title": "SQL essentials, step by step",
+  "tables": [
+    {
+      "name": "customers",
+      "columns": [
+        "id",
+        "name",
+        "city"
+      ],
+      "rows": [
+        [
+          1,
+          "Ada",
+          "London"
+        ],
+        [
+          2,
+          "Grace",
+          "New York"
+        ],
+        [
+          3,
+          "Linus",
+          "Helsinki"
+        ],
+        [
+          4,
+          "Margaret",
+          "Boston"
+        ]
+      ]
+    },
+    {
+      "name": "orders",
+      "columns": [
+        "id",
+        "customer_id",
+        "total",
+        "status"
+      ],
+      "rows": [
+        [
+          10,
+          1,
+          25,
+          "paid"
+        ],
+        [
+          11,
+          1,
+          8.5,
+          "pending"
+        ],
+        [
+          12,
+          2,
+          120,
+          "paid"
+        ],
+        [
+          13,
+          3,
+          42,
+          "cancelled"
+        ],
+        [
+          14,
+          2,
+          15,
+          "paid"
+        ]
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "label": "SELECT + WHERE",
+      "note": "Pick columns, filter rows with WHERE, sort with ORDER BY. Without ORDER BY, row order is not guaranteed.",
+      "sql": "SELECT name, city\nFROM customers\nWHERE city <> 'London'\nORDER BY name;",
+      "uses": [
+        "customers"
+      ],
+      "columns": [
+        "name",
+        "city"
+      ],
+      "rows": [
+        [
+          "Grace",
+          "New York"
+        ],
+        [
+          "Linus",
+          "Helsinki"
+        ],
+        [
+          "Margaret",
+          "Boston"
+        ]
+      ]
+    },
+    {
+      "label": "JOIN",
+      "note": "JOIN matches each order with its customer through the foreign key customer_id → customers.id.",
+      "sql": "SELECT o.id, c.name, o.total\nFROM orders o\nJOIN customers c ON c.id = o.customer_id\nWHERE o.status = 'paid'\nORDER BY o.id;",
+      "uses": [
+        "orders",
+        "customers"
+      ],
+      "columns": [
+        "id",
+        "name",
+        "total"
+      ],
+      "rows": [
+        [
+          10,
+          "Ada",
+          25
+        ],
+        [
+          12,
+          "Grace",
+          120
+        ],
+        [
+          14,
+          "Grace",
+          15
+        ]
+      ]
+    },
+    {
+      "label": "GROUP BY",
+      "note": "GROUP BY collapses rows into one per customer; COUNT and SUM work per group.",
+      "sql": "SELECT c.name, COUNT(o.id) AS orders, SUM(o.total) AS spent\nFROM customers c\nJOIN orders o ON o.customer_id = c.id\nWHERE o.status = 'paid'\nGROUP BY c.name\nORDER BY spent DESC;",
+      "uses": [
+        "orders",
+        "customers"
+      ],
+      "columns": [
+        "name",
+        "orders",
+        "spent"
+      ],
+      "rows": [
+        [
+          "Grace",
+          2,
+          135
+        ],
+        [
+          "Ada",
+          1,
+          25
+        ]
+      ]
+    },
+    {
+      "label": "LEFT JOIN",
+      "note": "A LEFT JOIN keeps customers with no orders (Margaret): their order columns are NULL, so COUNT gives 0. An inner JOIN would drop her.",
+      "sql": "SELECT c.name, COUNT(o.id) AS orders\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nGROUP BY c.id\nORDER BY c.id;",
+      "uses": [
+        "orders",
+        "customers"
+      ],
+      "columns": [
+        "name",
+        "orders"
+      ],
+      "rows": [
+        [
+          "Ada",
+          2
+        ],
+        [
+          "Grace",
+          2
+        ],
+        [
+          "Linus",
+          1
+        ],
+        [
+          "Margaret",
+          0
+        ]
+      ]
+    },
+    {
+      "label": "HAVING",
+      "note": "WHERE filters rows before grouping; HAVING filters groups after aggregation (all statuses count here).",
+      "sql": "SELECT c.name, SUM(o.total) AS spent\nFROM customers c\nJOIN orders o ON o.customer_id = c.id\nGROUP BY c.id\nHAVING SUM(o.total) > 30\nORDER BY spent DESC;",
+      "uses": [
+        "orders",
+        "customers"
+      ],
+      "columns": [
+        "name",
+        "spent"
+      ],
+      "rows": [
+        [
+          "Grace",
+          135
+        ],
+        [
+          "Linus",
+          42
+        ],
+        [
+          "Ada",
+          33.5
+        ]
+      ]
+    },
+    {
+      "label": "Subquery",
+      "note": "A subquery's result feeds the outer query: customers who placed any order over 100.",
+      "sql": "SELECT name\nFROM customers\nWHERE id IN (SELECT customer_id FROM orders WHERE total > 100);",
+      "uses": [
+        "orders",
+        "customers"
+      ],
+      "columns": [
+        "name"
+      ],
+      "rows": [
+        [
+          "Grace"
+        ]
+      ]
+    }
+  ]
+}

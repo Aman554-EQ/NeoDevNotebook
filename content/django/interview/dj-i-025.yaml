@@ -1,0 +1,31 @@
+id: dj-i-025
+question: How do you receive webhooks securely and reliably?
+difficulty: hard
+tags:
+  - webhooks
+  - security
+shortAnswer: |
+  Verify an HMAC signature over the raw body (and a timestamp, with a tolerance window) using a shared secret and constant-time comparison; deduplicate by event id; acknowledge quickly with 2xx and process in the background; don't trust payload values without checking your own records.
+detailedAnswer: |
+  Security:
+
+  - The provider signs `timestamp + "." + raw_body` with HMAC-SHA256 and a secret only you and it know.
+    Recompute it on the **exact bytes** received (before parsing JSON), compare with
+    `hmac.compare_digest`, and reject timestamps outside a few minutes (replay protection).
+  - Webhook endpoints have no user session: exempt them from CSRF and authentication, the signature is the
+    authentication. Rotate secrets; support two during rotation.
+
+  Reliability:
+
+  - Providers deliver **at least once** and retry on errors/timeouts. Store the event id with a unique
+    constraint and treat repeats as no-ops (still answering 2xx).
+  - Respond fast (a few hundred ms): enqueue slow work (outbox or task queue).
+  - Events can arrive out of order: use state machines and timestamps; re-fetch the object from the
+    provider's API if in doubt.
+  - Validate business facts (amount, currency, which order) against your own data before acting.
+pitfalls:
+  - Verifying a re-serialised body.
+  - Processing synchronously and timing out.
+followUps:
+  - How would you test webhook handling?
+  - How do you handle a secret rotation?

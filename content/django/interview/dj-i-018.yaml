@@ -1,0 +1,27 @@
+id: dj-i-018
+question: How does middleware ordering work, and what belongs in middleware?
+difficulty: medium
+tags:
+  - middleware
+  - architecture
+shortAnswer: |
+  Middleware wraps the view like an onion: settings.MIDDLEWARE runs top to bottom for the request and bottom to top for the response; a layer can short-circuit by returning a response. Use it for cross-cutting concerns applied to (almost) every request: security headers, sessions, auth, request IDs, timing, CORS, rate limits.
+detailedAnswer: |
+  Each middleware receives `get_response` (the next layer). Requests go A → B → C → view;
+  responses go back C → B → A. If B returns a response itself, C and the view never run and only A sees
+  the response on the way out. Hooks: `process_view`, `process_exception`, `process_template_response`.
+
+  Order matters because layers depend on each other: `SessionMiddleware` before
+  `AuthenticationMiddleware`; `CorsMiddleware` before `CommonMiddleware`; a request-ID layer first so every
+  later log line has the id; `SecurityMiddleware` near the top.
+
+  Good candidates: security headers, request IDs and timing logs, maintenance mode, JSON error handling,
+  coarse authentication or rate limiting. Poor candidates: business logic, anything needing the resolved
+  view's specific data (use a decorator or view mixin), heavy work (it runs on every request, including
+  health checks).
+pitfalls:
+  - Reading request.body in middleware for every request.
+  - Putting a request-ID middleware last.
+followUps:
+  - Write middleware that times requests.
+  - "Middleware vs decorator: when each?"

@@ -1,0 +1,179 @@
+{
+  "kind": "http",
+  "title": "One ViewSet, every CRUD operation",
+  "steps": [
+    {
+      "label": "List (page 1)",
+      "note": "The router made /books/ from register('books', ...). PAGE_SIZE is 2, so the list is paginated: count, next, previous, results.",
+      "request": {
+        "method": "GET",
+        "url": "/books/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"count\": 3,\n  \"next\": \"http://testserver/books/?page=2\",\n  \"previous\": null,\n  \"results\": [\n    {\n      \"id\": 1,\n      \"title\": \"Dune\",\n      \"author\": \"Herbert\",\n      \"year\": 1965\n    },\n    {\n      \"id\": 2,\n      \"title\": \"Emma\",\n      \"author\": \"Austen\",\n      \"year\": 1815\n    }\n  ]\n}",
+        "size": 189
+      }
+    },
+    {
+      "label": "Page 2",
+      "note": "Follow 'next' to get the rest. Clients never need to know the page size.",
+      "request": {
+        "method": "GET",
+        "url": "/books/?page=2",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"count\": 3,\n  \"next\": null,\n  \"previous\": \"http://testserver/books/\",\n  \"results\": [\n    {\n      \"id\": 3,\n      \"title\": \"Persuasion\",\n      \"author\": \"Austen\",\n      \"year\": 1817\n    }\n  ]\n}",
+        "size": 133
+      }
+    },
+    {
+      "label": "Filter + order",
+      "note": "?author= comes from filterset_fields (django-filter); ?ordering=-year from OrderingFilter. Both are whitelisted per view.",
+      "request": {
+        "method": "GET",
+        "url": "/books/?author=Austen&ordering=-year",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"count\": 2,\n  \"next\": null,\n  \"previous\": null,\n  \"results\": [\n    {\n      \"id\": 3,\n      \"title\": \"Persuasion\",\n      \"author\": \"Austen\",\n      \"year\": 1817\n    },\n    {\n      \"id\": 2,\n      \"title\": \"Emma\",\n      \"author\": \"Austen\",\n      \"year\": 1815\n    }\n  ]\n}",
+        "size": 165
+      }
+    },
+    {
+      "label": "Search",
+      "note": "SearchFilter does a case-insensitive contains match on search_fields.",
+      "request": {
+        "method": "GET",
+        "url": "/books/?search=dun",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"count\": 1,\n  \"next\": null,\n  \"previous\": null,\n  \"results\": [\n    {\n      \"id\": 1,\n      \"title\": \"Dune\",\n      \"author\": \"Herbert\",\n      \"year\": 1965\n    }\n  ]\n}",
+        "size": 106
+      }
+    },
+    {
+      "label": "Create",
+      "note": "POST to the list URL: 201 Created with the new object.",
+      "request": {
+        "method": "POST",
+        "url": "/books/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"title\": \"Mansfield Park\",\n  \"author\": \"Austen\",\n  \"year\": 1814\n}"
+      },
+      "response": {
+        "status": 201,
+        "reason": "Created",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"id\": 4,\n  \"title\": \"Mansfield Park\",\n  \"author\": \"Austen\",\n  \"year\": 1814\n}",
+        "size": 63
+      }
+    },
+    {
+      "label": "Retrieve",
+      "note": "The detail route /books/{pk}/ came from the same ViewSet.",
+      "request": {
+        "method": "GET",
+        "url": "/books/4/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"id\": 4,\n  \"title\": \"Mansfield Park\",\n  \"author\": \"Austen\",\n  \"year\": 1814\n}",
+        "size": 63
+      }
+    },
+    {
+      "label": "Partial update",
+      "note": "PATCH changes only the fields sent (partial_update). PUT would require every field (update).",
+      "request": {
+        "method": "PATCH",
+        "url": "/books/4/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"year\": 1815\n}"
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"id\": 4,\n  \"title\": \"Mansfield Park\",\n  \"author\": \"Austen\",\n  \"year\": 1815\n}",
+        "size": 63
+      }
+    },
+    {
+      "label": "Delete",
+      "note": "destroy: 204 No Content.",
+      "request": {
+        "method": "DELETE",
+        "url": "/books/4/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 204,
+        "reason": "No Content",
+        "headers": {},
+        "body": "",
+        "size": 0
+      }
+    },
+    {
+      "label": "Gone",
+      "note": "Now it's a 404, from get_object() raising Http404.",
+      "request": {
+        "method": "GET",
+        "url": "/books/4/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 404,
+        "reason": "Not Found",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"detail\": \"No Book matches the given query.\"\n}",
+        "size": 45
+      }
+    }
+  ]
+}

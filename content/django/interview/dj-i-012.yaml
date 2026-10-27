@@ -1,0 +1,28 @@
+id: dj-i-012
+question: How does Django's CSRF protection work, and when don't you need it?
+difficulty: simple
+tags:
+  - security
+  - csrf
+shortAnswer: |
+  CsrfViewMiddleware requires a secret token (from a cookie, echoed in a form field or X-CSRFToken header) on unsafe methods. Other sites can make a browser send cookies but can't read the token. APIs authenticated by headers (tokens, JWT) don't need it.
+detailedAnswer: |
+  A CSRF attack makes a logged-in user's browser submit a request to your site from another site; the
+  browser attaches your cookies automatically. Django's defence:
+
+  1. Django sets a `csrftoken` cookie and puts a (masked) token in forms via `{% csrf_token %}`.
+  2. On POST/PUT/PATCH/DELETE, `CsrfViewMiddleware` checks that the submitted token matches the cookie
+     (and, over HTTPS, that `Origin`/`Referer` is your site or in `CSRF_TRUSTED_ORIGINS`).
+  3. A foreign site can trigger the request but can't read your page or cookie, so it can't supply the
+     token: `403 Forbidden`.
+
+  You need it whenever authentication is automatic (session cookies). With `Authorization` headers (DRF
+  token or JWT), another site can't make the browser add the header, so CSRF doesn't apply; DRF enforces
+  CSRF only for `SessionAuthentication`. Never `csrf_exempt` cookie-authenticated views; webhooks verified
+  by signature are the classic legitimate exemption.
+pitfalls:
+  - csrf_exempt to 'fix' a 403.
+  - Storing JWTs in cookies without CSRF protection.
+followUps:
+  - What does SameSite=Lax change?
+  - How does JavaScript send the token?

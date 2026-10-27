@@ -1,0 +1,154 @@
+{
+  "kind": "http",
+  "title": "JWT authentication, request by request",
+  "steps": [
+    {
+      "label": "No token",
+      "note": "IsAuthenticated rejects the anonymous request: 401, with WWW-Authenticate telling the client to use Bearer auth.",
+      "request": {
+        "method": "GET",
+        "url": "/api/notes/1/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 401,
+        "reason": "Unauthorized",
+        "headers": {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": "Bearer realm=\"api\""
+        },
+        "body": "{\n  \"detail\": \"Authentication credentials were not provided.\"\n}",
+        "size": 58
+      }
+    },
+    {
+      "label": "Log in",
+      "note": "Username and password are exchanged for two tokens: a short-lived access token and a longer-lived refresh token. (Tokens are shortened here; real ones are about 230 characters.)",
+      "request": {
+        "method": "POST",
+        "url": "/api/token/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"username\": \"ada\",\n  \"password\": \"correct-horse-battery\"\n}"
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"refresh\": \"eyJhbGciOiJIUzI1NiIs…\",\n  \"access\": \"eyJhbGciOiJIUzI1NiIs…\"\n}",
+        "size": 489
+      }
+    },
+    {
+      "label": "Bearer token",
+      "note": "The access token goes in the Authorization header. The server verifies the signature and expiry; no session, no database lookup for the token itself.",
+      "request": {
+        "method": "GET",
+        "url": "/api/notes/1/",
+        "headers": {
+          "Authorization": "Bearer eyJhbGciOiJIUzI1NiIs…"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"id\": 1,\n  \"text\": \"Ada's note\"\n}",
+        "size": 28
+      }
+    },
+    {
+      "label": "Not the owner",
+      "note": "Authenticated, but IsOwner's has_object_permission says no: 403 Forbidden. 401 means 'who are you?', 403 means 'I know, and no'.",
+      "request": {
+        "method": "GET",
+        "url": "/api/notes/2/",
+        "headers": {
+          "Authorization": "Bearer eyJhbGciOiJIUzI1NiIs…"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 403,
+        "reason": "Forbidden",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"detail\": \"You do not have permission to perform this action.\"\n}",
+        "size": 63
+      }
+    },
+    {
+      "label": "Bad token",
+      "note": "A tampered or malformed token fails verification: 401 with a token_not_valid code.",
+      "request": {
+        "method": "GET",
+        "url": "/api/notes/1/",
+        "headers": {
+          "Authorization": "Bearer not.a.valid-token"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 401,
+        "reason": "Unauthorized",
+        "headers": {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": "Bearer realm=\"api\""
+        },
+        "body": "{\n  \"detail\": \"Given token not valid for any token type\",\n  \"code\": \"token_not_valid\",\n  \"messages\": [\n    {\n      \"token_class\": \"AccessToken\",\n      \"token_type\": \"access\",\n      \"message\": \"Token is invalid\"\n    }\n  ]\n}",
+        "size": 172
+      }
+    },
+    {
+      "label": "Refresh",
+      "note": "Before the access token expires, the refresh token buys a new one without asking for the password again.",
+      "request": {
+        "method": "POST",
+        "url": "/api/token/refresh/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"refresh\": \"eyJhbGciOiJIUzI1NiIs…\"\n}"
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"access\": \"eyJhbGciOiJIUzI1NiIs…\"\n}",
+        "size": 244
+      }
+    },
+    {
+      "label": "Wrong password",
+      "note": "Bad credentials: 401 with a deliberately vague message, so attackers can't tell which part was wrong.",
+      "request": {
+        "method": "POST",
+        "url": "/api/token/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"username\": \"ada\",\n  \"password\": \"wrong\"\n}"
+      },
+      "response": {
+        "status": 401,
+        "reason": "Unauthorized",
+        "headers": {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": "Bearer realm=\"api\""
+        },
+        "body": "{\n  \"detail\": \"No active account found with the given credentials\"\n}",
+        "size": 63
+      }
+    }
+  ]
+}

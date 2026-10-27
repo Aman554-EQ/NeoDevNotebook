@@ -1,0 +1,30 @@
+id: dj-i-030
+question: "Django, FastAPI or Flask: how would you choose for a new backend?"
+difficulty: hard
+tags:
+  - frameworks
+  - architecture
+  - comparison
+shortAnswer: |
+  Django for full products with users, relational data, an admin and many standard features; FastAPI for async-first JSON APIs, ML/LLM serving and high-concurrency I/O with Pydantic validation and automatic docs; Flask for small services or unusual architectures where you want to pick every component. Team experience and ecosystem matter as much as features.
+detailedAnswer: |
+  **Django** (with DRF): ORM and migrations, admin, auth, forms, sessions, security defaults, a huge
+  ecosystem and conventions every Django developer knows. Ideal for e-commerce, SaaS, content platforms,
+  internal tools. Costs: heavier for tiny services; async exists but the ORM is sync underneath.
+
+  **FastAPI**: built on type hints and Pydantic: validation, serialization and OpenAPI docs come from
+  signatures; async-first on ASGI; very good for I/O-bound APIs and serving ML models or LLM calls. You
+  choose and wire the database layer (SQLAlchemy/SQLModel), migrations (Alembic), auth and admin yourself.
+
+  **Flask**: a small core plus extensions (Flask-SQLAlchemy, Flask-Login...). Great for small services,
+  prototypes and when you need an unusual structure; large Flask codebases need strong conventions.
+
+  Decision factors: how much of the "standard web app" you need out of the box, async/I/O profile, team
+  familiarity, hiring, and long-term maintenance. It's common to combine them: Django for the core
+  product, FastAPI for an ML inference service.
+pitfalls:
+  - Choosing by benchmark alone.
+  - Claiming one is always better.
+followUps:
+  - How would you split a Django monolith with an ML service?
+  - What does Django lose without DRF?

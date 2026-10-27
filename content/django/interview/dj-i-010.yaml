@@ -1,0 +1,52 @@
+id: dj-i-010
+question: What are Q and F objects used for?
+difficulty: simple
+tags:
+  - orm
+  - q-objects
+  - f-expressions
+shortAnswer: |
+  Q builds complex conditions (OR with |, NOT with ~, grouping) in filter(). F refers to a column's value in the database, for comparing fields or updating values atomically (stock = stock - 1).
+detailedAnswer: |
+  **Q**: keyword arguments in `filter()` are ANDed; `Q` objects let you combine conditions freely:
+  `filter(Q(status="paid") | Q(total__gte=100))`, `exclude(~Q(...))`, and build conditions dynamically
+  (`query &= Q(...)` from request parameters).
+
+  **F**: refers to a field **inside the database query**:
+
+  - compare fields of the same row: `filter(stock__lt=F("reorder_level"))`;
+  - update atomically: `update(stock=F("stock") - 1)` becomes `SET stock = stock - 1`, so concurrent
+    requests can't overwrite each other (no read-modify-write race);
+  - arithmetic in annotations: `annotate(total=F("qty") * F("price"))`.
+
+  After `obj.field = F(...); obj.save()`, call `refresh_from_db()` before reading the value: the
+  attribute holds the expression, not the number.
+code:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+    from django.db.models import F, Q
+
+
+    class Product(models.Model):
+        name = models.CharField(max_length=20)
+        stock = models.IntegerField()
+        reorder = models.IntegerField()
+
+
+    migrate()
+    Product.objects.bulk_create([Product(name="a", stock=1, reorder=5), Product(name="b", stock=9, reorder=5)])
+    print(list(Product.objects.filter(Q(stock__lt=F("reorder")) | Q(name="b")).values_list("name", flat=True)))
+    Product.objects.filter(name="a").update(stock=F("stock") + 10)
+    print(Product.objects.get(name="a").stock)
+pitfalls:
+  - Reading obj.stock after an F() save without refresh_from_db().
+  - Combining Q and keyword args in the wrong order (Q must come first).
+followUps:
+  - How would you prevent stock from going negative under concurrency?
+  - What does ExpressionWrapper do?
+verify: assert Product.objects.get(name="a").stock == 11

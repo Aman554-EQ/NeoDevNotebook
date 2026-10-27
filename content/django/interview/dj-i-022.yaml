@@ -1,0 +1,26 @@
+id: dj-i-022
+question: Does Django support async, and when does it help?
+difficulty: medium
+tags:
+  - async
+  - performance
+shortAnswer: |
+  Yes: async views under ASGI, async middleware, and an async ORM API (aget, acreate, async for) that still runs the synchronous ORM in a thread. Async helps when a request waits on several slow I/O calls that can overlap; it doesn't speed up CPU work or a single database query.
+detailedAnswer: |
+  Since 3.1 Django runs `async def` views (best under an ASGI server such as uvicorn), and since 4.1 the
+  ORM has async methods (`aget`, `acount`, `acreate`, `async for`). Under the hood the ORM is still
+  synchronous; Django runs it in a thread via `sync_to_async`. Calling the sync ORM directly from async
+  code raises `SynchronousOnlyOperation`.
+
+  Async helps when a view waits on **several independent I/O operations** (calling other APIs, an LLM, a
+  slow service) that can run concurrently with `asyncio.gather`, or for long-lived connections
+  (WebSockets via Channels, server-sent events). It doesn't help CPU-bound work (offload to workers) or a
+  view that runs a few quick queries; a mostly-sync app under WSGI with enough workers is often simpler
+  and just as fast. Mixing sync and async has a cost (thread hops), so don't convert everything by
+  default.
+pitfalls:
+  - Blocking calls (requests, sync ORM) inside async views.
+  - Expecting async to make queries faster.
+followUps:
+  - How would you call three external APIs from one view concurrently?
+  - WSGI vs ASGI deployment?

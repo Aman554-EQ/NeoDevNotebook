@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}ShopLite{% endblock %}</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 56rem; margin: 0 auto; padding: 1rem; }
+      header { display: flex; gap: 1rem; align-items: center; justify-content: space-between; }
+      .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); }
+      .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; }
+      .messages .success { color: #15803d; } .messages .error { color: #be123c; }
+      table { border-collapse: collapse; width: 100%; } td, th { padding: 0.4rem; border-bottom: 1px solid #eee; text-align: left; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a href="{% url 'storefront' %}"><strong>ShopLite</strong></a>
+      <nav>
+        <a href="{% url 'cart' %}">Cart ({{ cart_count }})</a>
+        {% if user.is_authenticated %}
+          <form method="post" action="{% url 'logout' %}" style="display:inline">{% csrf_token %}<button>Log out</button></form>
+        {% else %}
+          <a href="{% url 'login' %}">Log in</a>
+        {% endif %}
+      </nav>
+    </header>
+    {% if messages %}
+      <ul class="messages">{% for m in messages %}<li class="{{ m.tags }}">{{ m }}</li>{% endfor %}</ul>
+    {% endif %}
+    <main>{% block content %}{% endblock %}</main>
+  </body>
+</html>

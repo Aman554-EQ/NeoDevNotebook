@@ -4,6 +4,7 @@ import { notFound } from "next/navigation"
 import { ListChecks, MessageSquareText } from "lucide-react"
 import { DifficultyBadge, MinutesBadge } from "@/components/lesson/badges"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
+import { ModuleParts } from "@/components/layout/module-parts"
 import { getModule, getNavTree } from "@/lib/content"
 import { groupBySection, sectionId } from "@/lib/content/sections"
 
@@ -32,6 +33,7 @@ export default async function ModulePage({ params }: PageProps<"/learn/[module]"
       <p className="text-muted font-mono text-sm">Part {m.part}</p>
       <h1 className="font-display mt-1 text-3xl font-semibold sm:text-4xl">{m.title}</h1>
       <p className="text-muted mt-3 max-w-2xl text-lg">{m.description}</p>
+      <ModuleParts module={m} />
 
       <div className="mt-8 space-y-10">
         {groupBySection(m.lessons).map((g, i) => (

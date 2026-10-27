@@ -8,8 +8,9 @@ import { useCallback, useSyncExternalStore } from "react"
  * in-memory state for the current tab instead of crashing.
  */
 
-export type ItemType = "lesson" | "problem" | "interview"
-/** e.g. "lesson:start-here/how-this-notebook-works", "problem:sh-p-001" */
+export type ItemType = "lesson" | "problem" | "interview" | "project"
+/** e.g. "lesson:start-here/how-this-notebook-works", "problem:sh-p-001",
+ *  "project:django/notes" (a whole project) or "project:django/notes#models" (one checkpoint) */
 export type ItemKey = `${ItemType}:${string}`
 export type Bookmark = { key: ItemKey; title: string; href: string; savedAt: number }
 

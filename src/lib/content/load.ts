@@ -10,10 +10,12 @@ import {
   lessonFrontmatterSchema,
   moduleSchema,
   problemSchema,
+  projectFrontmatterSchema,
   type InterviewQuestion,
   type LessonFrontmatter,
   type ModuleMeta,
   type Problem,
+  type ProjectFrontmatter,
 } from "./schema"
 
 /**
@@ -38,6 +40,13 @@ export type LessonSummary = LessonFrontmatter & {
   file: string
 }
 export type Lesson = LessonSummary & { body: string }
+export type Project = ProjectFrontmatter & {
+  module: string
+  slug: string
+  order: number
+  file: string
+  body: string
+}
 export type ContentModule = ModuleMeta & { slug: string }
 
 const LESSON_FILE = /^(\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)\.mdx$/
@@ -104,6 +113,41 @@ export function loadLessons(moduleSlug: string, root = DEFAULT_CONTENT_DIR): Les
   })
 }
 
+export function loadProjects(moduleSlug: string, root = DEFAULT_CONTENT_DIR): Project[] {
+  const dir = path.join(root, moduleSlug, "projects")
+  return listFiles(dir, ".mdx").map((name) => {
+    const file = path.join(dir, name)
+    const match = LESSON_FILE.exec(name)
+    if (!match) throw new ContentError(file, "  - file name must look like 01-my-project.mdx")
+    const { data, content } = matter(fs.readFileSync(/*turbopackIgnore: true*/ file, "utf8"))
+    return {
+      ...parseWith(projectFrontmatterSchema, data, file),
+      module: moduleSlug,
+      slug: match[2]!,
+      order: Number(match[1]),
+      file,
+      body: content,
+    }
+  })
+}
+
+/** projects/<module>/<code>/: the real code of a guided project (next to content/). */
+export function projectCodeDir(moduleSlug: string, code: string, root = DEFAULT_CONTENT_DIR) {
+  return path.join(path.dirname(root), "projects", moduleSlug, code)
+}
+
+/** `<ProjectFile project="x" path="a/b.py" />` and `<ProjectFiles paths="a.py b.py" />` in MDX. */
+export function projectFileRefs(body: string, defaultProject?: string) {
+  const refs: { project: string | undefined; path: string }[] = []
+  for (const m of body.matchAll(/<ProjectFiles?\b([^>]*)\/>/g)) {
+    const attrs = m[1]!
+    const project = /\bproject="([^"]+)"/.exec(attrs)?.[1] ?? defaultProject
+    const paths = /\bpaths?="([^"]+)"/.exec(attrs)?.[1]?.split(/\s+/).filter(Boolean) ?? []
+    for (const p of paths) refs.push({ project, path: p })
+  }
+  return refs
+}
+
 function loadIdFiles<T extends { id: string }>(
   moduleSlug: string,
   sub: "problems" | "interview",
@@ -137,6 +181,7 @@ export type ContentBundle = {
   lessons: Lesson[]
   problems: Problem[]
   interview: InterviewQuestion[]
+  projects: Project[]
 }
 
 /** Everything, validated, plus cross-file integrity checks (unique ids/titles, id prefixes). */
@@ -146,8 +191,9 @@ export function loadAllContent(root = DEFAULT_CONTENT_DIR): ContentBundle[] {
     lessons: loadLessons(module.slug, root),
     problems: loadProblems(module.slug, root),
     interview: loadInterviewQuestions(module.slug, root),
+    projects: loadProjects(module.slug, root),
   }))
-  const issues = findIntegrityIssues(bundles)
+  const issues = [...findIntegrityIssues(bundles), ...findProjectIssues(bundles, root)]
   if (issues.length) throw new ContentError(root, issues.map((i) => `  - ${i}`).join("\n"))
   return bundles
 }
@@ -191,6 +237,37 @@ export function findIntegrityIssues(bundles: ContentBundle[]): string[] {
       const title = normalise("title" in item ? item.title : item.question)
       if (titles.has(title)) issues.push(`${module.slug}: duplicate title/question "${title}"`)
       titles.add(title)
+    }
+  }
+  return issues
+}
+
+/** Project code folders and every file shown with <ProjectFile> must exist. */
+export function findProjectIssues(bundles: ContentBundle[], root = DEFAULT_CONTENT_DIR): string[] {
+  const issues: string[] = []
+  const exists = (p: string) => fs.existsSync(/*turbopackIgnore: true*/ p)
+  for (const { module, lessons, projects } of bundles) {
+    for (const p of projects) {
+      if (!exists(projectCodeDir(module.slug, p.code, root))) {
+        issues.push(
+          `${module.slug}/${p.slug}: code folder projects/${module.slug}/${p.code} is missing`,
+        )
+      }
+    }
+    const sources = [
+      ...projects.map((p) => ({ where: `${module.slug}/${p.slug}`, body: p.body, code: p.code })),
+      ...lessons.map((l) => ({ where: `${module.slug}/${l.slug}`, body: l.body, code: undefined })),
+    ]
+    for (const { where, body, code } of sources) {
+      for (const ref of projectFileRefs(body, code)) {
+        if (!ref.project) {
+          issues.push(
+            `${where}: <ProjectFile path="${ref.path}"> needs project="..." outside a project page`,
+          )
+        } else if (!exists(path.join(projectCodeDir(module.slug, ref.project, root), ref.path))) {
+          issues.push(`${where}: projects/${module.slug}/${ref.project}/${ref.path} does not exist`)
+        }
+      }
     }
   }
   return issues

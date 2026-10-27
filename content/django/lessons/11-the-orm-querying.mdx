@@ -1,0 +1,513 @@
+---
+title: "The ORM: querying"
+summary: Ask the database questions in Python. Lazy, cached QuerySets; filter, exclude and get with field lookups; Q for OR and NOT; F to compare and update columns in the database; values, ordering and slicing; annotate and aggregate; conditional expressions; bulk operations, and seeing the SQL Django runs.
+estimatedMinutes: 28
+difficulty: simple
+section: Django Core
+objectives:
+  - Explain when a QuerySet runs SQL and when it reuses cached results
+  - Filter with field lookups, Q objects (OR, NOT) and F expressions
+  - Summarise data with aggregate, and per-row or per-group values with annotate
+  - Use get_or_create, update_or_create, bulk_create and bulk update/delete correctly
+  - Inspect the SQL and the number of queries any ORM code produces
+prerequisites:
+  - Models & migrations
+  - Databases for backend developers
+tags: [django, orm, queryset, sql, aggregation]
+practice: [dj-p-007, dj-p-009, dj-p-010, dj-p-015]
+interview: [dj-i-008, dj-i-010]
+---
+
+## Intuition: a query written in Python, sent only when needed
+
+A **QuerySet** is a description of a question: "books published before 1900, newest first, titles
+only". Building it, chaining `.filter()` and `.order_by()`, costs nothing: no SQL runs. Django sends
+**one** SQL query at the last moment, when you actually need the rows (looping, `list()`, `len()`,
+slicing with a step, `bool()`), and keeps the results so a second loop doesn't ask again.
+
+Good ORM code is about controlling **how many** queries run and **what** they fetch. The visual below
+shows the exact SQL for each operation.
+
+## See it
+
+<OrmToSql
+  recording="orm-basics"
+  caption="Each expression on top was really run; below it is the SQL Django sent (captured), how many queries that took, and the result. Building a QuerySet costs zero queries; evaluating it costs one."
+/>
+
+## The precise rules
+
+**Getting rows:** `all()`, `filter(**lookups)`, `exclude(**lookups)`, `get(**lookups)` (exactly one
+row, or `DoesNotExist` / `MultipleObjectsReturned`), `first()`, `last()`, `earliest()`,
+`latest()`, `exists()`, `count()`.
+
+**Field lookups** use double underscores: `price__gte=10`, `title__icontains="dune"`,
+`status__in=["paid", "shipped"]`, `published__year=2026`, `published__range=(start, end)`,
+`author__isnull=True`, `name__startswith="A"`, and they follow relations: `author__name="Austen"`.
+
+**Q objects** combine conditions: `Q(a) | Q(b)` (OR), `Q(a) & Q(b)` (AND), `~Q(a)` (NOT).
+**F expressions** refer to a column's value in the database: `filter(stock__lt=F("reorder_level"))`,
+`update(stock=F("stock") - 1)` (atomic, no race).
+
+**Shaping results:** `order_by("-year", "title")`, slicing `[:10]` (`LIMIT`) and `[10:20]`
+(`OFFSET`), `values("id", "title")` (dicts), `values_list("title", flat=True)` (plain values),
+`distinct()`, `only()`/`defer()` (columns).
+
+**Summaries:** `aggregate(total=Sum("price"))` returns **one dict** for the whole QuerySet.
+`annotate(n=Count("books"))` adds a value **to every row**; after `values("field")` it groups by that
+field (SQL `GROUP BY`). Conditional values use `Case(When(...), default=...)`.
+
+**Writing:** `create()`, `get_or_create()`, `update_or_create()`, `bulk_create([...])`,
+`QuerySet.update(...)` and `QuerySet.delete()` (one SQL statement each, **no** `save()`/signals per
+object), `bulk_update(objs, ["field"])`.
+
+**Laziness and caching:** a QuerySet runs when evaluated and caches its rows. Evaluating a **new**
+QuerySet (e.g. `qs.filter(...)` again) runs a new query. `qs.count()` and `qs.exists()` run cheap
+queries without loading rows (unless the cache is already full).
+
+**Seeing the SQL:** `str(qs.query)` (approximate, values unquoted), `qs.explain()`,
+`django.test.utils.CaptureQueriesContext(connection)`, `connection.queries` when `DEBUG=True`,
+and the Django Debug Toolbar in development.
+
+## Worked example
+
+Laziness and caching, measured: the number of SQL queries after each step.
+
+```python title="lazy.py"
+from playground import migrate, setup
+
+setup()
+
+from django.db import connection, models
+from django.test.utils import CaptureQueriesContext
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    year = models.IntegerField()
+
+
+migrate()
+Book.objects.bulk_create([Book(title=t, year=y) for t, y in
+                          [("Dune", 1965), ("Emma", 1815), ("Persuasion", 1817), ("Neuromancer", 1984)]])
+
+with CaptureQueriesContext(connection) as ctx:
+    old = Book.objects.filter(year__lt=1900)  # nothing runs yet
+    old = old.order_by("year")
+    print("after building:", len(ctx), "queries")
+
+    titles = [b.title for b in old]  # evaluation: one query
+    print("after the loop:", len(ctx), titles)
+
+    again = [b.year for b in old]  # same QuerySet: cached rows
+    print("after a second loop:", len(ctx), again)
+
+    print("count on a filled cache:", old.count(), "->", len(ctx), "queries")
+    newer = old.filter(year__gt=1816)  # a NEW QuerySet: its own query
+    print("new queryset:", list(newer.values_list("title", flat=True)), "->", len(ctx), "queries")
+
+print(ctx.captured_queries[0]["sql"])
+```
+
+```text title="Output"
+after building: 0 queries
+after the loop: 1 ['Emma', 'Persuasion']
+after a second loop: 1 [1815, 1817]
+count on a filled cache: 2 -> 1 queries
+new queryset: ['Persuasion'] -> 2 queries
+SELECT "shop_book"."id", "shop_book"."title", "shop_book"."year" FROM "shop_book" WHERE "shop_book"."year" < 1900 ORDER BY "shop_book"."year" ASC
+```
+
+- Chaining `filter()` and `order_by()` only builds the question.
+- The first loop runs one `SELECT`; the second loop reuses the cached rows: still one query.
+- `count()` on an evaluated QuerySet uses its cache (`len()` of the rows) instead of asking again.
+- `old.filter(...)` creates a new QuerySet with an extra condition, so it needs its own query.
+- `CaptureQueriesContext` is how you count queries in tests and experiments; lesson 26 uses its
+  test helper `assertNumQueries`.
+
+## Variations
+
+### Field lookups
+
+```python
+from datetime import date
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    published = models.DateField()
+    pages = models.IntegerField()
+    series = models.CharField(max_length=50, null=True, blank=True)
+
+
+migrate()
+Book.objects.bulk_create([
+    Book(title="Dune", published=date(1965, 8, 1), pages=412, series="Dune"),
+    Book(title="Dune Messiah", published=date(1969, 10, 15), pages=256, series="Dune"),
+    Book(title="Emma", published=date(1815, 12, 23), pages=474),
+    Book(title="The Dispossessed", published=date(1974, 5, 1), pages=387),
+])
+
+
+def titles(**lookups):
+    return list(Book.objects.filter(**lookups).order_by("published").values_list("title", flat=True))
+
+
+print("icontains: ", titles(title__icontains="dune"))
+print("startswith:", titles(title__startswith="The"))
+print("in:        ", titles(pages__in=[256, 474]))
+print("range:     ", titles(pages__range=(300, 420)))
+print("year:      ", titles(published__year__gte=1970))
+print("isnull:    ", titles(series__isnull=True))
+print("exclude:   ", list(Book.objects.exclude(series="Dune").order_by("title").values_list("title", flat=True)))
+```
+
+```text title="Output"
+icontains:  ['Dune', 'Dune Messiah']
+startswith: ['The Dispossessed']
+in:         ['Emma', 'Dune Messiah']
+range:      ['Dune', 'The Dispossessed']
+year:       ['The Dispossessed']
+isnull:     ['Emma', 'The Dispossessed']
+exclude:    ['Emma', 'The Dispossessed']
+```
+
+Lookups compose (`published__year__gte`), and `exclude()` is the opposite of `filter()`. Prefer
+`icontains` for user search boxes and `exact` (the default) for ids and codes.
+
+### Q for OR and NOT, F for column comparisons
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+from django.db.models import F, Q
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=50)
+    stock = models.IntegerField()
+    reorder_level = models.IntegerField()
+    discontinued = models.BooleanField(default=False)
+
+
+migrate()
+Product.objects.bulk_create([
+    Product(name="Dune", stock=3, reorder_level=5),
+    Product(name="Emma", stock=40, reorder_level=10),
+    Product(name="Chess set", stock=0, reorder_level=2, discontinued=True),
+    Product(name="Go board", stock=8, reorder_level=8),
+])
+names = lambda qs: list(qs.order_by("name").values_list("name", flat=True))  # noqa: E731
+
+print("low stock:     ", names(Product.objects.filter(stock__lte=F("reorder_level"))))
+print("empty or gone: ", names(Product.objects.filter(Q(stock=0) | Q(discontinued=True))))
+print("to reorder:    ", names(Product.objects.filter(Q(stock__lte=F("reorder_level")) & ~Q(discontinued=True))))
+changed = Product.objects.filter(name="Dune").update(stock=F("stock") + 10)
+print("restocked rows:", changed, "| Dune stock:", Product.objects.get(name="Dune").stock)
+```
+
+```text title="Output"
+low stock:      ['Chess set', 'Dune', 'Go board']
+empty or gone:  ['Chess set']
+to reorder:     ['Dune', 'Go board']
+restocked rows: 1 | Dune stock: 13
+```
+
+`F("reorder_level")` compares two columns of the same row inside the database. `update(stock=F(...)
+
+- 10)`becomes`SET stock = stock + 10`: correct even if another request changes the stock at the
+  same moment, unlike reading the value into Python, adding, and saving.
+
+### aggregate vs annotate, and GROUP BY
+
+```python
+from decimal import Decimal
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+from django.db.models import Avg, Count, Max, Sum
+
+
+class Sale(models.Model):
+    product = models.CharField(max_length=50)
+    category = models.CharField(max_length=20)
+    qty = models.IntegerField()
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+migrate()
+Sale.objects.bulk_create([
+    Sale(product="Dune", category="books", qty=3, price=Decimal("12.50")),
+    Sale(product="Emma", category="books", qty=1, price=Decimal("8.00")),
+    Sale(product="Dune", category="books", qty=2, price=Decimal("12.50")),
+    Sale(product="Chess set", category="games", qty=1, price=Decimal("30.00")),
+])
+
+print(Sale.objects.aggregate(units=Sum("qty"), biggest=Max("qty"), sales=Count("id")))
+by_category = (Sale.objects.values("category")
+               .annotate(units=Sum("qty"), avg_price=Avg("price"))
+               .order_by("category"))
+for row in by_category:
+    print(row["category"], row["units"], round(row["avg_price"], 2))
+top = Sale.objects.values("product").annotate(units=Sum("qty")).order_by("-units").first()
+print("best seller:", top)
+```
+
+```text title="Output"
+{'units': 7, 'biggest': 3, 'sales': 4}
+books 6 11.00
+games 1 30.00
+best seller: {'product': 'Dune', 'units': 5}
+```
+
+`aggregate()` collapses the whole QuerySet into one dict. `values("category").annotate(...)` turns
+into `GROUP BY category` with one result per group. Remember from the Library project: an annotated
+query with GROUP BY ignores `Meta.ordering`, so order explicitly.
+
+### Conditional values with Case and When
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+from django.db.models import Case, CharField, Count, Value, When
+
+
+class Order(models.Model):
+    total = models.IntegerField()
+
+
+migrate()
+Order.objects.bulk_create(Order(total=t) for t in [5, 18, 25, 40, 75, 120, 300])
+
+band = Case(
+    When(total__gte=100, then=Value("large")),
+    When(total__gte=25, then=Value("medium")),
+    default=Value("small"),
+    output_field=CharField(),
+)
+rows = Order.objects.annotate(band=band).values("band").annotate(n=Count("id")).order_by("band")
+print({row["band"]: row["n"] for row in rows})
+print(Order.objects.aggregate(large=Count("id", filter=models.Q(total__gte=100))))
+```
+
+```text title="Output"
+{'large': 2, 'medium': 3, 'small': 2}
+{'large': 2}
+```
+
+`Case/When` computes a value per row in SQL; combined with `values().annotate()` it buckets rows
+without loading them. `Count(..., filter=Q(...))` counts only matching rows: a conditional aggregate.
+
+### Creating and updating in bulk
+
+```python
+from collections import Counter
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import connection, models
+from django.test.utils import CaptureQueriesContext
+
+
+def kinds(ctx):  # e.g. {'SELECT': 1, 'UPDATE': 5}
+    return dict(Counter(q["sql"].split()[0] for q in ctx.captured_queries))
+
+
+class Tag(models.Model):
+    name = models.CharField(max_length=30, unique=True)
+    uses = models.IntegerField(default=0)
+
+
+migrate()
+tag, created = Tag.objects.get_or_create(name="python")
+print("get_or_create:", tag.name, created, "| again:", Tag.objects.get_or_create(name="python")[1])
+tag, created = Tag.objects.update_or_create(name="python", defaults={"uses": 10})
+print("update_or_create:", tag.uses, created)
+
+with CaptureQueriesContext(connection) as ctx:
+    Tag.objects.bulk_create([Tag(name=f"tag{i}") for i in range(100)])
+print("bulk_create 100 rows:", kinds(ctx))
+
+with CaptureQueriesContext(connection) as ctx:
+    for t in Tag.objects.filter(name__startswith="tag")[:5]:
+        t.uses = 1
+        t.save()
+print("5 x save():", kinds(ctx))
+
+with CaptureQueriesContext(connection) as ctx:
+    n = Tag.objects.filter(name__startswith="tag").update(uses=2)
+print("one update():", kinds(ctx), "for", n, "rows")
+deleted = Tag.objects.filter(uses=2).delete()
+print("delete():", deleted)
+```
+
+```text title="Output"
+get_or_create: python True | again: False
+update_or_create: 10 False
+bulk_create 100 rows: {'BEGIN': 1, 'INSERT': 1, 'COMMIT': 1}
+5 x save(): {'SELECT': 1, 'UPDATE': 5}
+one update(): {'UPDATE': 1} for 100 rows
+delete(): (100, {'shop.Tag': 100})
+```
+
+Saving in a loop costs one `UPDATE` per object (plus the `SELECT` to fetch them); `bulk_create`
+sends one `INSERT` for all 100 rows (wrapped in its own transaction, hence `BEGIN`/`COMMIT`) and
+`QuerySet.update()` one `UPDATE`. `delete()` returns the number of rows deleted
+per model. Remember that bulk operations skip `save()`, model validation and signals.
+
+## Putting it together
+
+A monthly sales report built entirely in the database: revenue per month, the best-selling
+product, customers who never ordered and the share of large orders, in a handful of queries.
+
+```python title="sales_report.py"
+from datetime import datetime, timezone
+from decimal import Decimal
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import connection, models
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum
+from django.db.models.functions import TruncMonth
+from django.test.utils import CaptureQueriesContext
+
+
+class Customer(models.Model):
+    name = models.CharField(max_length=50)
+
+
+class Order(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="orders")
+    created = models.DateTimeField()
+
+
+class Line(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="lines")
+    product = models.CharField(max_length=50)
+    qty = models.IntegerField()
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+migrate()
+ada, grace, linus = (Customer.objects.create(name=n) for n in ("Ada", "Grace", "Linus"))
+for customer, month, lines in [
+    (ada, 1, [("Dune", 2, "12.50"), ("Emma", 1, "8.00")]),
+    (grace, 1, [("Chess set", 1, "30.00")]),
+    (ada, 2, [("Dune", 1, "12.50")]),
+    (grace, 2, [("Go board", 2, "45.00"), ("Dune", 3, "12.50")]),
+]:
+    order = Order.objects.create(customer=customer, created=datetime(2026, month, 10, tzinfo=timezone.utc))
+    Line.objects.bulk_create(Line(order=order, product=p, qty=q, price=Decimal(pr)) for p, q, pr in lines)
+
+line_total = ExpressionWrapper(F("qty") * F("price"), output_field=DecimalField(max_digits=12, decimal_places=2))
+
+with CaptureQueriesContext(connection) as ctx:
+    monthly = (Line.objects.annotate(month=TruncMonth("order__created"))
+               .values("month").annotate(revenue=Sum(line_total)).order_by("month"))
+    for row in monthly:
+        print(row["month"].strftime("%Y-%m"), f"{row['revenue']:.2f}")
+    best = Line.objects.values("product").annotate(units=Sum("qty")).order_by("-units", "product").first()
+    print("best seller:", best["product"], best["units"])
+    print("never ordered:", list(Customer.objects.filter(orders__isnull=True).values_list("name", flat=True)))
+    order_total = Sum(F("lines__qty") * F("lines__price"), output_field=DecimalField())
+    big = Order.objects.annotate(total=order_total).aggregate(
+        orders=Count("id"), large=Count("id", filter=Q(total__gte=50)))
+    print("orders >= 50:", f"{big['large']} of {big['orders']}")
+print(len(ctx), "queries for the whole report")
+```
+
+```text title="Output"
+2026-01 63.00
+2026-02 140.00
+best seller: Dune 6
+never ordered: ['Linus']
+orders >= 50: 1 of 4
+4 queries for the whole report
+```
+
+Every number was computed by the database: `TruncMonth` groups timestamps by month, `ExpressionWrapper`
+multiplies two columns per row, `orders__isnull=True` finds customers with no related orders (a LEFT
+JOIN), and a conditional `Count` gives the share of large orders. Loading every line into Python to
+add them up would work for 10 rows and collapse at 10 million.
+
+## Common mistakes
+
+<Callout type="warning" title="Evaluating a QuerySet more often than you think">
+  `if qs:` then `for x in qs:` is fine (one query, cached), but `if qs.count():` followed by
+  `list(qs)` runs two, and calling `Book.objects.filter(...)` inside a loop runs one per iteration.
+  Count your queries with `CaptureQueriesContext` or the Debug Toolbar.
+</Callout>
+
+- **`get()` without handling `DoesNotExist`.** Use `filter(...).first()` when "none" is normal, or
+  `get_object_or_404` in views.
+- **Read-modify-write races.** `p.stock -= 1; p.save()` loses updates under concurrency; use
+  `update(stock=F("stock") - 1)` (or row locks, lesson 12).
+- **Expecting `update()`/`delete()` to call `save()` or signals.** They don't.
+- **`len(qs)` to count a big table.** It loads every row. Use `qs.count()`; and `qs.exists()` to ask
+  "any?".
+- **Trusting `str(qs.query)` as runnable SQL.** It doesn't quote values; use it to read, not to run.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: write a query for books whose title contains 'war' (any case) published after 2000."
+>
+  `Book.objects.filter(title__icontains="war", published__year__gt=2000)`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: products that are either out of stock or cost more than 100?"
+>
+  `Product.objects.filter(Q(stock=0) | Q(price__gt=100))`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: number of orders per status, as {status: count}?">
+  `Order.objects.values("status").annotate(n=Count("id"))`, then
+  `{r["status"]: r["n"] for r in ...}`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: how many queries does `for b in Book.objects.all(): print(b.title)` run, and the same loop twice over one saved QuerySet?"
+>
+  One for the first loop. Looping twice over the **same** QuerySet object reuses its cache: still
+  one in total. Writing `Book.objects.all()` twice creates two QuerySets: two queries.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: give every employee a 5% raise in one statement.">
+  `Employee.objects.update(salary=F("salary") * Decimal("1.05"))`. One `UPDATE`, computed in the
+  database.
+</Reveal>
+
+<KeyTakeaways>
+
+- QuerySets are lazy and cache their rows; count queries, don't guess.
+- `filter`/`exclude`/`get` + lookups (`__icontains`, `__in`, `__gte`, `__year`, `__isnull`, across
+  relations with `__`).
+- `Q` for OR/NOT; `F` to compare or update columns inside the database, race-free.
+- `aggregate` → one dict; `annotate` → per row, or per group after `values()`.
+- Bulk methods (`bulk_create`, `update`, `delete`) are one statement but skip `save()` and signals.
+- See the SQL with `CaptureQueriesContext`, `explain()` and the Debug Toolbar.
+
+</KeyTakeaways>

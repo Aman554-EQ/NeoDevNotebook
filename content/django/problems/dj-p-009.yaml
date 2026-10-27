@@ -1,0 +1,75 @@
+id: dj-p-009
+title: Revenue per category
+difficulty: simple
+tags:
+  - orm
+  - aggregation
+statement: |
+  Models: `Category(name)`, `Product(name, category FK)`, `Sale(product FK, qty,
+  unit_price)`. Write `revenue_by_category()` returning `{category name: Decimal total}` for every
+  category, **including categories with no sales (0)**, computed in one query.
+examples:
+  - input: revenue_by_category()
+    output: "{'books': Decimal('33.00'), 'music': Decimal('0')}"
+hints:
+  - Annotate categories, following `products__sales__...`.
+  - "`Coalesce(Sum(...), Value(0))` for empty groups."
+solution:
+  language: python
+  code: |
+    from decimal import Decimal
+
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+    from django.db.models import DecimalField, ExpressionWrapper, F, Sum, Value
+    from django.db.models.functions import Coalesce
+
+
+    class Category(models.Model):
+        name = models.CharField(max_length=30)
+
+
+    class Product(models.Model):
+        name = models.CharField(max_length=30)
+        category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name="products")
+
+
+    class Sale(models.Model):
+        product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="sales")
+        qty = models.PositiveIntegerField()
+        unit_price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+    def revenue_by_category():
+        money = DecimalField(max_digits=12, decimal_places=2)
+        line = ExpressionWrapper(F("products__sales__qty") * F("products__sales__unit_price"), output_field=money)
+        rows = Category.objects.annotate(revenue=Coalesce(Sum(line), Value(Decimal("0")), output_field=money))
+        return {c.name: c.revenue for c in rows}
+
+
+    migrate()
+  explanation: |
+    Annotating `Category` and following the relations backwards (`products__sales__qty`)
+    produces `LEFT OUTER JOIN`s from categories to products to sales, grouped by category, so categories
+    without sales still appear. `ExpressionWrapper` multiplies two columns per row and declares the result
+    type. A sum over no rows is `NULL`, so `Coalesce(..., 0)` turns it into zero. Everything happens in one
+    SQL query; summing in Python would load every sale.
+complexity:
+  time: O(n) rows joined
+  space: O(categories)
+verify: |
+  from django.db import connection
+  from django.test.utils import CaptureQueriesContext
+
+  books, music = Category.objects.create(name="books"), Category.objects.create(name="music")
+  dune, emma = Product.objects.create(name="Dune", category=books), Product.objects.create(name="Emma", category=books)
+  Product.objects.create(name="Vinyl", category=music)
+  Sale.objects.create(product=dune, qty=2, unit_price=Decimal("12.50"))
+  Sale.objects.create(product=emma, qty=1, unit_price=Decimal("8.00"))
+  with CaptureQueriesContext(connection) as ctx:
+      result = revenue_by_category()
+  assert len(ctx) == 1
+  assert result == {"books": Decimal("33.00"), "music": Decimal("0")}, result

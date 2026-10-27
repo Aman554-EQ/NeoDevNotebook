@@ -1,0 +1,112 @@
+{
+  "kind": "http",
+  "title": "An API client's view of one endpoint",
+  "steps": [
+    {
+      "label": "No token",
+      "note": "Without credentials the API answers 401 Unauthorized, and WWW-Authenticate names the scheme it expects.",
+      "request": {
+        "method": "GET",
+        "url": "/api/reports/",
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 401,
+        "reason": "Unauthorized",
+        "headers": {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": "Bearer"
+        },
+        "body": "{\n  \"error\": \"Send Authorization: Bearer <token>.\"\n}",
+        "size": 48
+      }
+    },
+    {
+      "label": "Wrong token",
+      "note": "A wrong token is also 401. In Postman, put the real one in an environment variable instead of pasting it into every request.",
+      "request": {
+        "method": "GET",
+        "url": "/api/reports/",
+        "headers": {
+          "Authorization": "Bearer wrong"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 401,
+        "reason": "Unauthorized",
+        "headers": {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": "Bearer"
+        },
+        "body": "{\n  \"error\": \"Send Authorization: Bearer <token>.\"\n}",
+        "size": 48
+      }
+    },
+    {
+      "label": "Authorized",
+      "note": "With the right Authorization header: 200 OK and JSON.",
+      "request": {
+        "method": "GET",
+        "url": "/api/reports/",
+        "headers": {
+          "Authorization": "Bearer fake-token-for-learning-123"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"results\": [\n    {\n      \"month\": \"2026-01\",\n      \"units\": 16\n    },\n    {\n      \"month\": \"2026-02\",\n      \"units\": 20\n    }\n  ]\n}",
+        "size": 83
+      }
+    },
+    {
+      "label": "Query parameter",
+      "note": "Filters travel in the query string (Postman's Params tab builds it for you).",
+      "request": {
+        "method": "GET",
+        "url": "/api/reports/?month=2026-02",
+        "headers": {
+          "Authorization": "Bearer fake-token-for-learning-123"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"results\": [\n    {\n      \"month\": \"2026-02\",\n      \"units\": 20\n    }\n  ]\n}",
+        "size": 48
+      }
+    },
+    {
+      "label": "Accept header",
+      "note": "The Accept header asks for a format. This endpoint can also answer in CSV: same data, different representation.",
+      "request": {
+        "method": "GET",
+        "url": "/api/reports/",
+        "headers": {
+          "Authorization": "Bearer fake-token-for-learning-123",
+          "Accept": "text/csv"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "text/csv"
+        },
+        "body": "month,units\n2026-01,16\n2026-02,20\n",
+        "size": 34
+      }
+    }
+  ]
+}

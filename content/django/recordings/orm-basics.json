@@ -1,0 +1,94 @@
+{
+  "kind": "orm",
+  "title": "QuerySets and the SQL behind them",
+  "steps": [
+    {
+      "label": "Lazy",
+      "note": "Building a QuerySet runs no SQL: zero queries. .query only shows the SQL Django would send (without quoting the values).",
+      "python": "str(Book.objects.filter(year__lt=1900).query)",
+      "sql": [],
+      "result": "'SELECT \"shop_book\".\"id\", \"shop_book\".\"title\", \"shop_book\".\"author_id\", \"shop_book\".\"year\", \"shop_book\".\"copies\" FROM \"shop_book\" WHERE \"shop_book\".\"year\" < 1900'"
+    },
+    {
+      "label": "filter + order_by",
+      "note": "Iterating (here: list()) runs it. Field lookups like year__lt become WHERE clauses; order_by becomes ORDER BY.",
+      "python": "Book.objects.filter(year__lt=1900).order_by(\"-year\")",
+      "sql": [
+        "SELECT \"shop_book\".\"id\", \"shop_book\".\"title\", \"shop_book\".\"author_id\", \"shop_book\".\"year\", \"shop_book\".\"copies\" FROM \"shop_book\" WHERE \"shop_book\".\"year\" < 1900 ORDER BY \"shop_book\".\"year\" DESC"
+      ],
+      "result": "[<Book: Persuasion>, <Book: Emma>]"
+    },
+    {
+      "label": "get",
+      "note": "get() returns exactly one object. With no match it raises DoesNotExist; with two, MultipleObjectsReturned.",
+      "python": "Book.objects.get(title=\"Dune\")",
+      "sql": [
+        "SELECT \"shop_book\".\"id\", \"shop_book\".\"title\", \"shop_book\".\"author_id\", \"shop_book\".\"year\", \"shop_book\".\"copies\" FROM \"shop_book\" WHERE \"shop_book\".\"title\" = 'Dune' LIMIT 21"
+      ],
+      "result": "<Book: Dune>"
+    },
+    {
+      "label": "Q objects (OR)",
+      "note": "Keyword arguments are ANDed. For OR (or NOT, with ~Q) combine Q objects.",
+      "python": "Book.objects.filter(Q(year__lt=1816) | Q(copies__gte=3))",
+      "sql": [
+        "SELECT \"shop_book\".\"id\", \"shop_book\".\"title\", \"shop_book\".\"author_id\", \"shop_book\".\"year\", \"shop_book\".\"copies\" FROM \"shop_book\" WHERE (\"shop_book\".\"year\" < 1816 OR \"shop_book\".\"copies\" >= 3)"
+      ],
+      "result": "[<Book: Dune>, <Book: Emma>]"
+    },
+    {
+      "label": "Across a relation",
+      "note": "author__name follows the foreign key: Django writes the JOIN. values_list returns plain values instead of model objects.",
+      "python": "Book.objects.filter(author__name=\"Jane Austen\").values_list(\"title\", flat=True)",
+      "sql": [
+        "SELECT \"shop_book\".\"title\" AS \"title\" FROM \"shop_book\" INNER JOIN \"shop_author\" ON (\"shop_book\".\"author_id\" = \"shop_author\".\"id\") WHERE \"shop_author\".\"name\" = 'Jane Austen'"
+      ],
+      "result": "['Emma', 'Persuasion']"
+    },
+    {
+      "label": "annotate",
+      "note": "annotate adds a computed column per row: here COUNT with GROUP BY, one row per author.",
+      "python": "Author.objects.annotate(n=Count(\"books\")).values(\"name\", \"n\").order_by(\"name\")",
+      "sql": [
+        "SELECT \"shop_author\".\"name\" AS \"name\", COUNT(\"shop_book\".\"id\") AS \"n\" FROM \"shop_author\" LEFT OUTER JOIN \"shop_book\" ON (\"shop_author\".\"id\" = \"shop_book\".\"author_id\") GROUP BY \"shop_author\".\"id\", 1 ORDER BY 1 ASC"
+      ],
+      "result": "[{'name': 'Frank Herbert', 'n': 1}, {'name': 'Jane Austen', 'n': 2}]"
+    },
+    {
+      "label": "aggregate",
+      "note": "aggregate summarises the whole QuerySet into one dict.",
+      "python": "Book.objects.aggregate(avg_year=Avg(\"year\"), total=Count(\"id\"))",
+      "sql": [
+        "SELECT AVG(\"shop_book\".\"year\") AS \"avg_year\", COUNT(\"shop_book\".\"id\") AS \"total\" FROM \"shop_book\""
+      ],
+      "result": "{'avg_year': 1865.6666666666667, 'total': 3}"
+    },
+    {
+      "label": "update with F()",
+      "note": "One UPDATE for every matching row, and F() makes the database do the arithmetic: no read-modify-write race. Returns the number of rows changed.",
+      "python": "Book.objects.filter(title=\"Dune\").update(copies=F(\"copies\") + 1)",
+      "sql": [
+        "UPDATE \"shop_book\" SET \"copies\" = (\"shop_book\".\"copies\" + 1) WHERE \"shop_book\".\"title\" = 'Dune'"
+      ],
+      "result": "1"
+    },
+    {
+      "label": "exists",
+      "note": "exists() asks only 'is there at least one?' (LIMIT 1), far cheaper than len() or count() when that's all you need.",
+      "python": "Book.objects.filter(year__gt=1900).exists()",
+      "sql": [
+        "SELECT 1 AS \"a\" FROM \"shop_book\" WHERE \"shop_book\".\"year\" > 1900 LIMIT 1"
+      ],
+      "result": "True"
+    },
+    {
+      "label": "Slicing",
+      "note": "Slicing a QuerySet becomes LIMIT/OFFSET in SQL, not a Python slice of every row.",
+      "python": "Book.objects.order_by(\"title\")[:2]",
+      "sql": [
+        "SELECT \"shop_book\".\"id\", \"shop_book\".\"title\", \"shop_book\".\"author_id\", \"shop_book\".\"year\", \"shop_book\".\"copies\" FROM \"shop_book\" ORDER BY \"shop_book\".\"title\" ASC LIMIT 2"
+      ],
+      "result": "[<Book: Dune>, <Book: Emma>]"
+    }
+  ]
+}

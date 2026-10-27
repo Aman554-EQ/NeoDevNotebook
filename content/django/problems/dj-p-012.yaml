@@ -1,0 +1,85 @@
+id: dj-p-012
+title: Owner can edit, everyone can read
+difficulty: simple
+tags:
+  - drf
+  - permissions
+statement: |
+  Write a DRF permission `IsOwnerOrReadOnly`: safe methods (GET, HEAD, OPTIONS) are
+  allowed for anyone on any object; other methods only when `obj.owner == request.user`. Use it on a
+  `ModelViewSet` for `Post(owner, text)`. New posts get `owner=request.user`.
+examples:
+  - input: bob PATCH /posts/1/ (ada's)
+    output: "403"
+hints:
+  - Implement `has_object_permission`.
+  - Set the owner in `perform_create`.
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup(apps=["rest_framework"], REST_FRAMEWORK={
+        "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
+        "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticatedOrReadOnly"],
+    })
+
+    from django.contrib.auth.models import User
+    from django.db import models
+    from rest_framework import permissions, routers, serializers, viewsets
+
+
+    class Post(models.Model):
+        owner = models.ForeignKey(User, on_delete=models.CASCADE)
+        text = models.CharField(max_length=100)
+
+
+    class IsOwnerOrReadOnly(permissions.BasePermission):
+        def has_object_permission(self, request, view, obj):
+            return request.method in permissions.SAFE_METHODS or obj.owner == request.user
+
+
+    class PostSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = Post
+            fields = ["id", "text"]
+
+
+    class PostViewSet(viewsets.ModelViewSet):
+        queryset = Post.objects.order_by("id")
+        serializer_class = PostSerializer
+        permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
+
+        def perform_create(self, serializer):
+            serializer.save(owner=self.request.user)
+
+
+    router = routers.DefaultRouter()
+    router.register("posts", PostViewSet)
+    urlpatterns = router.urls
+    migrate()
+  explanation: |
+    `IsAuthenticatedOrReadOnly` (a request-level check) keeps anonymous users from writing at
+    all; `IsOwnerOrReadOnly.has_object_permission` (an object-level check) runs when the view calls
+    `get_object()`, i.e. for retrieve, update and destroy. Safe methods always pass, so everyone can read;
+    writes need ownership. `perform_create` sets the owner from the authenticated user, so a client can
+    never create a post in someone else's name. Remember that object permissions are not checked for list
+    views.
+complexity:
+  time: O(1) per request
+  space: O(1)
+verify: |
+  from django.test import Client
+
+  ada, bob = User.objects.create_user("ada"), User.objects.create_user("bob")
+  c = Client()
+  c.force_login(ada)
+  assert c.post("/posts/", {"text": "hello"}, content_type="application/json").status_code == 201
+  assert Post.objects.get().owner == ada
+  c.force_login(bob)
+  assert c.get("/posts/1/").status_code == 200
+  assert c.patch("/posts/1/", {"text": "hacked"}, content_type="application/json").status_code == 403
+  assert c.delete("/posts/1/").status_code == 403
+  c.force_login(ada)
+  assert c.patch("/posts/1/", {"text": "edited"}, content_type="application/json").status_code == 200
+  assert Client().post("/posts/", {"text": "x"}, content_type="application/json").status_code == 403

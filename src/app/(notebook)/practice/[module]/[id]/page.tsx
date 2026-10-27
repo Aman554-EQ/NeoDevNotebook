@@ -86,7 +86,7 @@ export default async function ProblemPage({ params }: PageProps<"/practice/[modu
           {p.examples.map((e, i) => (
             <div
               key={i}
-              className="border-rule bg-surface rounded-[var(--radius-card)] border p-4 font-mono text-sm"
+              className="border-rule bg-surface rounded-[var(--radius-card)] border p-4 font-mono text-sm [overflow-wrap:anywhere]"
             >
               <p>
                 <span className="text-muted">Input: </span>

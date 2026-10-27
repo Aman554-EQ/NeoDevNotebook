@@ -1,0 +1,392 @@
+---
+title: Django in one picture
+summary: What Django is, what "batteries included" means, how MVT relates to MVC, the difference between a project and an app, and the path every request takes through Django, with your first runnable Django code.
+estimatedMinutes: 18
+difficulty: easy
+section: Django Core
+objectives:
+  - Explain what Django gives you out of the box and when that helps
+  - Map Django's Model-View-Template to the classic MVC pattern
+  - Tell a project from an app and say what lives in each
+  - Trace a request through middleware, URLconf, view, model and template and back
+prerequisites:
+  - How the web works
+  - Backend fundamentals & REST
+tags: [django, mvt, mvc, architecture, request-lifecycle]
+practice: [dj-p-001, dj-p-002]
+interview: [dj-i-001, dj-i-002, dj-i-003]
+---
+
+## Intuition: a fully equipped kitchen
+
+Some frameworks hand you a stove and let you buy every pot yourself. **Django** is a fully equipped
+professional kitchen: the ORM and migrations, URL routing, templates, forms, an admin site, users and
+permissions, sessions, security protections, caching, email, testing tools. They are designed to work
+together and are maintained as one project.
+
+You pay with some structure you must follow. In return, you build a secure, data-driven web
+application in days instead of weeks, and any Django developer can find their way around your code.
+
+## See it
+
+<RequestLifecycleViz framework="django" />
+
+## The precise rules
+
+**MVT, Django's name for MVC:**
+
+| Django name  | What it is                                 | Classic MVC name |
+| ------------ | ------------------------------------------ | ---------------- |
+| **Model**    | data and its rules (`models.py`, the ORM)  | Model            |
+| **View**     | a function or class that handles a request | Controller       |
+| **Template** | how the response looks (HTML with tags)    | View             |
+| URLconf      | maps URLs to views (`urls.py`)             | (the router)     |
+
+The naming trips people up: a Django **view** decides _what_ to show (like a controller); a
+**template** decides _how_ it looks. For JSON APIs the "template" is a serializer (lesson 18).
+
+**Project vs app:**
+
+- A **project** is the whole website: settings, root URLs, and the WSGI/ASGI entry points
+  (`config/` in this module's projects).
+- An **app** is one area of the domain with its own models, views, URLs, templates, admin and
+  tests (`notes`, `orders`, `payments`). Apps are listed in `INSTALLED_APPS`; well-designed ones
+  could be reused in another project.
+
+**The path of a request:**
+
+1. A web server (**gunicorn** for WSGI, **uvicorn** for ASGI) receives the HTTP request and calls
+   Django.
+2. Django builds an `HttpRequest` and runs the **middleware** in `settings.MIDDLEWARE`, top to
+   bottom (security, sessions, CSRF, authentication...).
+3. The **URLconf** (`ROOT_URLCONF`) matches the path and picks a **view**.
+4. The **view** reads or changes data through **models**, then renders a **template** (or JSON).
+5. It returns an `HttpResponse`, which passes back through the middleware, bottom to top.
+6. The web server sends the bytes to the client.
+
+**Who uses Django:** Instagram, Mozilla, Disqus, Sentry, Eventbrite and many governments, newsrooms,
+banks and startups. It shines for data-heavy products with users, permissions and an internal admin.
+
+<Callout type="tip" title="Run the examples: get playground.py once">
+  From here on, examples run as a single file. Download
+  [playground.py](/downloads/django/playground.py) next to your scripts and install Django with
+  `python -m pip install "Django>=5.2,<5.3"`. It configures Django in memory, so each example is one
+  `python example.py` away. Lesson 7 explains every line, and how a real project differs.
+</Callout>
+
+## Worked example
+
+The smallest Django application: one view, one URL, and a request sent with Django's test client
+(which calls Django directly, without a network or a running server).
+
+```python title="hello_django.py"
+from playground import setup
+
+setup()  # settings in memory: urls come from this file, SQLite in memory
+
+from django.http import HttpResponse
+from django.test import Client
+from django.urls import path
+
+
+def hello(request):
+    name = request.GET.get("name", "world")
+    return HttpResponse(f"Hello, {name}!")
+
+
+urlpatterns = [path("hello/", hello)]
+
+client = Client()
+response = client.get("/hello/", {"name": "Ada"})
+print(response.status_code, response["Content-Type"])
+print(response.content.decode())
+print(client.get("/nowhere/").status_code)
+```
+
+```text title="Output"
+200 text/html; charset=utf-8
+Hello, Ada!
+404
+```
+
+- `setup()` must run **before** importing Django modules that need settings. In a real project,
+  `manage.py` and `settings.py` do this job.
+- A **view** is just a function: it receives an `HttpRequest` and returns an `HttpResponse`.
+  `request.GET` holds the query string (`?name=Ada`) as a dict-like object.
+- `urlpatterns` is the URLconf: a list of `path(route, view)` entries.
+- The test client builds a real `HttpRequest` and runs the full middleware stack. An unknown path
+  gives `404` without any code from you.
+
+## Variations
+
+### A JSON view
+
+```python
+from playground import setup
+
+setup()
+
+from django.http import JsonResponse
+from django.test import Client
+from django.urls import path
+
+
+def status(request):
+    return JsonResponse({"service": "shop", "healthy": True, "version": 3})
+
+
+urlpatterns = [path("status/", status)]
+response = Client().get("/status/")
+print(response.status_code, response["Content-Type"])
+print(response.json())
+```
+
+```text title="Output"
+200 application/json
+{'service': 'shop', 'healthy': True, 'version': 3}
+```
+
+`JsonResponse` serialises a dict and sets `Content-Type: application/json`. For full APIs you'll
+use Django REST Framework (from lesson 18), which builds on the same request and response objects.
+
+### Capturing part of the URL
+
+```python
+from playground import setup
+
+setup()
+
+from django.http import JsonResponse
+from django.test import Client
+from django.urls import path
+
+BOOKS = {1: "Dune", 2: "Emma"}
+
+
+def book_detail(request, pk):
+    if pk not in BOOKS:
+        return JsonResponse({"error": "not found"}, status=404)
+    return JsonResponse({"id": pk, "title": BOOKS[pk], "pk_type": type(pk).__name__})
+
+
+urlpatterns = [path("books/<int:pk>/", book_detail)]
+client = Client()
+print(client.get("/books/2/").json())
+print(client.get("/books/9/").status_code)
+print(client.get("/books/abc/").status_code, "(the int converter refuses 'abc')")
+```
+
+```text title="Output"
+{'id': 2, 'title': 'Emma', 'pk_type': 'int'}
+404
+404 (the int converter refuses 'abc')
+```
+
+`<int:pk>` both matches digits and converts them, so the view receives an `int`. Lesson 8 covers
+routing in depth.
+
+### A model, a table, a query
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    year = models.IntegerField()
+
+    def __str__(self):
+        return f"{self.title} ({self.year})"
+
+
+migrate()  # creates the table for Book (and Django's built-in tables)
+
+Book.objects.create(title="Dune", year=1965)
+Book.objects.create(title="Emma", year=1815)
+print(Book.objects.count())
+print(list(Book.objects.order_by("year")))
+print(Book.objects.get(title="Dune").year)
+print(Book._meta.db_table)
+```
+
+```text title="Output"
+2
+[<Book: Emma (1815)>, <Book: Dune (1965)>]
+1965
+shop_book
+```
+
+A **model** is a Python class that maps to a table; each attribute is a column. You never wrote SQL,
+yet Django created the table and ran `INSERT` and `SELECT` statements. The table is named
+`<app label>_<model name>`: the playground's app is labelled `shop`.
+
+### A template
+
+```python
+from playground import setup
+
+setup(templates={"greet.html": "<h1>Hi {{ name|title }}</h1>{% if admin %}<p>Admin</p>{% endif %}"})
+
+from django.template.loader import render_to_string
+
+print(render_to_string("greet.html", {"name": "ada lovelace", "admin": True}))
+print(render_to_string("greet.html", {"name": "<script>bob</script>", "admin": False}))
+```
+
+```text title="Output"
+<h1>Hi Ada Lovelace</h1><p>Admin</p>
+<h1>Hi &lt;Script&gt;Bob&lt;/Script&gt;</h1>
+```
+
+`{{ }}` prints a value (through **filters** like `|title`), `{% %}` runs logic. The second call shows
+**autoescaping**: user-supplied HTML is printed as harmless text, not executed.
+
+### Settings are just Python
+
+```python
+from playground import setup
+
+setup(DEBUG=False, TIME_ZONE="Europe/Paris")
+
+from django.conf import settings
+
+print(settings.DEBUG, settings.TIME_ZONE, settings.USE_TZ)
+print(len(settings.MIDDLEWARE), "middleware, first:", settings.MIDDLEWARE[0])
+print([app for app in settings.INSTALLED_APPS if app.startswith("django")])
+```
+
+```text title="Output"
+False Europe/Paris True
+6 middleware, first: django.middleware.security.SecurityMiddleware
+['django.contrib.contenttypes', 'django.contrib.auth', 'django.contrib.sessions', 'django.contrib.messages']
+```
+
+Everything Django does is driven by settings. `django.conf.settings` is how any code reads them;
+lesson 7 walks through the important ones.
+
+## Putting it together
+
+A whole (tiny) Django application in one file: a model, a list view returning JSON, a detail view
+rendering HTML through a template, URLs, and requests from a client. This is MVT end to end.
+
+```python title="mini_shop.py"
+from playground import migrate, setup
+
+setup(templates={
+    "product.html": "<h1>{{ product.name }}</h1><p>{{ product.price }} EUR</p>"
+                    "{% if not product.in_stock %}<p>Sold out</p>{% endif %}",
+})
+
+from django.db import models
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, render
+from django.test import Client
+from django.urls import path
+
+
+class Product(models.Model):  # Model
+    name = models.CharField(max_length=100)
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    stock = models.PositiveIntegerField(default=0)
+
+    @property
+    def in_stock(self):
+        return self.stock > 0
+
+
+def product_list(request):  # View (returns JSON)
+    products = Product.objects.order_by("name").values("id", "name", "price")
+    return JsonResponse({"products": [{**p, "price": str(p["price"])} for p in products]})
+
+
+def product_page(request, pk):  # View (renders a Template)
+    product = get_object_or_404(Product, pk=pk)
+    return render(request, "product.html", {"product": product})
+
+
+urlpatterns = [  # URLconf
+    path("api/products/", product_list),
+    path("products/<int:pk>/", product_page),
+]
+
+migrate()
+Product.objects.create(name="Dune", price="12.50", stock=3)
+Product.objects.create(name="Chess set", price="30.00", stock=0)
+
+client = Client()
+print(client.get("/api/products/").json())
+print(client.get("/products/2/").content.decode())
+print(client.get("/products/99/").status_code)
+```
+
+```text title="Output"
+{'products': [{'id': 2, 'name': 'Chess set', 'price': '30.00'}, {'id': 1, 'name': 'Dune', 'price': '12.50'}]}
+<h1>Chess set</h1><p>30.00 EUR</p><p>Sold out</p>
+404
+```
+
+`get_object_or_404` turns a missing row into a `404` response instead of a crash, and `render` fills
+a template and wraps it in an `HttpResponse`. Real projects split these pieces into `models.py`,
+`views.py`, `urls.py` and `templates/`, which is exactly the structure of the **Notes** project.
+
+## Common mistakes
+
+<Callout type="warning" title="Importing Django code before settings are configured">
+  `django.core.exceptions.ImproperlyConfigured: Requested setting INSTALLED_APPS, but settings are
+  not configured.` means code touched Django before setup. In a project, run code through
+  `manage.py` (`python manage.py shell`); in these examples, call `setup()` first.
+</Callout>
+
+- **Calling templates "views".** In Django the view is the Python function; the template is the
+  HTML. Say "MVT" in interviews and explain the mapping to MVC.
+- **One giant app.** Split by domain area (`catalog`, `orders`, `payments`), not by technical layer
+  (`models_app`, `views_app`).
+- **Business logic in templates.** Templates display; views and models (or a services module)
+  decide.
+- **Using `runserver` in production.** It's a development server only; production uses gunicorn or
+  uvicorn behind a proxy (lesson 28).
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: in Django's MVT, which part plays the role of MVC's controller?"
+>
+  The **view**: it receives the request, talks to the models, and decides which template (or JSON)
+  to return. The template is MVC's "view".
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: where would you put a Payment model: a new project, a new app, or the settings package?"
+>
+  A new **app** (`payments`) inside the existing project, added to `INSTALLED_APPS`. The project
+  holds configuration; apps hold domain code.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: name the order of the layers for GET /orders/7/ in Django.">
+  Web server → middleware (top to bottom) → URLconf → view → models/ORM → database, then back: view
+  builds the response → middleware (bottom to top) → web server → client.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what does get_object_or_404(Product, pk=99) do when there's no product 99?"
+>
+  It raises `Http404`, which Django turns into a `404 Not Found` response. Without it,
+  `Product.objects.get(pk=99)` raises `Product.DoesNotExist`, a `500` error.
+</Reveal>
+
+<KeyTakeaways>
+
+- Django is "batteries included": ORM, migrations, routing, templates, forms, admin, auth, security.
+- MVT = Model (data), View (request handling, MVC's controller), Template (presentation).
+- A project holds settings and root URLs; apps hold one domain area each.
+- Request path: web server → middleware → URLconf → view → model/template → response back out.
+- A view takes an `HttpRequest` and returns an `HttpResponse`; `urlpatterns` maps paths to views.
+
+</KeyTakeaways>

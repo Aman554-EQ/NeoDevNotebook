@@ -1,0 +1,58 @@
+id: dj-p-011
+title: A booking serializer with cross-field rules
+difficulty: simple
+tags:
+  - drf
+  - serializers
+  - validation
+statement: |
+  Write `BookingSerializer` with `room` (string), `start` and `end` (dates) and `guests`
+  (1–4). `end` must be after `start` (error on the `end` field: `"End must be after start."`), and
+  `room` must be one of `"A"`, `"B"`, `"C"`.
+examples:
+  - input: "{'room': 'A', 'start': '2026-05-01', 'end': '2026-04-30', 'guests': 2}"
+    output: "{'end': ['End must be after start.']}"
+hints:
+  - "`ChoiceField(choices=[...])` for the room."
+  - "`validate(self, attrs)` and raise `ValidationError({'end': ...})`."
+solution:
+  language: python
+  code: |
+    from playground import setup
+
+    setup(apps=["rest_framework"])
+
+    from rest_framework import serializers
+
+
+    class BookingSerializer(serializers.Serializer):
+        room = serializers.ChoiceField(choices=["A", "B", "C"])
+        start = serializers.DateField()
+        end = serializers.DateField()
+        guests = serializers.IntegerField(min_value=1, max_value=4)
+
+        def validate(self, attrs):
+            if attrs["end"] <= attrs["start"]:
+                raise serializers.ValidationError({"end": "End must be after start."})
+            return attrs
+  explanation: |
+    Field-level rules (allowed rooms, date parsing, the guests range) are declared on the
+    fields, so DRF reports them per field automatically. The relation between two fields belongs in
+    `validate(attrs)`, which receives already-converted values (real `date` objects, so comparing them is
+    correct). Raising `ValidationError` with a dict attaches the message to the `end` field, which is where
+    a client should show it. Remember that `validate()` only runs when every field is valid.
+complexity:
+  time: O(1)
+  space: O(1)
+verify: |
+  import json
+
+  ok = BookingSerializer(data={"room": "A", "start": "2026-05-01", "end": "2026-05-03", "guests": "2"})
+  assert ok.is_valid(), ok.errors
+  assert ok.validated_data["guests"] == 2
+  bad = BookingSerializer(data={"room": "A", "start": "2026-05-01", "end": "2026-04-30", "guests": 2})
+  assert not bad.is_valid() and json.loads(json.dumps(bad.errors)) == {"end": ["End must be after start."]}
+  same = BookingSerializer(data={"room": "B", "start": "2026-05-01", "end": "2026-05-01", "guests": 1})
+  assert not same.is_valid()
+  many = BookingSerializer(data={"room": "Z", "start": "2026-05-01", "end": "2026-05-02", "guests": 9})
+  assert not many.is_valid() and set(many.errors) == {"room", "guests"}

@@ -1,0 +1,494 @@
+---
+title: Documenting & exploring APIs
+summary: Make an API easy to discover, try and trust. OpenAPI and what it describes, generating it with drf-spectacular, improving it with extend_schema, parameters, examples and typed fields, validating it in CI, Swagger UI and ReDoc, Postman collections from the schema, and what a good README and API guide contain.
+estimatedMinutes: 18
+difficulty: simple
+section: REST APIs with DRF
+objectives:
+  - Explain what an OpenAPI schema describes and who uses it
+  - Generate and serve a schema with drf-spectacular, Swagger UI and ReDoc
+  - Improve generated docs with extend_schema, parameters, examples and typed fields
+  - Validate the schema in CI and turn it into a Postman collection
+  - Write a README and API guide that get a new developer productive quickly
+prerequisites:
+  - A complete CRUD API
+  - Environment, tools & API clients
+tags: [drf, openapi, swagger, postman, documentation]
+practice: [dj-p-021]
+interview: [dj-i-014]
+---
+
+## Intuition: a map that draws itself
+
+Documentation written by hand drifts out of date the day after it's written. An **OpenAPI schema** is
+a machine-readable map of your API (every path, method, parameter, request body, response and auth
+scheme) generated from the code itself. From that one file you get interactive docs, client
+generators, Postman collections, contract tests and API gateways. Your job is to fill in the parts the
+code can't express: descriptions, examples and the rules behind the fields.
+
+## See it
+
+<HttpExchange
+  recording="api-docs"
+  caption="Two ways to explore an API: OPTIONS returns DRF's metadata for one endpoint (fields, types, limits), and the schema endpoint returns the whole OpenAPI document that Swagger UI, ReDoc and Postman read."
+/>
+
+## The precise rules
+
+**OpenAPI 3** describes: `info` (title, version), `paths` (each URL and method with its
+`parameters`, `requestBody` and `responses`), `components.schemas` (the shapes of request and
+response bodies, usually one per serializer) and `components.securitySchemes` (how to authenticate).
+
+**drf-spectacular** generates it from your serializers and views:
+
+```python norun title="settings.py and urls.py"
+INSTALLED_APPS += ["drf_spectacular"]
+REST_FRAMEWORK = {"DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema"}
+SPECTACULAR_SETTINGS = {"TITLE": "Library API", "VERSION": "1.0.0", "SERVE_INCLUDE_SCHEMA": False}
+
+from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
+
+urlpatterns += [
+    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),  # try requests in the browser
+    path("api/redoc/", SpectacularRedocView.as_view(url_name="schema")),  # readable reference
+]
+```
+
+```bash
+python manage.py spectacular --validate --fail-on-warn --file openapi.yaml   # in CI
+```
+
+**Improve what's generated:**
+
+- `@extend_schema(summary=..., description=..., request=..., responses={201: ..., 409: ...},
+parameters=[OpenApiParameter(...)], examples=[OpenApiExample(...)], tags=[...])` on a view or
+  action.
+- Type hints on `SerializerMethodField` getters (`-> int`) so the schema knows the type.
+- `help_text` on model and serializer fields becomes field descriptions.
+- Warnings like "unable to guess serializer" or "could not derive type of path parameter" mean the
+  docs are wrong: fix them (a `serializer_class`, `queryset = Model.objects.none()`, or
+  `getattr(self, "swagger_fake_view", False)` in `get_queryset`).
+
+**Postman:** File → Import → your `openapi.yaml` creates a collection; add an environment with
+`baseUrl` and `token`. This module's projects ship generated collections (Library, Auth starter,
+ShopLite), and CI fails if they're stale.
+
+**Human docs** still matter: a README with what the project is, how to run it (env vars, commands),
+how to test it and how it's laid out; guides for the flows a schema can't explain (authentication,
+pagination, errors, idempotency, webhooks); a changelog; and Architecture Decision Records (short
+"we chose X because Y" notes) for the big choices.
+
+## Worked example
+
+Generating a schema in code for a small ViewSet and looking at what it contains.
+
+```python title="schema_basics.py"
+from playground import migrate, setup
+
+setup(apps=["rest_framework", "drf_spectacular"],
+      REST_FRAMEWORK={"DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema"},
+      SPECTACULAR_SETTINGS={"TITLE": "Books API", "VERSION": "1.0.0"})
+
+from django.db import models
+from drf_spectacular.generators import SchemaGenerator
+from rest_framework import routers, serializers, viewsets
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=100, help_text="As printed on the cover.")
+    year = models.PositiveIntegerField()
+
+
+class BookSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Book
+        fields = ["id", "title", "year"]
+
+
+class BookViewSet(viewsets.ModelViewSet):
+    """Books in the catalogue."""
+
+    queryset = Book.objects.order_by("id")
+    serializer_class = BookSerializer
+
+
+router = routers.DefaultRouter()
+router.register("books", BookViewSet)
+urlpatterns = router.urls
+
+schema = SchemaGenerator().get_schema(request=None, public=True)
+print(schema["openapi"], schema["info"])
+for path, operations in schema["paths"].items():
+    print(path, [f"{method.upper()} {op['operationId']}" for method, op in operations.items()])
+book = schema["components"]["schemas"]["Book"]
+print({name: (field.get("type"), field.get("readOnly", False)) for name, field in book["properties"].items()})
+print("title doc:", book["properties"]["title"]["description"], "| required:", book["required"])
+```
+
+```text title="Output"
+3.0.3 {'title': 'Books API', 'version': '1.0.0'}
+/books/ ['GET books_list', 'POST books_create']
+/books/{id}/ ['GET books_retrieve', 'PUT books_update', 'PATCH books_partial_update', 'DELETE books_destroy']
+{'id': ('integer', True), 'title': ('string', False), 'year': ('integer', False)}
+title doc: As printed on the cover. | required: ['id', 'title', 'year']
+```
+
+- Every action got an operation with an `operationId` (used by client generators as method names).
+- The `Book` component came from the serializer: `id` is read-only, `title` has its `help_text`, the
+  required fields are listed, and `year` is an integer because the model field is.
+- The ViewSet's docstring becomes the operations' description. All of this updates itself whenever the
+  code changes.
+
+## Variations
+
+### Documenting what the code can't say
+
+```python
+from playground import setup
+
+setup(apps=["rest_framework", "drf_spectacular"],
+      REST_FRAMEWORK={"DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema"},
+      SPECTACULAR_SETTINGS={"TITLE": "Shop API", "VERSION": "1.0.0"})
+
+from django.urls import path
+from drf_spectacular.generators import SchemaGenerator
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
+from rest_framework import serializers
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+
+class OrderIn(serializers.Serializer):
+    product = serializers.IntegerField(min_value=1)
+    quantity = serializers.IntegerField(min_value=1, max_value=100)
+
+
+class OrderOut(serializers.Serializer):
+    id = serializers.IntegerField()
+    status = serializers.CharField()
+
+
+class Orders(APIView):
+    @extend_schema(
+        summary="Place an order",
+        request=OrderIn,
+        responses={201: OrderOut, 409: OpenApiResponse(description="Not enough stock")},
+        parameters=[OpenApiParameter("Idempotency-Key", location=OpenApiParameter.HEADER, required=True,
+                                     description="Unique per checkout attempt; reuse it on retries.")],
+        examples=[OpenApiExample("Two copies", value={"product": 3, "quantity": 2}, request_only=True)],
+        tags=["orders"],
+    )
+    def post(self, request):
+        return Response({"id": 41, "status": "pending"}, status=201)
+
+
+urlpatterns = [path("orders/", Orders.as_view())]
+op = SchemaGenerator().get_schema(request=None, public=True)["paths"]["/orders/"]["post"]
+print(op["summary"], "|", op["tags"])
+print([(p["name"], p["in"], p["required"]) for p in op["parameters"]])
+print(sorted(op["responses"]), "|", op["responses"]["409"]["description"])
+print(op["requestBody"]["content"]["application/json"]["examples"]["TwoCopies"]["value"])
+```
+
+```text title="Output"
+Place an order | ['orders']
+[('Idempotency-Key', 'header', True)]
+['201', '409'] | Not enough stock
+{'product': 3, 'quantity': 2}
+```
+
+The header parameter, the 409 response and the example would otherwise be invisible: they live in your
+logic, not in a serializer. ShopLite documents its `Idempotency-Key` header exactly like this, and the
+generated Postman collection fills it with `{{$guid}}` automatically.
+
+### Typed computed fields
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework", "drf_spectacular"],
+      REST_FRAMEWORK={"DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema"},
+      SPECTACULAR_SETTINGS={"TITLE": "Books API", "VERSION": "1.0.0"})
+
+from django.db import models
+from django.urls import path
+from drf_spectacular.generators import SchemaGenerator
+from rest_framework import generics, serializers
+
+
+class Book(models.Model):
+    pages = models.PositiveIntegerField()
+
+
+class BookSerializer(serializers.ModelSerializer):
+    untyped = serializers.SerializerMethodField()
+    reading_hours = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Book
+        fields = ["id", "pages", "untyped", "reading_hours"]
+
+    def get_untyped(self, book):
+        return book.pages // 40
+
+    def get_reading_hours(self, book) -> float:
+        return book.pages / 40
+
+
+urlpatterns = [path("books/", generics.ListAPIView.as_view(queryset=Book.objects.all(),
+                                                         serializer_class=BookSerializer))]
+props = SchemaGenerator().get_schema(request=None, public=True)["components"]["schemas"]["Book"]["properties"]
+print({name: props[name].get("type") for name in ["untyped", "reading_hours"]})
+```
+
+```text title="Output"
+{'untyped': 'string', 'reading_hours': 'number'}
+```
+
+Without a return type hint, drf-spectacular can't know what a method returns and documents it as a
+string (and warns). The `-> float` hint made `reading_hours` a `number`. Typed clients generated from
+the schema depend on details like this.
+
+### Validating the schema like CI does
+
+```python
+from playground import setup
+
+setup(apps=["rest_framework", "drf_spectacular"],
+      REST_FRAMEWORK={"DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema"},
+      SPECTACULAR_SETTINGS={"TITLE": "Ping API", "VERSION": "1.0.0"})
+
+from django.urls import path
+from drf_spectacular.drainage import GENERATOR_STATS
+from drf_spectacular.generators import SchemaGenerator
+from drf_spectacular.validation import validate_schema
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+
+class Ping(APIView):  # no serializer: the generator can't describe the response
+    def get(self, request):
+        return Response({"pong": True})
+
+
+urlpatterns = [path("ping/", Ping.as_view())]
+GENERATOR_STATS.silent = True
+schema = SchemaGenerator().get_schema(request=None, public=True)
+validate_schema(schema)  # raises if the document isn't valid OpenAPI
+print("valid OpenAPI:", True, "| warnings:", len(GENERATOR_STATS._warn_cache), "| errors:", len(GENERATOR_STATS._error_cache))
+print("documented response:", schema["paths"]["/ping/"]["get"]["responses"])
+```
+
+```text title="Output"
+valid OpenAPI: True | warnings: 0 | errors: 1
+documented response: {'200': {'description': 'No response body'}}
+```
+
+The document is valid OpenAPI, yet wrong: the generator couldn't guess a serializer, recorded an
+error ("unable to guess serializer"), and documented the endpoint as returning no body at all. That's
+why CI should run `manage.py spectacular --validate --fail-on-warn`: this module's
+`pnpm test:projects` does, and the ShopLite views it flagged were fixed with `@extend_schema`.
+
+### From schema to a Postman collection
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework", "drf_spectacular"],
+      REST_FRAMEWORK={"DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema"},
+      SPECTACULAR_SETTINGS={"TITLE": "Books API", "VERSION": "1.0.0"})
+
+from django.db import models
+from drf_spectacular.generators import SchemaGenerator
+from rest_framework import routers, serializers, viewsets
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    year = models.PositiveIntegerField()
+
+
+class BookSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Book
+        fields = ["id", "title", "year"]
+
+
+class BookViewSet(viewsets.ModelViewSet):
+    queryset = Book.objects.all()
+    serializer_class = BookSerializer
+
+
+router = routers.DefaultRouter()
+router.register("books", BookViewSet)
+urlpatterns = router.urls
+schema = SchemaGenerator().get_schema(request=None, public=True)
+
+EXAMPLE = {"string": "Dune", "integer": 1965}
+items = []
+for path, operations in schema["paths"].items():
+    for method, op in operations.items():
+        request = {"method": method.upper(), "url": "{{baseUrl}}" + path.replace("{", ":").replace("}", "")}
+        body = op.get("requestBody", {}).get("content", {}).get("application/json")
+        if body:
+            component = schema["components"]["schemas"][body["schema"]["$ref"].rsplit("/", 1)[1]]
+            request["body"] = {k: EXAMPLE[v["type"]] for k, v in component["properties"].items() if not v.get("readOnly")}
+        items.append(request)
+for item in items:
+    print(item)
+```
+
+```text title="Output"
+{'method': 'GET', 'url': '{{baseUrl}}/books/'}
+{'method': 'POST', 'url': '{{baseUrl}}/books/', 'body': {'title': 'Dune', 'year': 1965}}
+{'method': 'GET', 'url': '{{baseUrl}}/books/:id/'}
+{'method': 'PUT', 'url': '{{baseUrl}}/books/:id/', 'body': {'title': 'Dune', 'year': 1965}}
+{'method': 'PATCH', 'url': '{{baseUrl}}/books/:id/', 'body': {'title': 'Dune', 'year': 1965}}
+{'method': 'DELETE', 'url': '{{baseUrl}}/books/:id/'}
+```
+
+That's the core of this module's `scripts/gen_postman.py`: every operation becomes a request with a
+`{{baseUrl}}` variable, path parameters as `:id`, and an example body built from the schema (read-only
+fields left out). Postman can also import `openapi.yaml` directly; generating it yourself lets you add
+auth and examples consistently and check it in CI.
+
+## Putting it together
+
+The ShopLite README: what it is, how to run it with fake values, how to play the payment provider,
+the endpoint table, the error format, the layout, how to test and what changes in production:
+
+<ProjectFile project="shoplite" path="README.md" />
+
+A runnable, well-documented endpoint set: tags, summaries, typed fields, documented auth and errors,
+validated with zero warnings.
+
+```python title="documented_api.py"
+from playground import migrate, setup
+
+setup(apps=["rest_framework", "drf_spectacular"], REST_FRAMEWORK={
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.TokenAuthentication"],
+}, SPECTACULAR_SETTINGS={"TITLE": "Library API", "VERSION": "1.0.0",
+                         "DESCRIPTION": "Books and loans. Errors: {'detail': ...}."})
+
+from django.db import models
+from drf_spectacular.drainage import GENERATOR_STATS
+from drf_spectacular.generators import SchemaGenerator
+from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_view
+from drf_spectacular.validation import validate_schema
+from rest_framework import routers, serializers, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=100, help_text="As printed on the cover.")
+    copies = models.PositiveIntegerField(default=1, help_text="Copies the library owns.")
+
+
+class BookSerializer(serializers.ModelSerializer):
+    available = serializers.SerializerMethodField(help_text="Copies on the shelf right now.")
+
+    class Meta:
+        model = Book
+        fields = ["id", "title", "copies", "available"]
+
+    def get_available(self, book) -> int:
+        return book.copies
+
+
+@extend_schema_view(
+    list=extend_schema(summary="List books", tags=["books"]),
+    retrieve=extend_schema(summary="Get one book", tags=["books"]),
+)
+class BookViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Book.objects.order_by("id")
+    serializer_class = BookSerializer
+
+    @extend_schema(summary="Borrow a copy", tags=["loans"], request=None,
+                   responses={200: BookSerializer, 409: OpenApiResponse(description="No copies left")})
+    @action(detail=True, methods=["post"])
+    def borrow(self, request, pk=None):
+        return Response(self.get_serializer(self.get_object()).data)
+
+
+router = routers.DefaultRouter()
+router.register("books", BookViewSet)
+urlpatterns = router.urls
+
+GENERATOR_STATS.silent = True
+schema = SchemaGenerator().get_schema(request=None, public=True)
+validate_schema(schema)
+print("warnings:", len(GENERATOR_STATS._warn_cache))
+for path, operations in schema["paths"].items():
+    for method, op in operations.items():
+        print(f"{method.upper():<5} {path:<22} {op['summary']:<15} tags={op['tags']} "
+              f"responses={sorted(op['responses'])} auth={[list(s)[0] for s in op['security'] if s]}")
+print("auth scheme:", schema["components"]["securitySchemes"]["tokenAuth"]["description"])
+```
+
+```text title="Output"
+warnings: 0
+GET   /books/                List books      tags=['books'] responses=['200'] auth=['tokenAuth']
+GET   /books/{id}/           Get one book    tags=['books'] responses=['200'] auth=['tokenAuth']
+POST  /books/{id}/borrow/    Borrow a copy   tags=['loans'] responses=['200', '409'] auth=['tokenAuth']
+auth scheme: Token-based authentication with required prefix "Token"
+```
+
+Every operation has a human summary, a tag for grouping in Swagger UI, its real responses (including
+the 409), and the token scheme with its "Token" prefix described. A new developer can now open
+`/api/docs/`, click "Authorize", paste a token and try every endpoint, without reading a line of code.
+
+## Common mistakes
+
+<Callout type="warning" title="Ignoring schema warnings">
+  Each warning is a part of your API that the docs describe wrongly or not at all. Run `spectacular
+  --validate --fail-on-warn` in CI so they can't pile up.
+</Callout>
+
+- **Hand-written API docs** that duplicate the schema: they go stale. Generate the reference; write
+  guides for the flows.
+- **Undocumented errors.** Clients need to know which 4xx codes an endpoint can return and their
+  shape; add them to `responses`.
+- **Real tokens in shared Postman collections.** Use environment variables (`{{token}}`) and share
+  collections without secrets.
+- **Serving Swagger UI publicly for an internal API** when it reveals more than you'd like; restrict it
+  like the admin.
+- **A README that only says "Django project".** Say what it does, how to run and test it, and which
+  environment variables exist.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: a SerializerMethodField shows as 'string' in the docs but returns a number. Fix?">
+  Add a return type hint to its getter (`def get_total(self, obj) -> int:`) or decorate it with
+  `@extend_schema_field(OpenApiTypes.INT)`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: document that POST /orders/ requires an Idempotency-Key header and can return 409.">
+  `@extend_schema(parameters=[OpenApiParameter("Idempotency-Key", location=OpenApiParameter.HEADER, required=True)], responses={201: OrderSerializer, 409: OpenApiResponse(description="...")})`
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: how does a new teammate try your API in Postman in one minute?"
+>
+  Import `openapi.yaml` (or the shipped collection), create an environment with `baseUrl` and
+  `token`, call the login request, paste the token, go.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: what belongs in a README, and what in an ADR?">
+  README: what the project is, how to run, configure, test and deploy it, and its layout. ADR: one
+  significant decision, its context, the options considered and why one was chosen.
+</Reveal>
+
+<KeyTakeaways>
+
+- OpenAPI describes paths, operations, parameters, bodies, responses and auth; generate it from code.
+- drf-spectacular + Swagger UI/ReDoc give interactive docs; `@extend_schema` adds summaries,
+  headers, error responses and examples.
+- Type hints and `help_text` make generated docs precise; fix every warning, validate in CI.
+- Postman collections come from the schema; use environments, never embedded secrets.
+- Generated reference + human guides (auth, errors, idempotency, webhooks) + a real README.
+
+</KeyTakeaways>

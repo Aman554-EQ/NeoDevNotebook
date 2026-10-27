@@ -1,0 +1,451 @@
+---
+title: Environment, tools & API clients
+summary: The everyday toolkit around a backend. Virtual environments and pinned dependencies, configuration from environment variables and .env files (12-factor), keeping secrets out of Git, and exploring APIs with Postman, curl, HTTPie and the browser's network tab.
+estimatedMinutes: 20
+difficulty: easy
+section: Web & Backend Foundations
+objectives:
+  - Set up an isolated project environment with pinned dependencies
+  - Read configuration from environment variables with safe defaults and type conversion
+  - Keep secrets out of code and Git, and generate strong secret keys
+  - Explore and test an API with Postman (collections, environments, tests), curl and HTTPie
+prerequisites:
+  - Backend fundamentals & REST
+tags: [environment, config, secrets, postman, curl, tooling]
+practice: [dj-p-001]
+interview: [dj-i-020]
+---
+
+## Intuition: one codebase, many places
+
+The same code runs on your laptop, in CI, on a staging server and in production. What changes between
+those places is **configuration**: which database, which secret keys, whether debug pages are on.
+Hard-code any of it and you either leak a secret into Git or run production with your laptop's
+settings.
+
+The fix, known as **12-factor config**: code reads its settings from **environment variables**. Each
+machine sets its own values, and secrets never touch the repository.
+
+Then, to see what your API really does, you talk to it with an **API client**: Postman for clicking
+and saving requests, curl and HTTPie for the terminal, and the browser's network tab for watching a
+real page.
+
+## See it
+
+<HttpExchange
+  recording="api-client-tour"
+  caption="What an API client lets you control: headers (Authorization, Accept), query parameters and the body. The server reads its expected token from an environment variable, never from the code."
+/>
+
+## The precise rules
+
+**Virtual environments** isolate a project's packages (Python lesson 30 covers them in depth):
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate     macOS/Linux: source .venv/bin/activate
+python -m pip install "Django>=5.2,<5.3" djangorestframework
+python -m pip freeze > requirements.txt   # exact versions, committed to Git
+```
+
+**Configuration comes from the environment.** Read it in one place (Django: `settings.py`), convert
+types there, and fail loudly when a required value is missing in production.
+
+**`.env` files** hold local values so you don't have to export variables by hand. A `.env` file is
+**never committed**; commit a `.env.example` with fake values instead, so new developers know what
+to set.
+
+```dotenv
+# .env.example  (committed: fake values only)
+DJANGO_DEBUG=true
+DJANGO_SECRET_KEY=fake-dev-key-change-me
+DATABASE_URL=sqlite:///db.sqlite3
+```
+
+```text
+# .gitignore
+.venv/
+.env
+*.sqlite3
+__pycache__/
+```
+
+**Secrets** (secret keys, database passwords, API keys) live only in environment variables or a
+secret manager. If one is ever committed, **rotate it**: deleting the commit doesn't help, because
+copies already exist.
+
+**API clients:**
+
+| Tool                                   | Best for                                                                                 |
+| -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Postman                                | saved collections, environments (`{{baseUrl}}`, `{{token}}`), tests, sharing with a team |
+| curl                                   | one-off requests in any terminal, scripts, CI; it's everywhere                           |
+| HTTPie                                 | the same as curl but friendlier (`http POST :8000/api/books/ title=Dune`)                |
+| DevTools Network                       | seeing what a real web page sends and receives                                           |
+| Python (`urllib`, `requests`, `httpx`) | automated checks and scripts                                                             |
+
+```bash
+# curl: -i shows response headers, -H adds a header, -d sends a body
+curl -i http://127.0.0.1:8000/api/books/
+curl -i -X POST http://127.0.0.1:8000/api/books/ \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"title": "Dune", "year": 1965}'
+
+# HTTPie: key=value becomes JSON, key:=value sends a raw JSON number
+http POST :8000/api/books/ "Authorization:Bearer $TOKEN" title=Dune year:=1965
+```
+
+**Postman tests** are small JavaScript checks that run after each request, so a whole collection can
+be run as a smoke test:
+
+```javascript
+pm.test("status is 201", () => pm.response.to.have.status(201))
+pm.test("returns the new id", () => pm.expect(pm.response.json().id).to.be.a("number"))
+pm.environment.set("bookId", pm.response.json().id) // reuse it in the next request
+```
+
+## Worked example
+
+Reading settings from the environment in one place, with defaults for development, type conversion,
+and a hard stop when production is missing a secret. This is the pattern Django's `settings.py`
+uses.
+
+```python title="config.py"
+import os
+
+
+def env_bool(name, default=False):
+    return os.environ.get(name, str(default)).lower() in {"1", "true", "yes", "on"}
+
+
+def env_list(name, default=""):
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
+
+
+def load_settings():
+    debug = env_bool("APP_DEBUG", default=False)  # safe default: off
+    secret = os.environ.get("APP_SECRET_KEY")
+    if not secret:
+        if not debug:
+            raise RuntimeError("APP_SECRET_KEY must be set when APP_DEBUG is off")
+        secret = "dev-only-insecure-key"
+    return {
+        "debug": debug,
+        "secret_key_set": secret != "dev-only-insecure-key",
+        "allowed_hosts": env_list("APP_ALLOWED_HOSTS", "localhost,127.0.0.1"),
+        "page_size": int(os.environ.get("APP_PAGE_SIZE", "20")),
+    }
+
+
+os.environ.update({"APP_DEBUG": "true", "APP_PAGE_SIZE": "50"})  # like a developer's .env
+print(load_settings())
+
+os.environ.update({"APP_DEBUG": "false", "APP_ALLOWED_HOSTS": "shop.example.com"})  # production
+try:
+    load_settings()
+except RuntimeError as exc:
+    print("refused to start:", exc)
+os.environ["APP_SECRET_KEY"] = "fake-prod-key-0123456789abcdefghijklmnopqrstuvwxyz"
+print(load_settings())
+```
+
+```text title="Output"
+{'debug': True, 'secret_key_set': False, 'allowed_hosts': ['localhost', '127.0.0.1'], 'page_size': 50}
+refused to start: APP_SECRET_KEY must be set when APP_DEBUG is off
+{'debug': False, 'secret_key_set': True, 'allowed_hosts': ['shop.example.com'], 'page_size': 50}
+```
+
+- Environment variables are **always strings**: `"false"` is truthy in Python, so convert explicitly
+  (`env_bool`, `int(...)`, splitting lists).
+- Defaults are chosen to be **safe**: debug is off unless someone turns it on.
+- A production deployment without a secret key refuses to start, which is far better than running
+  with a key everyone can read on GitHub.
+- The script sets `os.environ` itself only for the demo. In real life the shell, the `.env` file or
+  the hosting platform provides these values.
+
+## Variations
+
+### A minimal .env reader
+
+```python
+import os
+import tempfile
+from pathlib import Path
+
+
+def load_dotenv(path):
+    """KEY=value lines; '#' comments; variables already set in the environment win."""
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"'))
+
+
+with tempfile.TemporaryDirectory() as folder:
+    env_file = Path(folder) / ".env"
+    env_file.write_text('# local only\nSHOP_DB=sqlite:///dev.sqlite3\nSHOP_GREETING="hi there"\n')
+    os.environ["SHOP_DB"] = "postgres://from-the-real-environment"
+    load_dotenv(env_file)
+    print(os.environ["SHOP_DB"])
+    print(os.environ["SHOP_GREETING"])
+```
+
+```text title="Output"
+postgres://from-the-real-environment
+hi there
+```
+
+Real projects use `python-dotenv` or `django-environ` (lesson 23 and the ShopLite project), which also
+handle quoting rules and type casting. The rule that real environment variables win over the file is
+the same, so a deployment can override anything.
+
+### Generating a strong secret key
+
+```python
+import secrets
+import string
+
+key = secrets.token_urlsafe(50)
+print(len(key) >= 64, set(key) <= set(string.ascii_letters + string.digits + "-_"))
+print(secrets.token_hex(16).isalnum(), len(secrets.token_hex(16)))
+```
+
+```text title="Output"
+True True
+True 32
+```
+
+`secrets` uses the operating system's cryptographically secure random generator; `random` does not
+and must never be used for keys or tokens. Django's own
+`get_random_secret_key()` does the same job. Each environment gets its own key.
+
+### Finding secrets before they reach Git
+
+```python
+import re
+
+PATTERNS = {
+    "AWS access key": re.compile(r"AKIA[0-9A-Z]{16}"),
+    "private key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    "hard-coded secret": re.compile(r"(?i)(secret|password|api_key)\w*\s*=\s*['\"][^'\"]{8,}['\"]"),
+}
+files = {
+    "settings.py": 'SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]',
+    "old_settings.py": 'SECRET_KEY = "django-insecure-9x$k2...abc"',
+    "deploy.sh": "export AWS_ID=AKIAABCDEFGHIJKLMNOP",
+}
+for name, text in files.items():
+    found = [label for label, pattern in PATTERNS.items() if pattern.search(text)]
+    print(f"{name:<16} {', '.join(found) or 'clean'}")
+```
+
+```text title="Output"
+settings.py      clean
+old_settings.py  hard-coded secret
+deploy.sh        AWS access key
+```
+
+Tools like `gitleaks`, `detect-secrets` and GitHub's push protection do this at scale, in a pre-commit
+hook and in CI. They catch mistakes; they don't replace keeping secrets in the environment.
+
+### An API client in Python
+
+```python
+import json
+import threading
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+TOKEN = "fake-token-for-learning-123"
+
+
+class Api(BaseHTTPRequestHandler):
+    def do_GET(self):
+        ok = self.headers.get("Authorization") == f"Bearer {TOKEN}"
+        body = json.dumps({"books": ["Dune"]} if ok else {"error": "unauthorized"}).encode()
+        self.send_response(200 if ok else 401)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+server = ThreadingHTTPServer(("127.0.0.1", 0), Api)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+base_url = f"http://127.0.0.1:{server.server_address[1]}"  # Postman: {{baseUrl}}
+
+
+def get(path, token=None):
+    request = urllib.request.Request(base_url + path)
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:  # 4xx/5xx raise in urllib
+        return error.code, json.loads(error.read())
+
+
+print(get("/api/books/"))
+print(get("/api/books/", token=TOKEN))
+server.shutdown()
+```
+
+```text title="Output"
+(401, {'error': 'unauthorized'})
+(200, {'books': ['Dune']})
+```
+
+`urllib` raises `HTTPError` for 4xx and 5xx responses, so the error branch is where you read error
+bodies. The popular `requests` and `httpx` libraries return the response instead and let you call
+`raise_for_status()` when you want an exception.
+
+## Putting it together
+
+A smoke-test runner, like running a Postman collection: an environment (base URL and token), a list
+of requests with expected results, and a report. CI runs scripts like this after every deployment.
+
+```python title="smoke_test.py"
+import json
+import threading
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+TOKEN = "fake-token-for-learning-123"
+BOOKS = [{"id": 1, "title": "Dune"}]
+
+
+class Api(BaseHTTPRequestHandler):
+    def send(self, status, data):
+        body = json.dumps(data).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path == "/health/":
+            return self.send(200, {"status": "ok"})
+        if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+            return self.send(401, {"error": "unauthorized"})
+        self.send(200, BOOKS)
+
+    def do_POST(self):
+        if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+            return self.send(401, {"error": "unauthorized"})
+        data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        book = {"id": len(BOOKS) + 1, "title": data["title"]}
+        BOOKS.append(book)
+        self.send(201, book)
+
+    def log_message(self, *args):
+        pass
+
+
+server = ThreadingHTTPServer(("127.0.0.1", 0), Api)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+environment = {"baseUrl": f"http://127.0.0.1:{server.server_address[1]}", "token": TOKEN}
+
+
+def call(method, path, body=None, auth=True):
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(environment["baseUrl"] + path, data=data, method=method)
+    request.add_header("Content-Type", "application/json")
+    if auth:
+        request.add_header("Authorization", f"Bearer {environment['token']}")
+    try:
+        with urllib.request.urlopen(request) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read())
+
+
+collection = [
+    ("health check", "GET", "/health/", None, False, lambda s, b: s == 200 and b["status"] == "ok"),
+    ("rejects anonymous", "GET", "/api/books/", None, False, lambda s, b: s == 401),
+    ("lists books", "GET", "/api/books/", None, True, lambda s, b: s == 200 and len(b) >= 1),
+    ("creates a book", "POST", "/api/books/", {"title": "Emma"}, True,
+     lambda s, b: s == 201 and b["title"] == "Emma"),
+    ("new book is listed", "GET", "/api/books/", None, True,
+     lambda s, b: [x["title"] for x in b] == ["Dune", "Emma"]),
+]
+passed = 0
+for name, method, path, body, auth, check in collection:
+    status, data = call(method, path, body, auth)
+    ok = check(status, data)
+    passed += ok
+    print(f"{'PASS' if ok else 'FAIL'}  {name:<20} {method} {path} -> {status}")
+print(f"{passed}/{len(collection)} passed")
+server.shutdown()
+```
+
+```text title="Output"
+PASS  health check         GET /health/ -> 200
+PASS  rejects anonymous    GET /api/books/ -> 401
+PASS  lists books          GET /api/books/ -> 200
+PASS  creates a book       POST /api/books/ -> 201
+PASS  new book is listed   GET /api/books/ -> 200
+5/5 passed
+```
+
+The **environment** dictionary is the same idea as a Postman environment: switch it to staging or
+production and the same collection checks a different deployment. Each project in this module ships
+with a ready-made Postman collection you can import.
+
+## Common mistakes
+
+<Callout type="warning" title="Committing .env or a real key">
+  Once a secret is in a Git history (even for a minute, even in a private repo), treat it as public:
+  rotate it. Add `.env` to `.gitignore` on day one and commit only `.env.example` with fakes.
+</Callout>
+
+- **Treating `"false"` as false.** `bool("false")` is `True`. Convert strings explicitly.
+- **Unsafe defaults** (`DEBUG = True` unless told otherwise). Defaults should be the safe production
+  values; developers opt into debug locally.
+- **Installing into the global Python.** Each project needs its own virtual environment and a
+  pinned `requirements.txt`, or "works on my machine" bugs follow.
+- **Pasting tokens into every Postman request.** Use environment variables (`{{token}}`) so you can
+  switch environments and never share a collection with a real token inside.
+- **Using `random` for secrets.** Use `secrets`.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: what goes in .env.example, and what goes in .env?">
+  `.env.example` (committed) lists every variable the app needs, with fake or development values and
+  comments. `.env` (never committed) holds your real local values.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: write the curl command that sends a JSON POST with a bearer token and shows response headers.">
+  `curl -i -X POST https://api.example.com/books/ -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"title": "Dune"}'`
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: you accidentally pushed an API key to GitHub and deleted the commit a minute later. Are you safe?"
+>
+  No. Bots scan public pushes within seconds, and forks, caches and clones keep copies. Rotate
+  (revoke and replace) the key immediately, then clean the history.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why does settings code convert PAGE_SIZE with int(...)?">
+  Environment variables are always strings. Without conversion, `"20" * 2` is `"2020"`, and
+  comparisons like `size > 100` raise `TypeError`.
+</Reveal>
+
+<KeyTakeaways>
+
+- One virtual environment and one pinned requirements file per project.
+- Configuration comes from environment variables; `.env` for local values, `.env.example` (fakes)
+  in Git.
+- Convert types explicitly, choose safe defaults, refuse to start without required secrets.
+- Generate keys with `secrets`; rotate anything that leaks.
+- Postman for saved collections, environments and tests; curl/HTTPie for the terminal; DevTools for
+  watching real pages.
+
+</KeyTakeaways>

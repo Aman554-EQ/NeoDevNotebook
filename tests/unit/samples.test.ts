@@ -43,6 +43,7 @@ describe("code sample extraction", () => {
         ],
         problems: [],
         interview: [],
+        projects: [],
       },
     ]
     const samples = extractSamples(bundles)

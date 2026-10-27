@@ -1,0 +1,31 @@
+id: dj-i-017
+question: What are Django signals, and what are their pros and cons?
+difficulty: medium
+tags:
+  - signals
+  - architecture
+shortAnswer: |
+  A publish/subscribe mechanism (post_save, pre_delete, user_logged_in...) letting receivers react to events. Good for reacting to code you don't own; bad for core business logic: hidden control flow, skipped by bulk operations, run synchronously inside the same transaction.
+detailedAnswer: |
+  Receivers registered with `@receiver(post_save, sender=User)` run whenever the signal is sent.
+
+  **Pros**: decoupling; reacting to events from code you don't control (Django's auth, third-party apps,
+  the admin); reusable apps can expose hooks.
+
+  **Cons**:
+
+  - Control flow is invisible: reading `place_order()` doesn't tell you an email is sent from a receiver
+    in another file.
+  - `QuerySet.update()`, `bulk_create()` and raw SQL don't send model signals, so logic can be silently
+    skipped.
+  - Receivers run synchronously, inside the sender's transaction; a slow or failing receiver slows or
+    breaks the save. Use `transaction.on_commit` for external side effects.
+  - Ordering between receivers and testing are harder.
+
+  Prefer explicit **service functions** for your own workflows; use signals at the boundaries.
+pitfalls:
+  - Business rules in post_save.
+  - Sending emails directly from a receiver inside a transaction.
+followUps:
+  - How do you make sure receivers are connected?
+  - What would you use instead to decouple your own apps?

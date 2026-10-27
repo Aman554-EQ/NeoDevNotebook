@@ -1,0 +1,27 @@
+id: dj-i-013
+question: What does a DRF serializer do, and how is ModelSerializer different from Serializer?
+difficulty: simple
+tags:
+  - drf
+  - serializers
+shortAnswer: |
+  A serializer validates incoming data into Python values (is_valid, validated_data, errors) and turns objects into JSON-ready data (.data). ModelSerializer generates fields, validators (like unique) and create/update from a model.
+detailedAnswer: |
+  A serializer is DRF's equivalent of a form, working both ways:
+
+  - **Input**: `S(data=request.data)` → `is_valid()` converts types and runs field validators,
+    `validate_<field>()` and `validate()`; then `validated_data` or `errors` (a dict per field). `save()`
+    calls `create()` or `update()`.
+  - **Output**: `S(instance).data` (or `many=True`) produces primitive values ready for JSON.
+
+  `Serializer` declares every field and leaves `create()`/`update()` to you: good for inputs that aren't
+  one model (a login, a search, an order with lines). `ModelSerializer` reads `Meta.model` and
+  `Meta.fields`, generating fields with the model's types and limits, `unique` validators, and default
+  `create`/`update`. List fields explicitly, mark server-controlled ones `read_only`, and remember that
+  object-level `validate()` only runs when all fields are valid.
+pitfalls:
+  - fields = '__all__' (mass assignment).
+  - Expecting validate() to report alongside field errors.
+followUps:
+  - How do you handle writable nested serializers?
+  - Where do you set the owner of a new object?

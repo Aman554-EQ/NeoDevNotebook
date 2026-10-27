@@ -1,0 +1,483 @@
+---
+title: Databases for backend developers
+summary: The database knowledge every backend developer needs before touching an ORM. Tables, keys and relations, the SQL you'll actually write, constraints, indexes, transactions and ACID, normalisation, and how PostgreSQL, MySQL and MongoDB differ.
+estimatedMinutes: 30
+difficulty: easy
+section: Web & Backend Foundations
+objectives:
+  - Model data as tables with primary keys, foreign keys and constraints
+  - Write SELECT queries with WHERE, JOIN, GROUP BY, HAVING and subqueries
+  - Explain what an index does and check whether a query uses one
+  - Use transactions so a group of changes happens completely or not at all
+  - Compare relational databases (PostgreSQL, MySQL) with a document database (MongoDB)
+prerequisites:
+  - Backend fundamentals & REST
+tags: [databases, sql, sqlite, postgresql, transactions, indexes]
+practice: [dj-p-009, dj-p-026]
+interview: [dj-i-016, dj-i-029]
+---
+
+## Intuition: spreadsheets with rules and a referee
+
+A relational database is a set of **tables**, like spreadsheet tabs, but with three superpowers:
+
+1. **Rules**: each column has a type, some values must be unique, some may never be empty, and a
+   row can point at a row in another table only if that row exists.
+2. **A query language** (SQL) that lets you ask questions across tables without writing loops.
+3. **A referee for concurrency**: thousands of requests can read and write at once, and every group
+   of changes either happens completely or not at all.
+
+An ORM like Django's writes the SQL for you, but you can't use an ORM well without understanding
+what it is writing.
+
+## See it
+
+<SqlPlayground
+  recording="sql-basics"
+  caption="Each query reads the highlighted tables and produces a new, temporary table: its result. JOIN glues rows together through a key, GROUP BY collapses rows into groups, and a LEFT JOIN keeps rows that have no partner."
+/>
+
+## The precise rules
+
+**Keys and relations**
+
+- A **primary key** (`id`) identifies a row; it's unique and never null.
+- A **foreign key** (`orders.customer_id → customers.id`) links rows; the database refuses a link to
+  a row that doesn't exist.
+- Relations come in three shapes: **one-to-many** (a customer has many orders: the foreign key goes
+  on the "many" side), **many-to-many** (books ↔ tags: a join table with two foreign keys), and
+  **one-to-one** (user ↔ profile: a unique foreign key).
+
+**The SQL you'll use every day**
+
+```sql
+SELECT c.name, COUNT(o.id) AS orders      -- columns and computed values
+FROM customers c                          -- the main table (alias c)
+LEFT JOIN orders o ON o.customer_id = c.id  -- bring in related rows
+WHERE c.city <> 'London'                  -- filter rows (before grouping)
+GROUP BY c.id                             -- one result row per customer
+HAVING COUNT(o.id) > 0                    -- filter groups (after grouping)
+ORDER BY orders DESC                      -- sort
+LIMIT 10;                                 -- page
+```
+
+Plus `INSERT INTO ... VALUES ...`, `UPDATE ... SET ... WHERE ...` and `DELETE FROM ... WHERE ...`.
+An `UPDATE` or `DELETE` without `WHERE` changes **every row**.
+
+**Constraints** are rules the database enforces no matter which code writes: `NOT NULL`, `UNIQUE`,
+`CHECK (price >= 0)`, `FOREIGN KEY`. Validation in your code is for friendly messages; constraints
+are the last line of defence.
+
+**Indexes** are sorted lookup structures (usually B-trees) on one or more columns. They turn "read
+every row" into "jump to the matching rows", at the cost of extra storage and slower writes. Index
+the columns you filter, join and sort on, not everything.
+
+**Transactions and ACID**
+
+- **Atomic**: all statements in a transaction take effect, or none do.
+- **Consistent**: constraints hold before and after.
+- **Isolated**: concurrent transactions don't see each other's half-finished work.
+- **Durable**: once committed, it survives a crash.
+
+**Normalisation** means storing each fact once (customer names in `customers`, not copied into every
+order). It prevents **update anomalies**. Sometimes you deliberately **denormalise** (copy data) for
+speed, and then you own keeping the copies in sync.
+
+| Database   | Model                     | Strong at                                                    |
+| ---------- | ------------------------- | ------------------------------------------------------------ |
+| PostgreSQL | relational                | correctness, rich SQL, JSONB, extensions; Django's favourite |
+| MySQL      | relational                | very common in hosting and older stacks; fast simple reads   |
+| SQLite     | relational, a single file | development, tests, small apps, embedded devices             |
+| MongoDB    | documents (JSON-like)     | flexible, self-contained records read and written as a whole |
+
+## Worked example
+
+Python ships with SQLite, so you can practise real SQL without installing anything. This creates two
+related tables with constraints, inserts data, and runs a join.
+
+```python title="first_tables.py"
+import sqlite3
+
+db = sqlite3.connect(":memory:")  # a database that lives only in memory
+db.execute("PRAGMA foreign_keys = ON")  # SQLite enforces foreign keys only when asked
+db.executescript(
+    """
+    CREATE TABLE customers (
+        id    INTEGER PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        name  TEXT NOT NULL
+    );
+    CREATE TABLE orders (
+        id          INTEGER PRIMARY KEY,
+        customer_id INTEGER NOT NULL REFERENCES customers(id),
+        total       NUMERIC NOT NULL CHECK (total >= 0),
+        status      TEXT NOT NULL DEFAULT 'pending'
+    );
+    """
+)
+db.execute("INSERT INTO customers (email, name) VALUES (?, ?)", ("ada@example.com", "Ada"))
+db.execute("INSERT INTO customers (email, name) VALUES (?, ?)", ("grace@example.com", "Grace"))
+db.executemany(
+    "INSERT INTO orders (customer_id, total, status) VALUES (?, ?, ?)",
+    [(1, 25.0, "paid"), (1, 8.5, "pending"), (2, 120.0, "paid")],
+)
+
+rows = db.execute(
+    """
+    SELECT c.name, o.id, o.total, o.status
+    FROM orders o
+    JOIN customers c ON c.id = o.customer_id
+    ORDER BY o.id
+    """
+).fetchall()
+for row in rows:
+    print(row)
+```
+
+```text title="Output"
+('Ada', 1, 25, 'paid')
+('Ada', 2, 8.5, 'pending')
+('Grace', 3, 120, 'paid')
+```
+
+- `INTEGER PRIMARY KEY` makes SQLite assign ids 1, 2, 3... automatically.
+- The `?` placeholders send values **separately** from the SQL text. Never build SQL with f-strings:
+  that's how SQL injection happens (see the Variations).
+- `REFERENCES customers(id)` declares the foreign key; `CHECK (total >= 0)` and `UNIQUE` are rules
+  the database will enforce on every write.
+- The `JOIN ... ON` matches each order with its customer; the result is a new table of tuples.
+
+## Variations
+
+### Constraints catch bad data, whoever writes it
+
+```python
+import sqlite3
+
+db = sqlite3.connect(":memory:")
+db.execute("PRAGMA foreign_keys = ON")
+db.executescript(
+    """
+    CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE);
+    CREATE TABLE orders (id INTEGER PRIMARY KEY,
+                         customer_id INTEGER NOT NULL REFERENCES customers(id),
+                         total NUMERIC NOT NULL CHECK (total >= 0));
+    INSERT INTO customers (email) VALUES ('ada@example.com');
+    """
+)
+attempts = [
+    ("duplicate email", "INSERT INTO customers (email) VALUES ('ada@example.com')"),
+    ("missing email", "INSERT INTO customers (email) VALUES (NULL)"),
+    ("negative total", "INSERT INTO orders (customer_id, total) VALUES (1, -5)"),
+    ("unknown customer", "INSERT INTO orders (customer_id, total) VALUES (99, 10)"),
+]
+for label, sql in attempts:
+    try:
+        db.execute(sql)
+    except sqlite3.IntegrityError as exc:
+        print(f"{label:<17} -> IntegrityError: {exc}")
+```
+
+```text title="Output"
+duplicate email   -> IntegrityError: UNIQUE constraint failed: customers.email
+missing email     -> IntegrityError: NOT NULL constraint failed: customers.email
+negative total    -> IntegrityError: CHECK constraint failed: total >= 0
+unknown customer  -> IntegrityError: FOREIGN KEY constraint failed
+```
+
+Django turns these into `django.db.IntegrityError`. Good code validates first (friendly messages)
+**and** keeps the constraints (protection against bugs and race conditions).
+
+### Aggregation: GROUP BY and HAVING
+
+```python
+import sqlite3
+
+db = sqlite3.connect(":memory:")
+db.executescript(
+    """
+    CREATE TABLE sales (product TEXT, month TEXT, qty INTEGER, price NUMERIC);
+    INSERT INTO sales VALUES ('Dune', '2026-01', 10, 12.5), ('Emma', '2026-01', 4, 8),
+                             ('Dune', '2026-02', 6, 12.5), ('Emma', '2026-02', 9, 8),
+                             ('Chess', '2026-02', 1, 30);
+    """
+)
+query = """
+    SELECT product, SUM(qty) AS units, SUM(qty * price) AS revenue, COUNT(*) AS months
+    FROM sales
+    GROUP BY product
+    HAVING SUM(qty) >= 5
+    ORDER BY revenue DESC
+"""
+for row in db.execute(query):
+    print(row)
+```
+
+```text title="Output"
+('Dune', 16, 200.0, 2)
+('Emma', 13, 104, 2)
+```
+
+Every column in the `SELECT` must either be in `GROUP BY` or inside an aggregate (`SUM`, `COUNT`,
+`AVG`, `MIN`, `MAX`). `HAVING` filters after grouping, which is why it can use `SUM(qty)`.
+
+### Does my query use an index?
+
+```python
+import sqlite3
+
+db = sqlite3.connect(":memory:")
+db.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER, status TEXT)")
+db.executemany(
+    "INSERT INTO orders (customer_id, status) VALUES (?, ?)",
+    [(n % 500, "paid" if n % 3 else "pending") for n in range(10_000)],
+)
+
+
+def plan(sql):
+    detail = " ".join(row[-1] for row in db.execute("EXPLAIN QUERY PLAN " + sql))
+    return "uses an index" if "USING" in detail and "INDEX" in detail else "scans every row"
+
+
+query = "SELECT * FROM orders WHERE customer_id = 42"
+print("before:", plan(query))
+db.execute("CREATE INDEX orders_customer_idx ON orders (customer_id)")
+print("after: ", plan(query))
+print("status:", plan("SELECT * FROM orders WHERE status = 'paid'"))
+```
+
+```text title="Output"
+before: scans every row
+after:  uses an index
+status: scans every row
+```
+
+`EXPLAIN QUERY PLAN` (SQLite) and `EXPLAIN ANALYZE` (PostgreSQL) show how the database will run a
+query. A full scan of 10,000 rows is quick; of 10 million it is an outage. The `status` column has
+no index, so filtering on it still scans every row.
+
+### Transactions: all or nothing
+
+```python
+import sqlite3
+
+db = sqlite3.connect(":memory:")
+db.executescript(
+    """
+    CREATE TABLE accounts (name TEXT PRIMARY KEY,
+                           balance INTEGER NOT NULL CHECK (balance >= 0));
+    INSERT INTO accounts VALUES ('ada', 100), ('bob', 20);
+    """
+)
+
+
+def transfer(sender, receiver, amount):
+    try:
+        with db:  # a transaction: commit on success, roll back on any exception
+            db.execute("UPDATE accounts SET balance = balance + ? WHERE name = ?", (amount, receiver))
+            db.execute("UPDATE accounts SET balance = balance - ? WHERE name = ?", (amount, sender))
+        return "ok"
+    except sqlite3.IntegrityError:
+        return "refused: insufficient funds"
+
+
+print(transfer("ada", "bob", 30), dict(db.execute("SELECT * FROM accounts")))
+print(transfer("bob", "ada", 500), dict(db.execute("SELECT * FROM accounts")))
+```
+
+```text title="Output"
+ok {'ada': 70, 'bob': 50}
+refused: insufficient funds {'ada': 70, 'bob': 50}
+```
+
+In the failed transfer, Ada's balance was increased first, then Bob's update broke the `CHECK`
+constraint. The transaction rolled **both** updates back, so no money appeared from nowhere. Django
+gives you the same with `transaction.atomic()` (lesson 12).
+
+### SQL injection, and why placeholders fix it
+
+```python
+import sqlite3
+
+db = sqlite3.connect(":memory:")
+db.executescript(
+    """
+    CREATE TABLE users (name TEXT, is_admin INTEGER);
+    INSERT INTO users VALUES ('ada', 1), ('bob', 0);
+    """
+)
+attack = "nobody' OR '1'='1"
+
+unsafe = f"SELECT name FROM users WHERE name = '{attack}'"
+print("f-string:    ", db.execute(unsafe).fetchall())
+
+safe = db.execute("SELECT name FROM users WHERE name = ?", (attack,)).fetchall()
+print("placeholder: ", safe)
+```
+
+```text title="Output"
+f-string:     [('ada',), ('bob',)]
+placeholder:  []
+```
+
+With string formatting, the attacker's quote ends your string and `OR '1'='1'` becomes SQL: every
+user is returned. With a placeholder the whole input is just a value to compare. Django's ORM always
+uses placeholders; only raw SQL written with f-strings is at risk.
+
+### Normalised vs copied data
+
+```python
+orders_copied = [  # the customer's email is copied into every order
+    {"id": 10, "customer": "ada@example.com", "total": 25},
+    {"id": 11, "customer": "ada@example.com", "total": 8},
+]
+customers = {1: {"email": "ada@example.com"}}
+orders_normalised = [{"id": 10, "customer_id": 1, "total": 25}, {"id": 11, "customer_id": 1, "total": 8}]
+
+# Ada changes her email.
+orders_copied[0]["customer"] = "ada@newmail.com"  # ...and someone forgets order 11
+customers[1]["email"] = "ada@newmail.com"  # one place, done
+
+print(sorted({o["customer"] for o in orders_copied}))
+print(sorted({customers[o["customer_id"]]["email"] for o in orders_normalised}))
+```
+
+```text title="Output"
+['ada@example.com', 'ada@newmail.com']
+['ada@newmail.com']
+```
+
+Copies drift apart: an **update anomaly**. Storing a fact once and linking to it by key is the core
+idea of normalisation. Order lines are the classic exception: an order **should** keep the price paid
+at the time, even if the product's price changes later.
+
+## Putting it together
+
+A small shop schema and the reporting questions a business actually asks, answered with SQL. This
+is the kind of query you'll later write with the ORM and check with `EXPLAIN`.
+
+```python title="shop_reports.py"
+import sqlite3
+
+db = sqlite3.connect(":memory:")
+db.execute("PRAGMA foreign_keys = ON")
+db.executescript(
+    """
+    CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+    CREATE TABLE products  (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price NUMERIC NOT NULL);
+    CREATE TABLE orders    (id INTEGER PRIMARY KEY,
+                            customer_id INTEGER NOT NULL REFERENCES customers(id),
+                            status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'cancelled')));
+    CREATE TABLE order_items (order_id INTEGER NOT NULL REFERENCES orders(id),
+                              product_id INTEGER NOT NULL REFERENCES products(id),
+                              qty INTEGER NOT NULL CHECK (qty > 0),
+                              unit_price NUMERIC NOT NULL,
+                              PRIMARY KEY (order_id, product_id));
+    CREATE INDEX order_items_product ON order_items (product_id);
+
+    INSERT INTO customers VALUES (1, 'Ada'), (2, 'Grace'), (3, 'Linus');
+    INSERT INTO products  VALUES (1, 'Dune', 12.5), (2, 'Emma', 8), (3, 'Chess set', 30);
+    INSERT INTO orders VALUES (10, 1, 'paid'), (11, 2, 'paid'), (12, 2, 'cancelled'), (13, 1, 'pending');
+    INSERT INTO order_items VALUES (10, 1, 2, 12.5), (10, 2, 1, 8),
+                                   (11, 3, 1, 30), (11, 1, 1, 12.5),
+                                   (12, 2, 3, 8), (13, 3, 2, 30);
+    """
+)
+
+reports = {
+    "Revenue from paid orders": """
+        SELECT SUM(i.qty * i.unit_price) FROM order_items i
+        JOIN orders o ON o.id = i.order_id WHERE o.status = 'paid'""",
+    "Best sellers (paid)": """
+        SELECT p.name, SUM(i.qty) AS units FROM order_items i
+        JOIN orders o ON o.id = i.order_id JOIN products p ON p.id = i.product_id
+        WHERE o.status = 'paid' GROUP BY p.id ORDER BY units DESC, p.name""",
+    "Spend per customer (paid)": """
+        SELECT c.name, COALESCE(SUM(i.qty * i.unit_price), 0) AS spent
+        FROM customers c
+        LEFT JOIN orders o ON o.customer_id = c.id AND o.status = 'paid'
+        LEFT JOIN order_items i ON i.order_id = o.id
+        GROUP BY c.id ORDER BY spent DESC""",
+    "Customers with a pending order": """
+        SELECT name FROM customers c WHERE EXISTS (
+            SELECT 1 FROM orders o WHERE o.customer_id = c.id AND o.status = 'pending')""",
+}
+for title, sql in reports.items():
+    print(f"{title}: {db.execute(sql).fetchall()}")
+```
+
+```text title="Output"
+Revenue from paid orders: [(75.5,)]
+Best sellers (paid): [('Dune', 3), ('Chess set', 1), ('Emma', 1)]
+Spend per customer (paid): [('Grace', 42.5), ('Ada', 33.0), ('Linus', 0)]
+Customers with a pending order: [('Ada',)]
+```
+
+- `order_items` is a **join table** between orders and products, with its own data (quantity and
+  the price at the time of purchase) and a composite primary key.
+- Putting `o.status = 'paid'` **inside** the `LEFT JOIN ... ON` (not in `WHERE`) keeps Linus, who has
+  no paid orders, in the result with `0`. In `WHERE` it would silently drop him.
+- `EXISTS` answers a yes/no question per customer without counting everything.
+
+## Common mistakes
+
+<Callout type="warning" title="UPDATE or DELETE without WHERE">
+  `UPDATE products SET price = 0` changes every product. Write the `WHERE` first, run the same
+  condition as a `SELECT` to see which rows match, and do it inside a transaction you can roll back.
+</Callout>
+
+- **Building SQL with f-strings.** Use placeholders (`?` in SQLite, `%s` in psycopg) or the ORM.
+- **Relying only on application validation.** Two requests at once can both pass a "is this email
+  free?" check. A `UNIQUE` constraint can't be raced.
+- **Indexing everything, or nothing.** Index the columns you filter, join and sort on; check with
+  `EXPLAIN`. Every extra index slows down writes.
+- **Filtering a LEFT JOIN in WHERE.** It silently turns it back into an inner join.
+- **Storing money as float.** `0.1 + 0.2 != 0.3`. Use `NUMERIC`/`DECIMAL` (or integer cents).
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: where does the foreign key go in 'an author has many books'?"
+>
+  On the "many" side: `books.author_id REFERENCES authors(id)`. Each book points to one author.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: write SQL for 'customers who have never ordered'.">
+  `SELECT c.name FROM customers c LEFT JOIN orders o ON o.customer_id = c.id WHERE o.id IS NULL;` or
+  `... WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: WHERE vs HAVING: which one can use SUM(total)?">
+  `HAVING`. `WHERE` filters individual rows before grouping, so aggregates don't exist yet; `HAVING`
+  filters the groups afterwards.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why wrap 'create order, add lines, reduce stock' in one transaction?"
+>
+  Atomicity: if anything fails halfway (say, stock runs out on the third line), everything rolls
+  back, so you never end up with an order without lines or stock reduced for an order that doesn't
+  exist.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: when would you pick MongoDB over PostgreSQL?">
+  When records are self-contained documents read and written as a whole, their shape varies a lot,
+  and you rarely need joins or multi-record transactions (event logs, content with flexible fields).
+  For connected business data (users, orders, payments), a relational database is the safer default.
+</Reveal>
+
+<KeyTakeaways>
+
+- Tables + keys + constraints: the database enforces your rules for every writer.
+- SELECT ... FROM ... JOIN ... WHERE ... GROUP BY ... HAVING ... ORDER BY ... LIMIT covers most
+  questions; LEFT JOIN keeps rows without partners.
+- Always pass values with placeholders, never by formatting SQL strings.
+- Indexes make filters and joins fast; EXPLAIN tells you whether a query uses one.
+- Transactions are all-or-nothing (ACID); group related writes into one.
+- Store each fact once (normalise); copy data only on purpose.
+- PostgreSQL is the usual Django choice; SQLite for development and tests; MongoDB for
+  document-shaped data.
+
+</KeyTakeaways>

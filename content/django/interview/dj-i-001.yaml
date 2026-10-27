@@ -1,0 +1,25 @@
+id: dj-i-001
+question: What is MVT in Django, and how does it relate to MVC?
+difficulty: easy
+tags:
+  - architecture
+  - mvt
+shortAnswer: |
+  Model-View-Template: models hold data and rules, views handle requests and decide what to return (MVC's controller), templates render the output (MVC's view). The URLconf routes requests to views.
+detailedAnswer: |
+  Django calls its version of MVC **MVT**:
+
+  - **Model** (`models.py`): the data, its fields, constraints and behaviour; the ORM maps it to tables.
+  - **View** (`views.py`): a function or class that receives an `HttpRequest`, talks to models and
+    returns an `HttpResponse`. It plays the **controller** role.
+  - **Template**: how the response looks (HTML with `{{ }}` and `{% %}`); it plays MVC's **view** role.
+
+  The framework itself, via the **URLconf**, dispatches each request to a view, which is why Django's
+  docs say "the framework is the controller". For JSON APIs, the template's role is taken by a
+  serializer (DRF). In interviews, say the mapping out loud: the naming confuses many people.
+pitfalls:
+  - Saying Django views are MVC views (they're controllers).
+  - Putting business logic in templates.
+followUps:
+  - Where would you put business logic that several views share?
+  - What replaces templates in a JSON API?

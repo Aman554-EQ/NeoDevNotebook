@@ -1,0 +1,53 @@
+id: dj-i-016
+question: How do you prevent race conditions when two requests update the same row?
+difficulty: medium
+tags:
+  - orm
+  - transactions
+  - concurrency
+shortAnswer: |
+  Use atomic database operations: F() updates with conditions (filter(stock__gte=n).update(stock=F('stock')-n)), select_for_update() inside transaction.atomic() for multi-step logic, unique constraints for 'only once' rules, and optimistic locking (version columns) for user edits.
+detailedAnswer: |
+  A read-modify-write in Python (`p.stock -= 1; p.save()`) lets two requests read the same value and
+  both write: a lost update, or overselling. Options, from simplest:
+
+  - **Conditional atomic update**: `Product.objects.filter(pk=pk, stock__gte=qty).update(stock=F("stock") - qty)`;
+    the return value says whether it succeeded. One statement, no lock held.
+  - **Row locks**: inside `transaction.atomic()`, `select_for_update()` locks rows until commit, so other
+    transactions wait. Lock in a consistent order to avoid deadlocks; `nowait`/`skip_locked` exist on
+    PostgreSQL. (SQLite ignores it.)
+  - **Constraints**: `UniqueConstraint` turns "create only once" races into an `IntegrityError`
+    (idempotency keys, one booking per seat).
+  - **Optimistic locking**: a `version` column and `filter(version=seen).update(..., version=F("version")+1)`;
+    zero rows updated means someone else edited first.
+
+  Test concurrency on the production database engine, with threads and `TransactionTestCase`.
+code:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+    from django.db.models import F
+
+
+    class Product(models.Model):
+        stock = models.PositiveIntegerField()
+
+
+    def reserve(pk, qty):
+        return Product.objects.filter(pk=pk, stock__gte=qty).update(stock=F("stock") - qty) == 1
+
+
+    migrate()
+    p = Product.objects.create(stock=3)
+    print(reserve(p.pk, 2), reserve(p.pk, 2), Product.objects.get(pk=p.pk).stock)
+pitfalls:
+  - select_for_update outside a transaction (TransactionManagementError).
+  - Testing concurrency only on SQLite.
+followUps:
+  - What's a deadlock and how do you avoid one?
+  - Pessimistic vs optimistic locking?
+verify: assert Product.objects.get(pk=p.pk).stock == 1

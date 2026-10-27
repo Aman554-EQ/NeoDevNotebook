@@ -1,0 +1,39 @@
+id: dj-i-006
+question: How does Django protect templates against XSS, and when can that protection be bypassed?
+difficulty: easy
+tags:
+  - templates
+  - security
+  - xss
+shortAnswer: |
+  Template variables are HTML-escaped automatically. Protection is bypassed by |safe, mark_safe(), {% autoescape off %} or building HTML by string concatenation in Python; use format_html or a sanitiser instead.
+detailedAnswer: |
+  Every `{{ value }}` is escaped: `<` becomes `&lt;`, `"` becomes `&quot;`, and so on, so user
+  input renders as text instead of running as script. That covers most stored and reflected XSS.
+
+  The bypasses are all explicit: the `|safe` filter, `mark_safe()`, `{% autoescape off %}`, and
+  `SafeString` values. They're for HTML **you** produced. Building HTML in Python should use
+  `format_html("<b>{}</b>", value)`, which escapes the values. If users may submit rich text, sanitise it
+  with an allowlist library before storing or rendering. Escaping doesn't help in every context either:
+  values placed inside `<script>` need `json_script`, and URLs in `href` must be checked (a
+  `javascript:` URL is escaped text but still dangerous).
+code:
+  language: python
+  code: |
+    from playground import setup
+
+    setup()
+
+    from django.template import Context, Template
+    from django.utils.html import format_html
+
+    evil = "<script>alert(1)</script>"
+    print(Template("{{ v }}").render(Context({"v": evil})))
+    print(format_html("<b>{}</b>", evil))
+pitfalls:
+  - Using |safe on user content.
+  - Concatenating HTML strings in views.
+followUps:
+  - How do you pass data safely to JavaScript in a template?
+  - What does a Content-Security-Policy add?
+verify: 'assert "<script>" not in Template("{{ v }}").render(Context({"v": evil}))'

@@ -1,0 +1,63 @@
+id: dj-p-015
+title: Search across two models with Q
+difficulty: simple
+tags:
+  - orm
+  - q-objects
+  - search
+statement: |
+  Write `search_books(text)` returning titles of books whose title **or** author name
+  contains `text` (case-insensitive), sorted by title, without duplicates. An empty or whitespace-only
+  `text` returns `[]` (don't return everything).
+examples:
+  - input: search_books('aust')
+    output: "['Emma', 'Persuasion']"
+hints:
+  - "`Q(title__icontains=t) | Q(author__name__icontains=t)`"
+  - Strip and check the input first.
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+    from django.db.models import Q
+
+
+    class Author(models.Model):
+        name = models.CharField(max_length=50)
+
+
+    class Book(models.Model):
+        title = models.CharField(max_length=100)
+        author = models.ForeignKey(Author, on_delete=models.CASCADE)
+
+
+    def search_books(text):
+        text = (text or "").strip()
+        if not text:
+            return []
+        query = Q(title__icontains=text) | Q(author__name__icontains=text)
+        return list(Book.objects.filter(query).order_by("title").values_list("title", flat=True).distinct())
+
+
+    migrate()
+  explanation: |
+    Keyword arguments in `filter()` are ANDed; `Q` objects combined with `|` express OR. The
+    `author__name__icontains` lookup follows the foreign key with a JOIN and becomes a case-insensitive
+    `LIKE`. Here each book has one author, so duplicates can't happen, but adding `distinct()` is the habit
+    to keep when an OR crosses a "many" relation. Refusing empty input avoids an expensive
+    "match everything" query when a user submits an empty search box.
+complexity:
+  time: O(n) scan (use full-text search or trigram indexes at scale)
+  space: O(k)
+verify: |
+  austen, herbert = Author.objects.create(name="Jane Austen"), Author.objects.create(name="Frank Herbert")
+  for t, a in [("Emma", austen), ("Persuasion", austen), ("Dune", herbert), ("Dune Messiah", herbert)]:
+      Book.objects.create(title=t, author=a)
+  assert search_books("aust") == ["Emma", "Persuasion"]
+  assert search_books("DUNE") == ["Dune", "Dune Messiah"]
+  assert search_books("frank") == ["Dune", "Dune Messiah"]
+  assert search_books("   ") == [] and search_books("") == [] and search_books(None) == []

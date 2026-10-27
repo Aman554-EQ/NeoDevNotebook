@@ -11,6 +11,13 @@ export const CODE_LANGUAGES = [
   "dockerfile",
   "yaml",
   "json",
+  "html",
+  "jinja",
+  "http",
+  "dotenv",
+  "ini",
+  "toml",
+  "nginx",
   "text",
 ] as const
 export type CodeLanguage = (typeof CODE_LANGUAGES)[number]
@@ -30,6 +37,15 @@ export const LANGUAGE_LABEL: Record<string, string> = {
   dockerfile: "Dockerfile",
   yaml: "YAML",
   json: "JSON",
+  html: "HTML",
+  jinja: "Template",
+  django: "Template",
+  http: "HTTP",
+  dotenv: ".env",
+  env: ".env",
+  ini: "INI",
+  toml: "TOML",
+  nginx: "nginx",
   text: "Text",
 }
 
@@ -42,6 +58,10 @@ const ALIASES: Record<string, CodeLanguage> = {
   yml: "yaml",
   txt: "text",
   plaintext: "text",
+  django: "jinja",
+  htmldjango: "jinja",
+  env: "dotenv",
+  cfg: "ini",
 }
 
 export function normaliseLanguage(lang: string | undefined): CodeLanguage {

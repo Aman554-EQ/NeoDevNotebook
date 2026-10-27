@@ -39,6 +39,8 @@ jobs:
         with:
           python-version: "3.13"
       - run: pnpm install --frozen-lockfile
+      # Framework packages for running Django/FastAPI/Flask samples and project test suites.
+      - run: python -m pip install -r requirements-verify.txt
       - name: Create test database
         run: PGPASSWORD=neo_local_dev psql -h localhost -p 5434 -U neo -d neodevnotebook -c "CREATE DATABASE neodevnotebook_test"
       - run: cp .env.example .env.local
@@ -47,6 +49,13 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm verify:code
+        env:
+          # Lets the PostgreSQL code samples run (each creates and drops its own database).
+          VERIFY_POSTGRES_URL: postgres://neo:neo_local_dev@localhost:5434/neodevnotebook
+      # Every guided project's own test suite (ShopLite also against PostgreSQL).
+      - run: pnpm test:projects
+        env:
+          SHOPLITE_TEST_DATABASE_URL: postgres://neo:neo_local_dev@localhost:5434/shoplite
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - uses: actions/upload-artifact@v4

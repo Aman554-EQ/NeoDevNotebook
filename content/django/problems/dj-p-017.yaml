@@ -1,0 +1,76 @@
+id: dj-p-017
+title: Kill the N+1
+difficulty: medium
+tags:
+  - orm
+  - performance
+  - n-plus-one
+statement: |
+  `book_rows()` must return `[(title, author name, [tag names sorted])]` for every book,
+  ordered by title, in **at most 2 queries** however many books exist. The naive loop below runs
+  1 + 2N queries.
+
+  ```python
+  def book_rows():
+      return [(b.title, b.author.name, sorted(t.name for t in b.tags.all()))
+              for b in Book.objects.order_by("title")]
+  ```
+examples:
+  - input: book_rows()
+    output: "[('Dune', 'Herbert', ['classic', 'sci-fi']), ...]"
+hints:
+  - "ForeignKey: `select_related`."
+  - "Many-to-many: `prefetch_related`."
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+
+
+    class Author(models.Model):
+        name = models.CharField(max_length=50)
+
+
+    class Tag(models.Model):
+        name = models.CharField(max_length=30)
+
+
+    class Book(models.Model):
+        title = models.CharField(max_length=100)
+        author = models.ForeignKey(Author, on_delete=models.CASCADE)
+        tags = models.ManyToManyField(Tag)
+
+
+    def book_rows():
+        books = Book.objects.select_related("author").prefetch_related("tags").order_by("title")
+        return [(b.title, b.author.name, sorted(t.name for t in b.tags.all())) for b in books]
+
+
+    migrate()
+  explanation: |
+    Each `b.author` in the naive loop is a query, and so is each `b.tags.all()`: 1 + 2N.
+    `select_related("author")` adds a JOIN so authors arrive with the books in the first query.
+    `prefetch_related("tags")` runs **one** extra query for all tags of all books (`WHERE book_id IN
+    (...)`) and attaches them in Python, so `b.tags.all()` no longer hits the database. Two queries total,
+    constant whatever N is. Lock it in with an `assertNumQueries(2)` test.
+complexity:
+  time: O(N + T) rows, 2 queries
+  space: O(N + T)
+verify: |
+  from django.db import connection
+  from django.test.utils import CaptureQueriesContext
+
+  herbert, austen = Author.objects.create(name="Herbert"), Author.objects.create(name="Austen")
+  classic, scifi = Tag.objects.create(name="classic"), Tag.objects.create(name="sci-fi")
+  for i in range(10):
+      b = Book.objects.create(title=f"Book {i:02d}", author=herbert if i % 2 else austen)
+      b.tags.set([classic] if i % 3 else [scifi, classic])
+  with CaptureQueriesContext(connection) as ctx:
+      rows = book_rows()
+  assert len(ctx) <= 2, len(ctx)
+  assert rows[0] == ("Book 00", "Austen", ["classic", "sci-fi"]) and rows[1] == ("Book 01", "Herbert", ["classic"])
+  assert len(rows) == 10
