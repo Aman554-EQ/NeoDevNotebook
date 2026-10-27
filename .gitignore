@@ -32,3 +32,7 @@ Thumbs.db
 # generated
 src/components/viz/__generated__/
 .cache/
+.venv-verify/
+.pytest_cache/
+*.sqlite3
+projects/**/staticfiles/

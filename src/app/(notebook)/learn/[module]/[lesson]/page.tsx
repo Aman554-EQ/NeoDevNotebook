@@ -4,16 +4,11 @@ import "katex/dist/katex.min.css"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
 import { PrevNext } from "@/components/layout/prev-next"
 import { Toc } from "@/components/layout/toc"
-import { Callout } from "@/components/lesson/callout"
-import { KeyTakeaways } from "@/components/lesson/key-takeaways"
 import { LessonHeader } from "@/components/lesson/lesson-header"
 import { RelatedPractice } from "@/components/lesson/related-practice"
-import { Reveal } from "@/components/lesson/reveal"
 import { BookmarkButton, DoneToggle } from "@/components/progress/progress-buttons"
-import { CallStack } from "@/components/viz/_shared/call-stack/call-stack"
-import { CodeStepper } from "@/components/viz/_shared/code-stepper"
-import { vizComponents } from "@/components/viz/__generated__/registry"
 import { allLessonParams, getInterviewQuestions, getLesson, getProblems } from "@/lib/content"
+import { moduleComponents } from "@/lib/mdx/module-components"
 import { renderMdx } from "@/lib/mdx/render"
 
 export const ensureStatic = "navigation"
@@ -39,19 +34,7 @@ export default async function LessonPage({ params }: PageProps<"/learn/[module]/
   if (!data) notFound()
   const { lesson, prev, next } = data
   const { content, toc } = await renderMdx(lesson.body, {
-    components: {
-      Callout,
-      Reveal,
-      KeyTakeaways,
-      // Trace-driven visuals read content/<module>/traces/ of the lesson's own module.
-      CodeStepper: (props: Omit<React.ComponentProps<typeof CodeStepper>, "module">) => (
-        <CodeStepper module={module} {...props} />
-      ),
-      CallStack: (props: Omit<React.ComponentProps<typeof CallStack>, "module">) => (
-        <CallStack module={module} {...props} />
-      ),
-      ...vizComponents,
-    },
+    components: moduleComponents(module),
   })
   const href = `/learn/${module}/${slug}`
   const [allProblems, allQuestions] = await Promise.all([

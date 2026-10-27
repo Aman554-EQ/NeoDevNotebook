@@ -22,6 +22,9 @@ const eslintConfig = defineConfig([
     "playwright-report/**",
     "test-results/**",
     "src/components/viz/__generated__/**",
+    ".venv-verify/**",
+    ".cache/**",
+    "projects/**",
   ]),
 ])
 
