@@ -54,13 +54,19 @@ test.describe("navigation", () => {
   })
 
   test("every content route responds 200", async ({ request }) => {
-    const routes = content.flatMap(({ module: m, lessons, problems, interview }) => [
+    test.setTimeout(120_000) // a few hundred routes, and the list grows with every module
+    const routes = content.flatMap(({ module: m, lessons, problems, interview, projects }) => [
       `/learn/${m.slug}`,
       ...lessons.map((l) => `/learn/${m.slug}/${l.slug}`),
       ...problems.map((p) => `/practice/${m.slug}/${p.id}`),
       ...interview.map((q) => `/interview/${m.slug}/${q.id}`),
+      ...projects.map((p) => `/projects/${m.slug}/${p.slug}`),
     ])
-    for (const r of routes) expect((await request.get(r)).status(), r).toBe(200)
+    for (let i = 0; i < routes.length; i += 8) {
+      const batch = routes.slice(i, i + 8)
+      const statuses = await Promise.all(batch.map(async (r) => (await request.get(r)).status()))
+      batch.forEach((r, j) => expect(statuses[j], r).toBe(200))
+    }
   })
 
   for (const path of [

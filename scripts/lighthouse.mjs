@@ -18,6 +18,10 @@ const PAGES = [
   "/learn/python/dictionaries", // heaviest 3D lesson
   "/practice/python", // 60-item problem browser
   "/practice/python/py-p-050", // long problem page
+  "/learn/django/django-in-one-picture", // 3D request lifecycle
+  "/learn/django/the-orm-querying", // recorded ORM → SQL viewers
+  "/projects/django/shoplite", // longest project page, many file tabs
+  "/practice/django", // problem browser
 ]
 const BUDGET = {
   performance: 90,

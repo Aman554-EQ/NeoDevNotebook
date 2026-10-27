@@ -36,3 +36,11 @@ src/components/viz/__generated__/
 .pytest_cache/
 *.sqlite3
 projects/**/staticfiles/
+
+# maintainer notes: kept locally, not part of the website or the repository
+/documentation/
+/navigation/
+/plan/
+/changelog/
+/soul.md
+/initial-prompt.md

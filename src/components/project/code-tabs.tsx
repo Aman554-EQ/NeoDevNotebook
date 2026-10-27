@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 /**
  * Several files of one change, as tabs (server-rendered code blocks passed in as content).
  * Keyboard: arrow keys move between tabs (WAI-ARIA tabs pattern). The tab row scrolls sideways
- * on narrow screens instead of widening the page.
+ * on narrow screens instead of widening the page. Hidden panels stay empty until opened.
  */
 export function CodeTabs({ tabs }: { tabs: { label: string; content: React.ReactNode }[] }) {
   const [active, setActive] = useState(0)
@@ -65,7 +65,8 @@ export function CodeTabs({ tabs }: { tabs: { label: string; content: React.React
           hidden={i !== active}
           className="[&>figure]:mt-2"
         >
-          {t.content}
+          {/* Only the open file is in the DOM: long project pages carry dozens of highlighted files. */}
+          {i === active && t.content}
         </div>
       ))}
     </div>
