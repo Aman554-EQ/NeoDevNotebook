@@ -1,0 +1,699 @@
+---
+title: Query practice lab
+summary: Fifteen graded exercises on one seeded shop database, each solved with the ORM and shown next to its SQL. Filters and lookups, joins and aggregation, HAVING, Exists and subqueries, window functions and race-free bulk updates, then a monthly dashboard that combines them.
+estimatedMinutes: 35
+difficulty: medium
+section: Databases in Practice
+objectives:
+  - Translate business questions into ORM queries and read the equivalent SQL
+  - Combine filters, relations, aggregation and HAVING correctly
+  - Use Exists, Subquery and OuterRef for correlated questions
+  - Rank and number rows with window functions
+  - Change many rows safely with F expressions and conditional updates
+prerequisites:
+  - "The ORM: querying"
+  - Relationships & efficient queries
+tags: [django, orm, sql, practice, aggregation, window-functions]
+---
+
+## Intuition: the gym for your query muscles
+
+Reading about queries isn't the same as writing them. This lab is a set of graded exercises on one
+small, realistic shop database. Try each one yourself before opening the answer; every answer below
+was run, and its output is real. Two habits to practise as you go: ask "what SQL will this be?", and
+"how many queries does this cost?".
+
+## See it
+
+<SqlPlayground
+  recording="query-lab"
+  caption="The SQL side of the lab: revenue per category, ranking within groups with a window function, a running total, NOT EXISTS, and a CTE joined to itself. The ORM answers below produce queries of exactly these shapes."
+/>
+
+## The precise rules
+
+Every exercise uses this schema (the seed function is repeated in each runnable block, so each one
+works on its own):
+
+| Model      | Fields                                                                               |
+| ---------- | ------------------------------------------------------------------------------------ |
+| `Customer` | `name`, `city`                                                                       |
+| `Category` | `name`                                                                               |
+| `Product`  | `name`, `category` (FK), `price`, `stock`                                            |
+| `Order`    | `customer` (FK), `created` (date), `status` (`paid`, `pending`, `cancelled`)         |
+| `Item`     | `order` (FK, `related_name="items"`), `product` (FK), `qty`, `price` (paid per unit) |
+
+Grades: **easy** (1–5) single-table filters and lookups, **simple** (6–9) relations and aggregation,
+**medium** (10–12) correlated questions and HAVING, **hard** (13–15) window functions, subqueries
+and conditional bulk updates.
+
+Translation cheatsheet: `filter()` → `WHERE`; `__` across relations → `JOIN`; `values().annotate()`
+→ `GROUP BY`; filtering on an annotation → `HAVING`; `Exists(...)` → `EXISTS (SELECT 1 ...)`;
+`Subquery(...)` with `OuterRef` → a correlated subquery; `Window(...)` → `... OVER (PARTITION BY ...
+ORDER BY ...)`; `F()` → a column reference.
+
+## Worked example
+
+The seed, and exercise 0: "the three most expensive products with their category", with the SQL it
+produced and its query count.
+
+```python title="lab_seed.py"
+from datetime import date
+from decimal import Decimal as D
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import connection, models
+from django.test.utils import CaptureQueriesContext
+
+
+class Customer(models.Model):
+    name = models.CharField(max_length=30)
+    city = models.CharField(max_length=30)
+
+
+class Category(models.Model):
+    name = models.CharField(max_length=30)
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=30)
+    category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="products")
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    stock = models.PositiveIntegerField()
+
+
+class Order(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="orders")
+    created = models.DateField()
+    status = models.CharField(max_length=10)
+
+
+class Item(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="items")
+    qty = models.PositiveIntegerField()
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+def seed():
+    migrate()
+    c = {n: Customer.objects.create(name=n, city=city) for n, city in
+         [("Ada", "London"), ("Grace", "New York"), ("Linus", "Helsinki"), ("Marie", "Paris"), ("Alan", "London")]}
+    cat = {n: Category.objects.create(name=n) for n in ["books", "games", "music"]}
+    p = {n: Product.objects.create(name=n, category=cat[k], price=D(pr), stock=s) for n, k, pr, s in [
+        ("Dune", "books", "12.50", 8), ("Emma", "books", "8.00", 0), ("Neuromancer", "books", "14.00", 3),
+        ("Chess set", "games", "30.00", 2), ("Go set", "games", "45.00", 5), ("Vinyl", "music", "25.00", 1)]}
+    for who, day, status, lines in [
+        ("Ada", date(2026, 2, 10), "paid", [("Dune", 2), ("Chess set", 1)]),
+        ("Ada", date(2026, 3, 5), "paid", [("Neuromancer", 1)]),
+        ("Grace", date(2026, 3, 9), "paid", [("Go set", 2), ("Dune", 1)]),
+        ("Grace", date(2026, 3, 20), "cancelled", [("Vinyl", 1)]),
+        ("Linus", date(2026, 3, 22), "pending", [("Dune", 3)]),
+        ("Marie", date(2026, 4, 2), "paid", [("Chess set", 2), ("Neuromancer", 2)]),
+    ]:
+        order = Order.objects.create(customer=c[who], created=day, status=status)
+        for name, qty in lines:
+            Item.objects.create(order=order, product=p[name], qty=qty, price=p[name].price)
+
+
+seed()
+with CaptureQueriesContext(connection) as ctx:
+    top = list(Product.objects.select_related("category").order_by("-price")[:3])
+print([(p.name, p.category.name, str(p.price)) for p in top])
+print(len(ctx), "query:", ctx.captured_queries[0]["sql"].replace('"shop_', '"'))
+```
+
+```text title="Output"
+[('Go set', 'games', '45.00'), ('Chess set', 'games', '30.00'), ('Vinyl', 'music', '25.00')]
+1 query: SELECT "product"."id", "product"."name", "product"."category_id", "product"."price", "product"."stock", "category"."id", "category"."name" FROM "product" INNER JOIN "category" ON ("product"."category_id" = "category"."id") ORDER BY "product"."price" DESC LIMIT 3
+```
+
+- `select_related("category")` became an `INNER JOIN`, so printing the category costs nothing extra.
+- `order_by("-price")[:3]` became `ORDER BY ... DESC LIMIT 3`: the database sorted and cut, not
+  Python.
+- Ada and Alan both live in London, Alan has never ordered, and Emma has no stock: the seed contains
+  the edge cases the exercises need.
+
+## Variations
+
+### Exercises 1–5 (easy): filters and lookups
+
+1. Books under 15, cheapest first. 2. Customers in London **or** Paris. 3. Orders in March 2026 that
+   weren't cancelled. 4. In-stock products whose name contains "set" (any case). 5. Customers who never
+   ordered.
+
+```python
+from datetime import date
+from decimal import Decimal as D
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+from django.db.models import Q
+
+
+class Customer(models.Model):
+    name = models.CharField(max_length=30)
+    city = models.CharField(max_length=30)
+
+
+class Category(models.Model):
+    name = models.CharField(max_length=30)
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=30)
+    category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="products")
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    stock = models.PositiveIntegerField()
+
+
+class Order(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="orders")
+    created = models.DateField()
+    status = models.CharField(max_length=10)
+
+
+class Item(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="items")
+    qty = models.PositiveIntegerField()
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+def seed():
+    migrate()
+    c = {n: Customer.objects.create(name=n, city=city) for n, city in
+         [("Ada", "London"), ("Grace", "New York"), ("Linus", "Helsinki"), ("Marie", "Paris"), ("Alan", "London")]}
+    cat = {n: Category.objects.create(name=n) for n in ["books", "games", "music"]}
+    p = {n: Product.objects.create(name=n, category=cat[k], price=D(pr), stock=s) for n, k, pr, s in [
+        ("Dune", "books", "12.50", 8), ("Emma", "books", "8.00", 0), ("Neuromancer", "books", "14.00", 3),
+        ("Chess set", "games", "30.00", 2), ("Go set", "games", "45.00", 5), ("Vinyl", "music", "25.00", 1)]}
+    for who, day, status, lines in [
+        ("Ada", date(2026, 2, 10), "paid", [("Dune", 2), ("Chess set", 1)]),
+        ("Ada", date(2026, 3, 5), "paid", [("Neuromancer", 1)]),
+        ("Grace", date(2026, 3, 9), "paid", [("Go set", 2), ("Dune", 1)]),
+        ("Grace", date(2026, 3, 20), "cancelled", [("Vinyl", 1)]),
+        ("Linus", date(2026, 3, 22), "pending", [("Dune", 3)]),
+        ("Marie", date(2026, 4, 2), "paid", [("Chess set", 2), ("Neuromancer", 2)]),
+    ]:
+        order = Order.objects.create(customer=c[who], created=day, status=status)
+        for name, qty in lines:
+            Item.objects.create(order=order, product=p[name], qty=qty, price=p[name].price)
+
+
+seed()
+names = lambda qs, field="name": list(qs.values_list(field, flat=True))  # noqa: E731
+
+# 1. SELECT ... JOIN category WHERE category.name = 'books' AND price < 15 ORDER BY price
+print(1, names(Product.objects.filter(category__name="books", price__lt=15).order_by("price")))
+# 2. WHERE city = 'London' OR city = 'Paris'   (or: city__in=[...])
+print(2, names(Customer.objects.filter(Q(city="London") | Q(city="Paris")).order_by("name")))
+# 3. WHERE created BETWEEN '2026-03-01' AND '2026-03-31' AND NOT status = 'cancelled'
+march = Order.objects.filter(created__year=2026, created__month=3).exclude(status="cancelled")
+print(3, [d.isoformat() for d in names(march.order_by("created"), "created")])
+# 4. WHERE UPPER(name) LIKE UPPER('%set%') AND stock > 0
+print(4, names(Product.objects.filter(name__icontains="SET", stock__gt=0).order_by("name")))
+# 5. LEFT JOIN orders ... WHERE orders.id IS NULL
+print(5, names(Customer.objects.filter(orders__isnull=True)))
+```
+
+```text title="Output"
+1 ['Emma', 'Dune', 'Neuromancer']
+2 ['Ada', 'Alan', 'Marie']
+3 ['2026-03-05', '2026-03-09', '2026-03-22']
+4 ['Chess set', 'Go set']
+5 ['Alan']
+```
+
+`created__year` and `created__month` are date lookups; `exclude()` is SQL's `NOT`. Exercise 5 uses
+the reverse relation: `orders__isnull=True` becomes a `LEFT JOIN` keeping customers with no match.
+
+### Exercises 6–9 (simple): relations and aggregation
+
+6. Number of orders per status. 7. Revenue per customer from paid orders, biggest first. 8. Average
+   product price per category. 9. The best-selling product (by quantity, excluding cancelled orders).
+
+```python
+from datetime import date
+from decimal import Decimal as D
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+from django.db.models import Avg, Count, DecimalField, ExpressionWrapper, F, Sum
+
+
+class Customer(models.Model):
+    name = models.CharField(max_length=30)
+    city = models.CharField(max_length=30)
+
+
+class Category(models.Model):
+    name = models.CharField(max_length=30)
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=30)
+    category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="products")
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    stock = models.PositiveIntegerField()
+
+
+class Order(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="orders")
+    created = models.DateField()
+    status = models.CharField(max_length=10)
+
+
+class Item(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="items")
+    qty = models.PositiveIntegerField()
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+def seed():
+    migrate()
+    c = {n: Customer.objects.create(name=n, city=city) for n, city in
+         [("Ada", "London"), ("Grace", "New York"), ("Linus", "Helsinki"), ("Marie", "Paris"), ("Alan", "London")]}
+    cat = {n: Category.objects.create(name=n) for n in ["books", "games", "music"]}
+    p = {n: Product.objects.create(name=n, category=cat[k], price=D(pr), stock=s) for n, k, pr, s in [
+        ("Dune", "books", "12.50", 8), ("Emma", "books", "8.00", 0), ("Neuromancer", "books", "14.00", 3),
+        ("Chess set", "games", "30.00", 2), ("Go set", "games", "45.00", 5), ("Vinyl", "music", "25.00", 1)]}
+    for who, day, status, lines in [
+        ("Ada", date(2026, 2, 10), "paid", [("Dune", 2), ("Chess set", 1)]),
+        ("Ada", date(2026, 3, 5), "paid", [("Neuromancer", 1)]),
+        ("Grace", date(2026, 3, 9), "paid", [("Go set", 2), ("Dune", 1)]),
+        ("Grace", date(2026, 3, 20), "cancelled", [("Vinyl", 1)]),
+        ("Linus", date(2026, 3, 22), "pending", [("Dune", 3)]),
+        ("Marie", date(2026, 4, 2), "paid", [("Chess set", 2), ("Neuromancer", 2)]),
+    ]:
+        order = Order.objects.create(customer=c[who], created=day, status=status)
+        for name, qty in lines:
+            Item.objects.create(order=order, product=p[name], qty=qty, price=p[name].price)
+
+
+seed()
+money = DecimalField(max_digits=10, decimal_places=2)
+line_total = ExpressionWrapper(F("orders__items__qty") * F("orders__items__price"), output_field=money)
+
+# 6. SELECT status, COUNT(id) FROM order GROUP BY status
+print(6, dict(Order.objects.values("status").annotate(n=Count("id")).order_by("status").values_list("status", "n")))
+# 7. SUM(qty * price) per customer, only paid orders, biggest first
+revenue = (Customer.objects.filter(orders__status="paid").annotate(revenue=Sum(line_total))
+           .order_by("-revenue").values_list("name", "revenue"))
+print(7, [(name, f"{total:.2f}") for name, total in revenue])
+# 8. AVG(price) GROUP BY category
+print(8, [(c, f"{a:.2f}") for c, a in Category.objects.annotate(avg=Avg("products__price")).order_by("name").values_list("name", "avg")])
+# 9. SUM(qty) GROUP BY product, excluding cancelled orders, top 1
+best = (Item.objects.exclude(order__status="cancelled").values("product__name")
+        .annotate(units=Sum("qty")).order_by("-units").first())
+print(9, best)
+```
+
+```text title="Output"
+6 {'cancelled': 1, 'paid': 4, 'pending': 1}
+7 [('Grace', '102.50'), ('Marie', '88.00'), ('Ada', '69.00')]
+8 [('books', '11.50'), ('games', '37.50'), ('music', '25.00')]
+9 {'product__name': 'Dune', 'units': 6}
+```
+
+In exercise 7 the `filter(orders__status="paid")` comes **before** `annotate()`, so only paid orders'
+lines are summed. Put the filter after the annotation and it would mean something different (filter
+customers by an aggregate). Exercise 9 groups by a related field with `values("product__name")`.
+
+### Exercises 10–12 (medium): correlated questions and HAVING
+
+10. Each customer's latest order date. 11. Products nobody has ever ordered. 12. Orders whose total is
+    over 50.
+
+```python
+from datetime import date
+from decimal import Decimal as D
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+from django.db.models import DecimalField, Exists, ExpressionWrapper, F, Max, OuterRef, Sum
+
+
+class Customer(models.Model):
+    name = models.CharField(max_length=30)
+    city = models.CharField(max_length=30)
+
+
+class Category(models.Model):
+    name = models.CharField(max_length=30)
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=30)
+    category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="products")
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    stock = models.PositiveIntegerField()
+
+
+class Order(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="orders")
+    created = models.DateField()
+    status = models.CharField(max_length=10)
+
+
+class Item(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="items")
+    qty = models.PositiveIntegerField()
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+def seed():
+    migrate()
+    c = {n: Customer.objects.create(name=n, city=city) for n, city in
+         [("Ada", "London"), ("Grace", "New York"), ("Linus", "Helsinki"), ("Marie", "Paris"), ("Alan", "London")]}
+    cat = {n: Category.objects.create(name=n) for n in ["books", "games", "music"]}
+    p = {n: Product.objects.create(name=n, category=cat[k], price=D(pr), stock=s) for n, k, pr, s in [
+        ("Dune", "books", "12.50", 8), ("Emma", "books", "8.00", 0), ("Neuromancer", "books", "14.00", 3),
+        ("Chess set", "games", "30.00", 2), ("Go set", "games", "45.00", 5), ("Vinyl", "music", "25.00", 1)]}
+    for who, day, status, lines in [
+        ("Ada", date(2026, 2, 10), "paid", [("Dune", 2), ("Chess set", 1)]),
+        ("Ada", date(2026, 3, 5), "paid", [("Neuromancer", 1)]),
+        ("Grace", date(2026, 3, 9), "paid", [("Go set", 2), ("Dune", 1)]),
+        ("Grace", date(2026, 3, 20), "cancelled", [("Vinyl", 1)]),
+        ("Linus", date(2026, 3, 22), "pending", [("Dune", 3)]),
+        ("Marie", date(2026, 4, 2), "paid", [("Chess set", 2), ("Neuromancer", 2)]),
+    ]:
+        order = Order.objects.create(customer=c[who], created=day, status=status)
+        for name, qty in lines:
+            Item.objects.create(order=order, product=p[name], qty=qty, price=p[name].price)
+
+
+seed()
+# 10. MAX(created) per customer (LEFT JOIN keeps Alan, with None)
+latest = Customer.objects.annotate(last=Max("orders__created")).order_by("name").values_list("name", "last")
+print(10, [(n, d.isoformat() if d else None) for n, d in latest])
+# 11. WHERE NOT EXISTS (SELECT 1 FROM item WHERE item.product_id = product.id)
+ordered = Item.objects.filter(product=OuterRef("pk"))
+print(11, list(Product.objects.filter(~Exists(ordered)).values_list("name", flat=True)))
+# 12. GROUP BY order HAVING SUM(qty * price) > 50
+total = Sum(ExpressionWrapper(F("items__qty") * F("items__price"), output_field=DecimalField()))
+big = Order.objects.annotate(total=total).filter(total__gt=50).order_by("id")
+print(12, [(o.customer.name, o.created.isoformat(), f"{o.total:.2f}") for o in big.select_related("customer")])
+```
+
+```text title="Output"
+10 [('Ada', '2026-03-05'), ('Alan', None), ('Grace', '2026-03-20'), ('Linus', '2026-03-22'), ('Marie', '2026-04-02')]
+11 ['Emma']
+12 [('Ada', '2026-02-10', '55.00'), ('Grace', '2026-03-09', '102.50'), ('Marie', '2026-04-02', '88.00')]
+```
+
+`~Exists(...)` is usually the fastest way to ask "has no related rows": the database stops at the first
+match. Filtering on the `total` annotation (exercise 12) became `HAVING`, because it filters groups
+after the sum is computed.
+
+### Exercises 13–15 (hard): windows, subqueries and safe bulk updates
+
+13. Rank products by revenue within their category. 14. Each customer's first order id, as a column.
+14. Raise prices by 10% for products with fewer than 3 in stock, and mark the others "ok", in one
+    statement each.
+
+```python
+from datetime import date
+from decimal import Decimal as D
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+from django.db.models import (Case, DecimalField, ExpressionWrapper, F, OuterRef, Q, Subquery, Sum,
+                              Value, When, Window)
+from django.db.models.functions import Coalesce, Rank
+
+
+class Customer(models.Model):
+    name = models.CharField(max_length=30)
+    city = models.CharField(max_length=30)
+
+
+class Category(models.Model):
+    name = models.CharField(max_length=30)
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=30)
+    category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="products")
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    stock = models.PositiveIntegerField()
+    note = models.CharField(max_length=10, blank=True)
+
+
+class Order(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="orders")
+    created = models.DateField()
+    status = models.CharField(max_length=10)
+
+
+class Item(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="items")
+    qty = models.PositiveIntegerField()
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+def seed():
+    migrate()
+    c = {n: Customer.objects.create(name=n, city=city) for n, city in
+         [("Ada", "London"), ("Grace", "New York"), ("Linus", "Helsinki"), ("Marie", "Paris"), ("Alan", "London")]}
+    cat = {n: Category.objects.create(name=n) for n in ["books", "games", "music"]}
+    p = {n: Product.objects.create(name=n, category=cat[k], price=D(pr), stock=s) for n, k, pr, s in [
+        ("Dune", "books", "12.50", 8), ("Emma", "books", "8.00", 0), ("Neuromancer", "books", "14.00", 3),
+        ("Chess set", "games", "30.00", 2), ("Go set", "games", "45.00", 5), ("Vinyl", "music", "25.00", 1)]}
+    for who, day, status, lines in [
+        ("Ada", date(2026, 2, 10), "paid", [("Dune", 2), ("Chess set", 1)]),
+        ("Ada", date(2026, 3, 5), "paid", [("Neuromancer", 1)]),
+        ("Grace", date(2026, 3, 9), "paid", [("Go set", 2), ("Dune", 1)]),
+        ("Grace", date(2026, 3, 20), "cancelled", [("Vinyl", 1)]),
+        ("Linus", date(2026, 3, 22), "pending", [("Dune", 3)]),
+        ("Marie", date(2026, 4, 2), "paid", [("Chess set", 2), ("Neuromancer", 2)]),
+    ]:
+        order = Order.objects.create(customer=c[who], created=day, status=status)
+        for name, qty in lines:
+            Item.objects.create(order=order, product=p[name], qty=qty, price=p[name].price)
+
+
+seed()
+money = DecimalField(max_digits=10, decimal_places=2)
+
+# 13. SUM(...) of paid sales per product, then RANK() OVER (PARTITION BY category ORDER BY revenue DESC)
+paid_sales = Sum(ExpressionWrapper(F("items__qty") * F("items__price"), output_field=money),
+                 filter=Q(items__order__status="paid"))
+revenue = Coalesce(paid_sales, Value(D("0")), output_field=money)
+ranked = (Product.objects.annotate(revenue=revenue)
+          .annotate(rank=Window(Rank(), partition_by=F("category"), order_by=F("revenue").desc()))
+          .order_by("category__name", "rank"))
+print(13, [(p.category.name, p.name, f"{p.revenue:.2f}", p.rank) for p in ranked.select_related("category")])
+
+# 14. (SELECT id FROM order WHERE customer_id = customer.id ORDER BY created LIMIT 1) AS first_order
+first = Order.objects.filter(customer=OuterRef("pk")).order_by("created").values("id")[:1]
+print(14, list(Customer.objects.annotate(first_order=Subquery(first)).order_by("name").values_list("name", "first_order")))
+
+# 15. UPDATE ... SET price = price * 1.10 WHERE stock < 3;  UPDATE ... SET note = CASE ... END
+raised = Product.objects.filter(stock__lt=3).update(price=F("price") * D("1.10"))
+Product.objects.update(note=Case(When(stock__lt=3, then=Value("reorder")), default=Value("ok")))
+print(15, raised, "raised |", [(n, str(price), note) for n, price, note in
+                                Product.objects.order_by("name").values_list("name", "price", "note")])
+```
+
+```text title="Output"
+13 [('books', 'Neuromancer', '42.00', 1), ('books', 'Dune', '37.50', 2), ('books', 'Emma', '0.00', 3), ('games', 'Chess set', '90.00', 1), ('games', 'Go set', '90.00', 1), ('music', 'Vinyl', '0.00', 1)]
+14 [('Ada', 1), ('Alan', None), ('Grace', 3), ('Linus', 5), ('Marie', 6)]
+15 3 raised | [('Chess set', '33.00', 'reorder'), ('Dune', '12.50', 'ok'), ('Emma', '8.80', 'reorder'), ('Go set', '45.00', 'ok'), ('Neuromancer', '14.00', 'ok'), ('Vinyl', '27.50', 'reorder')]
+```
+
+The window function ranks **within** each category without collapsing the rows (GROUP BY couldn't);
+the two games tie on 90.00 and share rank 1. The aggregate's `filter=` counts only paid orders, and
+`Coalesce(..., 0)` turns "no paid sales" (`NULL`) into zero, so Emma and Vinyl (whose only order was
+cancelled) still get a rank. `Subquery` with `OuterRef` computes a value per customer in the same
+query. Both updates ran entirely in the database, and Django returns the new prices as `Decimal`s
+with the field's two decimal places.
+
+## Putting it together
+
+A monthly dashboard answered in a handful of queries: revenue per month, new vs returning customers,
+the top product of each month, and stock that needs reordering.
+
+```python title="monthly_dashboard.py"
+from datetime import date
+from decimal import Decimal as D
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import connection, models
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, Min, Sum, Window
+from django.db.models.functions import RowNumber, TruncMonth
+from django.test.utils import CaptureQueriesContext
+
+
+class Customer(models.Model):
+    name = models.CharField(max_length=30)
+    city = models.CharField(max_length=30)
+
+
+class Category(models.Model):
+    name = models.CharField(max_length=30)
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=30)
+    category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="products")
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    stock = models.PositiveIntegerField()
+
+
+class Order(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="orders")
+    created = models.DateField()
+    status = models.CharField(max_length=10)
+
+
+class Item(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="items")
+    qty = models.PositiveIntegerField()
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+def seed():
+    migrate()
+    c = {n: Customer.objects.create(name=n, city=city) for n, city in
+         [("Ada", "London"), ("Grace", "New York"), ("Linus", "Helsinki"), ("Marie", "Paris"), ("Alan", "London")]}
+    cat = {n: Category.objects.create(name=n) for n in ["books", "games", "music"]}
+    p = {n: Product.objects.create(name=n, category=cat[k], price=D(pr), stock=s) for n, k, pr, s in [
+        ("Dune", "books", "12.50", 8), ("Emma", "books", "8.00", 0), ("Neuromancer", "books", "14.00", 3),
+        ("Chess set", "games", "30.00", 2), ("Go set", "games", "45.00", 5), ("Vinyl", "music", "25.00", 1)]}
+    for who, day, status, lines in [
+        ("Ada", date(2026, 2, 10), "paid", [("Dune", 2), ("Chess set", 1)]),
+        ("Ada", date(2026, 3, 5), "paid", [("Neuromancer", 1)]),
+        ("Grace", date(2026, 3, 9), "paid", [("Go set", 2), ("Dune", 1)]),
+        ("Grace", date(2026, 3, 20), "cancelled", [("Vinyl", 1)]),
+        ("Linus", date(2026, 3, 22), "pending", [("Dune", 3)]),
+        ("Marie", date(2026, 4, 2), "paid", [("Chess set", 2), ("Neuromancer", 2)]),
+    ]:
+        order = Order.objects.create(customer=c[who], created=day, status=status)
+        for name, qty in lines:
+            Item.objects.create(order=order, product=p[name], qty=qty, price=p[name].price)
+
+
+seed()
+money = DecimalField(max_digits=10, decimal_places=2)
+paid = Item.objects.filter(order__status="paid")
+
+with CaptureQueriesContext(connection) as ctx:
+    by_month = (paid.annotate(month=TruncMonth("order__created")).values("month")
+                .annotate(revenue=Sum(ExpressionWrapper(F("qty") * F("price"), output_field=money)),
+                          orders=Count("order", distinct=True)).order_by("month"))
+    for row in by_month:
+        print(row["month"].strftime("%Y-%m"), f"revenue={row['revenue']:.2f}", f"orders={row['orders']}")
+
+    first_month = dict(Customer.objects.annotate(first=TruncMonth(Min("orders__created")))
+                       .exclude(first=None).values_list("name", "first"))
+    for month in sorted(set(first_month.values())):
+        print(month.strftime("%Y-%m"), "new customers:", sorted(n for n, m in first_month.items() if m == month))
+
+    top = (paid.annotate(month=TruncMonth("order__created")).values("month", "product__name")
+           .annotate(units=Sum("qty"))
+           .annotate(pos=Window(RowNumber(), partition_by=F("month"), order_by=[F("units").desc(), F("product__name")]))
+           .order_by("month"))
+    print("top product per month:", [(r["month"].strftime("%m"), r["product__name"], r["units"]) for r in top if r["pos"] == 1])
+
+    print("reorder:", list(Product.objects.filter(stock__lt=3).order_by("stock", "name").values_list("name", "stock")))
+print(len(ctx), "queries for the whole dashboard")
+```
+
+```text title="Output"
+2026-02 revenue=55.00 orders=1
+2026-03 revenue=116.50 orders=2
+2026-04 revenue=88.00 orders=1
+2026-02 new customers: ['Ada']
+2026-03 new customers: ['Grace', 'Linus']
+2026-04 new customers: ['Marie']
+top product per month: [('02', 'Dune', 2), ('03', 'Go set', 2), ('04', 'Chess set', 2)]
+reorder: [('Emma', 0), ('Vinyl', 1), ('Chess set', 2)]
+4 queries for the whole dashboard
+```
+
+Four questions, four queries, every number computed by the database: grouping by month with
+`TruncMonth`, counting distinct orders, first-order month per customer with `Min`, and the monthly
+winner with `RowNumber()` over a partition (ties broken by name, so the result is stable). The same
+code runs unchanged on PostgreSQL.
+
+## Common mistakes
+
+<Callout type="warning" title="filter() before or after annotate() changes the meaning">
+  `filter(orders__status="paid").annotate(Sum(...))` sums only paid orders.
+  `annotate(Sum(...)).filter(total__gt=50)` filters by the sum (HAVING). Swapping them gives a
+  different, often silently wrong, answer.
+</Callout>
+
+- **Joining two "many" relations in one annotate** (`Count("orders")` and `Count("reviews")`): the
+  join multiplies rows and both counts come out too big. Use `distinct=True`, or subqueries.
+- **Forgetting `NULL`s.** Sums over no rows are `NULL`, not 0; wrap them in `Coalesce(..., 0)`.
+- **Ranking with Python sorting** over all rows. Window functions do it in the database.
+- **Read-modify-write loops for bulk changes.** `update(price=F("price") * ...)` is one statement and
+  race-free.
+- **Unstable "top N" with ties.** Add a tie-breaker to the ordering (a name or id).
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: how many orders each customer has, including customers with none?"
+>
+  `Customer.objects.annotate(n=Count("orders"))`: the reverse relation uses a LEFT JOIN, so
+  customers with no orders get 0.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: categories with at least 2 products in stock?">
+  `Category.objects.annotate(n=Count("products",
+  filter=Q(products__stock__gt=0))).filter(n__gte=2)`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: each product with its most recent order date as a column?">
+  `Product.objects.annotate(last=Max("items__order__created"))`, or a `Subquery` with
+  `OuterRef("pk")` ordered by `-order__created` when you need another column of that latest row.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: number each customer's orders 1, 2, 3 by date.">
+  `Order.objects.annotate(n=Window(RowNumber(), partition_by=F("customer"),
+  order_by=F("created").asc()))`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: mark every product with zero stock as inactive, in one statement."
+>
+  `Product.objects.filter(stock=0).update(is_active=False)`.
+</Reveal>
+
+<KeyTakeaways>
+
+- Translate questions step by step: which rows (filter), across which relations (`__`), grouped how
+  (`values().annotate()`), filtered after grouping (HAVING)?
+- `Exists`/`~Exists` for yes/no questions; `Subquery` + `OuterRef` for a value from related rows.
+- Window functions (`Rank`, `RowNumber`) rank and number within groups without collapsing rows.
+- `Coalesce` for empty sums; `distinct=True` when joins multiply rows.
+- Bulk changes with `update()`, `F()` and `Case/When`: one statement, no races.
+
+</KeyTakeaways>

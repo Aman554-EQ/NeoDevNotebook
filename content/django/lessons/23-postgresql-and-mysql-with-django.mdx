@@ -1,0 +1,432 @@
+---
+title: PostgreSQL & MySQL with Django
+summary: Run Django on a real database server. DATABASES and DATABASE_URL, drivers, connection reuse and pooling, the differences between SQLite, PostgreSQL and MySQL that bite in production, PostgreSQL superpowers (JSONB, partial and GIN indexes, DISTINCT ON, full-text search, SKIP LOCKED), and reading EXPLAIN.
+estimatedMinutes: 25
+difficulty: medium
+section: Databases in Practice
+objectives:
+  - Configure Django for PostgreSQL or MySQL from a DATABASE_URL, with the right driver
+  - Reuse connections and know when to add a pooler
+  - Avoid the behavioural differences between SQLite, PostgreSQL and MySQL
+  - Use PostgreSQL features from the ORM (JSON, partial and GIN indexes, DISTINCT ON, full-text search)
+  - Read a query plan and confirm an index is used
+prerequisites:
+  - Databases for backend developers
+  - Relationships & efficient queries
+tags: [postgresql, mysql, databases, indexes, performance]
+---
+
+## Intuition: same language, different dialects
+
+SQLite, PostgreSQL and MySQL all speak SQL, and Django's ORM hides most differences. But they're
+different engines, like regional dialects: words mean slightly different things (case sensitivity,
+how `NULL` sorts, what a transaction covers), and each has features the others lack. Develop on the
+database you deploy on (Docker makes that easy), and you won't discover the differences in production.
+
+## See it
+
+<DatabaseUrlViz />
+
+## The precise rules
+
+**Configuration.** Keep the whole connection in one environment variable and parse it:
+
+```python norun title="settings.py"
+import environ
+
+env = environ.Env()
+DATABASES = {"default": env.db("DATABASE_URL", default="sqlite:///db.sqlite3")}
+DATABASES["default"]["CONN_MAX_AGE"] = 60  # reuse a connection for 60 s
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True  # test reused connections before use
+```
+
+```bash
+# a local PostgreSQL in Docker (this module's projects test against one in CI)
+docker run -d --name pg -e POSTGRES_PASSWORD=devpass -p 5432:5432 postgres:17-alpine
+export DATABASE_URL=postgres://postgres:devpass@localhost:5432/postgres
+python -m pip install "psycopg[binary]"       # PostgreSQL driver (psycopg 3)
+python -m pip install mysqlclient             # MySQL driver (needs build tools; PyMySQL is pure Python)
+```
+
+**Connections.** Opening one costs a TCP + TLS + authentication round trip. `CONN_MAX_AGE` keeps a
+connection per worker alive between requests; Django 5.1+ can also use psycopg's built-in pool
+(`OPTIONS = {"pool": True}`). With many workers or serverless functions, put **PgBouncer** in front
+of PostgreSQL.
+
+**Differences that bite:**
+
+|                              | SQLite               | PostgreSQL                            | MySQL (InnoDB)                                           |
+| ---------------------------- | -------------------- | ------------------------------------- | -------------------------------------------------------- |
+| `exact` on text              | case-sensitive       | case-sensitive                        | **case-insensitive** (default collation)                 |
+| length limits                | not enforced         | enforced                              | enforced (or truncated in non-strict mode)               |
+| DDL in transactions          | yes                  | **yes** (failed migrations roll back) | **no** (a failed migration leaves a half-applied schema) |
+| `select_for_update`          | ignored              | yes (`nowait`, `skip_locked`, `of`)   | yes                                                      |
+| NULLs in `ORDER BY ... DESC` | last                 | **first**                             | last                                                     |
+| JSON                         | JSON1 functions      | JSONB (indexable)                     | JSON                                                     |
+| concurrency                  | one writer at a time | many                                  | many                                                     |
+
+**PostgreSQL extras** (via the ORM and `django.contrib.postgres`): `JSONField` lookups backed by
+**JSONB**, `ArrayField`, `GinIndex`, **partial indexes** (`Index(condition=Q(...))`), functional
+indexes, `distinct("field")` (**DISTINCT ON**), full-text search (`SearchVector`, `SearchQuery`,
+`SearchRank`), `select_for_update(skip_locked=True)` for work queues, `AddIndexConcurrently` for big
+tables.
+
+**Query plans.** `queryset.explain()` returns the plan (`analyze=True` actually runs it and adds
+timings). Look for `Seq Scan` on big tables (missing index), `Index Scan` / `Index Only Scan` (good),
+and huge row estimates in nested loops.
+
+## Worked example
+
+Parsing database URLs with django-environ: the same settings line produces the right `DATABASES`
+entry for each engine.
+
+```python title="database_urls.py"
+import environ
+
+urls = {
+    "local sqlite": "sqlite:///db.sqlite3",
+    "postgres": "postgres://shop:s3cret@db.internal:5432/shoplite?sslmode=require&connect_timeout=5",
+    "mysql": "mysql://shop:s3cret@mysql.internal:3306/shoplite?charset=utf8mb4",
+}
+for label, url in urls.items():
+    config = environ.Env.db_url_config(url)
+    shown = {k: config[k] for k in ("ENGINE", "NAME", "HOST", "PORT") if config.get(k)}
+    print(f"{label:<13} {shown} options={config.get('OPTIONS', {})}")
+```
+
+```text title="Output"
+local sqlite  {'ENGINE': 'django.db.backends.sqlite3', 'NAME': 'db.sqlite3'} options={}
+postgres      {'ENGINE': 'django.db.backends.postgresql', 'NAME': 'shoplite', 'HOST': 'db.internal', 'PORT': 5432} options={'sslmode': 'require', 'connect_timeout': 5}
+mysql         {'ENGINE': 'django.db.backends.mysql', 'NAME': 'shoplite', 'HOST': 'mysql.internal', 'PORT': 3306} options={'charset': 'utf8mb4'}
+```
+
+- The scheme picks the backend (`postgres://` → `django.db.backends.postgresql`, `mysql://` →
+  `django.db.backends.mysql`).
+- Query parameters become driver `OPTIONS`: `sslmode=require` makes psycopg insist on TLS;
+  `charset=utf8mb4` gives MySQL full Unicode (including emoji), which plain `utf8` doesn't.
+- The password lives only in the environment variable. Rotating it is a deployment setting change,
+  never a code change.
+
+## Variations
+
+### Case sensitivity and the SQL behind it
+
+```python postgres
+from playground import migrate, postgres_database, setup
+
+setup(DATABASES={"default": postgres_database()})
+
+from django.db import models
+
+
+class Customer(models.Model):
+    email = models.EmailField()
+
+
+migrate()
+Customer.objects.create(email="Ada@Example.com")
+print("exact:", Customer.objects.filter(email="ada@example.com").count())
+print("iexact:", Customer.objects.filter(email__iexact="ada@example.com").count())
+sql = str(Customer.objects.filter(email__icontains="EXAMPLE").query)
+print("icontains SQL:", sql[sql.index("WHERE"):])
+```
+
+```text title="Output"
+exact: 0
+iexact: 1
+icontains SQL: WHERE UPPER("shop_customer"."email"::text) LIKE UPPER(%EXAMPLE%)
+```
+
+PostgreSQL compares text case-sensitively, so emails must be normalised on the way in (lower-case the
+domain at least) or compared with `iexact`. On MySQL the first query would have found Ada, because its
+default collation ignores case: a uniqueness check that passes on one database can fail on the other.
+
+### Is my index used? A partial index and EXPLAIN
+
+```python postgres
+import re
+
+from playground import migrate, postgres_database, setup
+
+setup(DATABASES={"default": postgres_database()})
+
+from django.db import connection, models
+from django.db.models import Q
+
+
+class Order(models.Model):
+    email = models.EmailField()
+    status = models.CharField(max_length=10)
+
+    class Meta:
+        # Only pending orders are looked up by email, so only they need to be in the index.
+        indexes = [models.Index(fields=["email"], name="pending_email_idx", condition=Q(status="pending"))]
+
+
+migrate()
+Order.objects.bulk_create(
+    Order(email=f"user{n}@example.com", status="pending" if n % 20 == 0 else "paid") for n in range(5000)
+)
+with connection.cursor() as cursor:
+    cursor.execute("ANALYZE shop_order")  # refresh statistics, as autovacuum would
+
+
+def plan(queryset):
+    first_line = queryset.explain().splitlines()[0]
+    return re.sub(r"\s+\(cost=.*", "", first_line)  # drop the cost numbers
+
+
+print(plan(Order.objects.filter(status="pending", email="user20@example.com")))
+print(plan(Order.objects.filter(status="paid", email="user21@example.com")))
+```
+
+```text title="Output"
+Index Scan using pending_email_idx on shop_order
+Seq Scan on shop_order
+```
+
+The partial index holds only the 250 pending orders, so it's small and fast, and PostgreSQL uses it
+whenever the query's condition matches. Paid orders aren't in it, so that lookup scans the table. Use
+`explain()` like this whenever you add an index, and on any slow query.
+
+### JSON fields on JSONB
+
+```python postgres
+from playground import migrate, postgres_database, setup
+
+setup(DATABASES={"default": postgres_database()})
+
+from django.contrib.postgres.indexes import GinIndex
+from django.db import models
+
+
+class Event(models.Model):
+    name = models.CharField(max_length=50)
+    data = models.JSONField(default=dict)
+
+    class Meta:
+        indexes = [GinIndex(fields=["data"], name="event_data_gin")]
+
+
+migrate()
+Event.objects.bulk_create([
+    Event(name="signup", data={"plan": "pro", "tags": ["beta", "eu"], "seats": 5}),
+    Event(name="signup", data={"plan": "free", "tags": ["eu"]}),
+    Event(name="upgrade", data={"plan": "pro", "from": "free", "seats": 12}),
+])
+names = lambda qs: list(qs.order_by("id").values_list("name", "data__plan"))  # noqa: E731
+print("plan = pro:   ", names(Event.objects.filter(data__plan="pro")))
+print("has 'from':   ", names(Event.objects.filter(data__has_key="from")))
+print("tag contains: ", names(Event.objects.filter(data__tags__contains=["beta"])))
+print("seats > 10:   ", names(Event.objects.filter(data__seats__gt=10)))
+print("contains dict:", names(Event.objects.filter(data__contains={"plan": "free"})))
+```
+
+```text title="Output"
+plan = pro:    [('signup', 'pro'), ('upgrade', 'pro')]
+has 'from':    [('upgrade', 'pro')]
+tag contains:  [('signup', 'pro')]
+seats > 10:    [('upgrade', 'pro')]
+contains dict: [('signup', 'free')]
+```
+
+`JSONField` lets you filter inside documents with key lookups, `has_key` and containment, and on
+PostgreSQL the GIN index makes containment queries fast. Use it for genuinely flexible data
+(settings, event payloads); keep data you filter and join on all the time in real columns.
+
+### DISTINCT ON and transactional DDL
+
+```python postgres
+from playground import migrate, postgres_database, setup
+
+setup(DATABASES={"default": postgres_database()})
+
+from django.db import connection, models, transaction
+
+
+class Reading(models.Model):
+    sensor = models.CharField(max_length=10)
+    taken_at = models.IntegerField()
+    value = models.FloatField()
+
+
+migrate()
+Reading.objects.bulk_create(Reading(sensor=s, taken_at=t, value=v) for s, t, v in [
+    ("north", 1, 20.5), ("north", 2, 21.0), ("south", 1, 18.2), ("south", 3, 17.9), ("north", 3, 21.4)])
+latest = Reading.objects.order_by("sensor", "-taken_at").distinct("sensor")
+print("latest per sensor:", list(latest.values_list("sensor", "taken_at", "value")))
+
+try:
+    with transaction.atomic():  # what a migration does on PostgreSQL
+        with connection.cursor() as cursor:
+            cursor.execute("CREATE TABLE half_done (id int)")
+            cursor.execute("ALTER TABLE does_not_exist ADD COLUMN x int")
+except Exception as exc:
+    print("migration failed:", type(exc).__name__)
+print("half_done table left behind:", "half_done" in connection.introspection.table_names())
+```
+
+```text title="Output"
+latest per sensor: [('north', 3, 21.4), ('south', 3, 17.9)]
+migration failed: ProgrammingError
+half_done table left behind: False
+```
+
+`distinct("sensor")` (PostgreSQL's DISTINCT ON) keeps the first row per sensor in the given order: the
+latest reading, in one query. And because PostgreSQL can roll back schema changes, a failing migration
+leaves no half-created tables behind; on MySQL the `CREATE TABLE` would have stayed.
+
+### MySQL settings, for reference
+
+```python norun title="settings.py (MySQL)"
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.mysql",
+        "NAME": "shoplite",
+        "USER": env("MYSQL_USER"),
+        "PASSWORD": env("MYSQL_PASSWORD"),
+        "HOST": env("MYSQL_HOST"),
+        "PORT": 3306,
+        "OPTIONS": {
+            "charset": "utf8mb4",  # full Unicode
+            "init_command": "SET sql_mode='STRICT_TRANS_TABLES'",  # error instead of truncating data
+            "isolation_level": "read committed",
+        },
+    }
+}
+```
+
+Strict mode turns "silently cut this 300-character string to 255" into an error, which is what you
+want. Remember MySQL's case-insensitive default collation and non-transactional DDL when you write
+migrations and uniqueness rules.
+
+## Putting it together
+
+A job queue on PostgreSQL: several workers take jobs at the same time without ever taking the same
+one twice, thanks to `select_for_update(skip_locked=True)`, plus full-text search over job
+descriptions.
+
+```python postgres title="pg_job_queue.py"
+import threading
+
+from playground import migrate, postgres_database, setup
+
+setup(apps=["django.contrib.postgres"], DATABASES={"default": postgres_database()})
+
+from django.contrib.postgres.search import SearchQuery, SearchVector
+from django.db import connection, models, transaction
+
+
+class Job(models.Model):
+    description = models.CharField(max_length=200)
+    status = models.CharField(max_length=10, default="queued")
+    worker = models.CharField(max_length=10, blank=True)
+
+
+def take_next(worker_name):
+    with transaction.atomic():
+        job = (Job.objects.select_for_update(skip_locked=True)  # skip rows another worker holds
+               .filter(status="queued").order_by("id").first())
+        if job:
+            job.status, job.worker = "running", worker_name
+            job.save(update_fields=["status", "worker"])
+        return job
+
+
+migrate()
+Job.objects.bulk_create(Job(description=d) for d in [
+    "send invoice email to ada", "resize product photos", "send newsletter",
+    "rebuild search index", "send password reset email", "export monthly report"])
+
+taken = []
+
+
+def worker(name):
+    while job := take_next(name):
+        taken.append(job.pk)
+    connection.close()
+
+
+threads = [threading.Thread(target=worker, args=(f"w{n}",)) for n in range(3)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+print("jobs taken:", len(taken), "| duplicates:", len(taken) - len(set(taken)))
+print("still queued:", Job.objects.filter(status="queued").count())
+
+emails = Job.objects.annotate(search=SearchVector("description")).filter(search=SearchQuery("emails"))
+print("full-text 'emails':", list(emails.order_by("id").values_list("description", flat=True)))
+```
+
+```text title="Output"
+jobs taken: 6 | duplicates: 0
+still queued: 0
+full-text 'emails': ['send invoice email to ada', 'send password reset email']
+```
+
+Three workers raced over six jobs and no job was taken twice: each locked the row it picked, and the
+others skipped locked rows instead of waiting. That's how Celery-free work queues and "claim the next
+ticket" features are built on PostgreSQL. Full-text search matched "email" for the query "emails"
+because it compares word stems, not raw text.
+
+## Common mistakes
+
+<Callout type="warning" title="Developing on SQLite, deploying on PostgreSQL or MySQL">
+  Case sensitivity, length limits, NULL ordering and locking all differ. Run PostgreSQL locally in
+  Docker and in CI (this module's ShopLite suite does), so differences show up before production.
+</Callout>
+
+- **A new connection per request at scale.** Set `CONN_MAX_AGE` (with health checks), use the
+  psycopg pool, or put PgBouncer in front.
+- **Indexes "just in case".** Each one slows writes. Add them for real queries and confirm with
+  `explain()`.
+- **MySQL with `utf8`.** It's a 3-byte subset; use `utf8mb4`.
+- **Running `CREATE INDEX` on a huge, busy table in a normal migration.** It locks writes; use
+  `AddIndexConcurrently` (PostgreSQL) in a non-atomic migration.
+- **Credentials in settings files.** One `DATABASE_URL` from the environment, different per
+  environment.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: which driver package does Django need for PostgreSQL, and which for MySQL?"
+>
+  PostgreSQL: `psycopg` (version 3; `psycopg2` also works). MySQL: `mysqlclient` (recommended) or
+  `PyMySQL` (pure Python).
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: a uniqueness check on email passes in tests (SQLite) but users with 'Ada@x.com' and 'ada@x.com' both exist in PostgreSQL. Fix?"
+>
+  Normalise emails to lower case before saving, and enforce it in the database with a unique
+  constraint on `Lower("email")` (a functional unique constraint), or use the `citext` type.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: how do you check whether a query uses an index?">
+  `print(queryset.explain())` (or `explain(analyze=True)` on PostgreSQL to run it), and look for
+  `Index Scan` versus `Seq Scan`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: several workers must claim jobs from one table without double-processing. What ORM call?"
+>
+  `Job.objects.select_for_update(skip_locked=True).filter(status="queued").order_by("id").first()`
+  inside `transaction.atomic()`, then mark the job taken before committing.
+</Reveal>
+
+<KeyTakeaways>
+
+- One `DATABASE_URL`, parsed into `DATABASES`; the right driver installed; credentials only in the
+  environment.
+- Reuse connections (`CONN_MAX_AGE`, psycopg pool, PgBouncer).
+- Know the differences: case sensitivity, length enforcement, transactional DDL, NULL ordering,
+  locking.
+- PostgreSQL adds JSONB lookups, GIN and partial indexes, DISTINCT ON, full-text search and
+  SKIP LOCKED queues.
+- Check plans with `explain()` before and after adding indexes.
+
+</KeyTakeaways>

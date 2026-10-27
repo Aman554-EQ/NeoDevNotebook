@@ -49,6 +49,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm verify:code
+        env:
+          # Lets the PostgreSQL code samples run (each creates and drops its own database).
+          VERIFY_POSTGRES_URL: postgres://neo:neo_local_dev@localhost:5434/neodevnotebook
       # Every guided project's own test suite (ShopLite also against PostgreSQL).
       - run: pnpm test:projects
         env:

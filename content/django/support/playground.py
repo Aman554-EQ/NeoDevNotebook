@@ -96,6 +96,45 @@ def setup(*, apps=(), templates=None, middleware=None, script_tags=False, **over
     django.setup()
 
 
+def postgres_database():
+    """A brand-new PostgreSQL database for one example, dropped again when the script ends.
+
+    Reads the server from the DATABASE_URL environment variable, e.g.
+    postgres://user:password@localhost:5432/postgres. Use it as
+    setup(DATABASES={"default": postgres_database()}). Your existing databases are never touched.
+    Requires: python -m pip install "psycopg[binary]"
+    """
+    import atexit
+    import os
+    import uuid
+    from urllib.parse import urlsplit
+
+    import psycopg
+
+    url = os.environ["DATABASE_URL"]
+    server = urlsplit(url)
+    name = f"playground_{uuid.uuid4().hex[:10]}"
+    admin = psycopg.connect(url, autocommit=True)
+    admin.execute(f'CREATE DATABASE "{name}"')
+
+    def drop():
+        from django.db import connections
+
+        connections.close_all()
+        admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        admin.close()
+
+    atexit.register(drop)
+    return {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": name,
+        "USER": server.username,
+        "PASSWORD": server.password,
+        "HOST": server.hostname,
+        "PORT": server.port or 5432,
+    }
+
+
 def migrate():
     """Create the tables of Django's built-in apps and of every model defined so far."""
     from django.core.management import call_command
