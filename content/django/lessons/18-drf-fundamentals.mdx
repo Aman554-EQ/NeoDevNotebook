@@ -1,0 +1,539 @@
+---
+title: DRF fundamentals
+summary: Django REST Framework from first principles. Request and Response, serializers that validate input and shape output, ModelSerializer, field options, field-level and object-level validation (and the order they run in), saving with create and update, nested data, APIView and @api_view, and how DRF turns exceptions into proper API errors.
+estimatedMinutes: 25
+difficulty: medium
+section: REST APIs with DRF
+objectives:
+  - Explain what DRF adds to Django for building JSON APIs
+  - Validate input and shape output with Serializer and ModelSerializer
+  - Write field-level and object-level validation and know when each runs
+  - Create and update objects through serializers, including partial updates
+  - Build endpoints with APIView or @api_view that return correct status codes and errors
+prerequisites:
+  - Backend fundamentals & REST
+  - Forms & validation
+tags: [drf, api, serializers, validation, rest]
+---
+
+## Intuition: forms for JSON
+
+You already know the idea from lesson 13: a **form** turns untrusted input into clean data, field by
+field, and reports precise errors. A DRF **serializer** does the same for JSON, and it also works in
+the other direction: it turns model instances into JSON-ready dictionaries. Add views that parse
+requests, negotiate formats and convert exceptions into proper error responses, and you have Django
+REST Framework.
+
+## See it
+
+<HttpExchange
+  recording="drf-basics"
+  caption="One APIView and one ModelSerializer. Valid input becomes 201 with the saved object; invalid input becomes 400 with every problem listed under its field, including a unique check DRF copied from the model."
+/>
+
+## The precise rules
+
+**What DRF adds:** `Request` (`request.data` parses JSON, forms and files), `Response` (renders to
+JSON or the **browsable API**), serializers, generic views and ViewSets (lesson 19), authentication,
+permissions and throttling (lesson 20), pagination and filtering, and OpenAPI schema support
+(lesson 22). Install `djangorestframework` and add `"rest_framework"` to `INSTALLED_APPS`.
+
+**A serializer** declares fields. Input: `Serializer(data=request.data)` → `.is_valid()` →
+`.validated_data` (or `.errors`) → `.save()`. Output: `Serializer(instance).data` (with
+`many=True` for lists).
+
+**`ModelSerializer`** generates fields, validators (including `unique`) and default `create()`/
+`update()` from a model: `class Meta: model = Book; fields = [...]`. List fields explicitly.
+
+**Field options:** `read_only=True` (output only: ids, computed values), `write_only=True` (input
+only: passwords), `required=False`, `allow_null`, `default`, `source="author.name"` (read from
+another attribute), `extra_kwargs` in `Meta`. `SerializerMethodField` computes a read-only value
+with a `get_<name>()` method.
+
+**Validation order:** (1) each field converts and runs its validators, (2) `validate_<field>()`
+methods, (3) `validate(self, attrs)` for cross-field rules, (4) `Meta` validators (unique together).
+**Object-level `validate()` only runs if every field passed.** Raise
+`serializers.ValidationError` (a dict to attach errors to fields).
+
+**Saving:** `save()` calls `create(validated_data)` or, if the serializer was given an instance,
+`update(instance, validated_data)`. Pass server-side values as keyword arguments:
+`serializer.save(owner=request.user)`. `partial=True` allows PATCH-style updates with only some fields.
+
+**Views:** `APIView` (class, one method per HTTP verb) or `@api_view(["GET", "POST"])` (function).
+Both wrap the request, check authentication/permissions/throttles, and convert exceptions
+(`ValidationError` → 400, `NotAuthenticated` → 401, `PermissionDenied` → 403, `NotFound`/`Http404` →
+404, `ParseError` for bad JSON) into JSON responses. Use `rest_framework.status` constants
+(`status.HTTP_201_CREATED`).
+
+## Worked example
+
+A plain `Serializer` doing both jobs: validating input and shaping output.
+
+```python title="serializer_basics.py"
+import json
+from datetime import date
+
+from playground import setup
+
+setup(apps=["rest_framework"])
+
+from rest_framework import serializers
+
+
+class EventSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=60)
+    day = serializers.DateField()
+    seats = serializers.IntegerField(min_value=1, max_value=500)
+    public = serializers.BooleanField(default=True)
+    tags = serializers.ListField(child=serializers.CharField(), required=False)
+
+    def validate_title(self, value):
+        if value.isupper():
+            raise serializers.ValidationError("Please don't shout.")
+        return value.strip()
+
+
+incoming = {"title": " PyCon meetup ", "day": "2026-06-12", "seats": "40", "tags": ["python"]}
+s = EventSerializer(data=incoming)
+print(s.is_valid(), dict(s.validated_data))
+
+bad = EventSerializer(data={"title": "FREE PIZZA", "day": "tomorrow", "seats": 0})
+print(bad.is_valid(), json.dumps(bad.errors))
+
+event = {"title": "Sprint", "day": date(2026, 7, 1), "seats": 12, "public": False}
+print(EventSerializer(event).data)
+```
+
+```text title="Output"
+True {'title': 'PyCon meetup', 'day': datetime.date(2026, 6, 12), 'seats': 40, 'public': True, 'tags': ['python']}
+False {"title": ["Please don't shout."], "day": ["Date has wrong format. Use one of these formats instead: YYYY-MM-DD."], "seats": ["Ensure this value is greater than or equal to 1."]}
+{'title': 'Sprint', 'day': '2026-07-01', 'seats': 12, 'public': False}
+```
+
+- Input values were converted (`"40"` → `40`, `"2026-06-12"` → a `date`), defaults filled in
+  (`public=True`), and your `validate_title` stripped the spaces.
+- Every error is collected per field with a clear message; the `errors` dict is exactly what an API
+  returns in a `400` response.
+- In the other direction, `.data` turns Python values back into JSON-friendly ones (the date becomes
+  `"2026-07-01"`).
+
+## Variations
+
+### ModelSerializer with read-only, write-only and computed fields
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework"])
+
+from django.contrib.auth.models import User
+from django.db import models
+from rest_framework import serializers
+
+
+class Author(models.Model):
+    name = models.CharField(max_length=100)
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    author = models.ForeignKey(Author, on_delete=models.CASCADE)
+    pages = models.PositiveIntegerField()
+    secret_note = models.CharField(max_length=100, blank=True)
+
+
+class BookSerializer(serializers.ModelSerializer):
+    author_name = serializers.CharField(source="author.name", read_only=True)
+    reading_hours = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Book
+        fields = ["id", "title", "author", "author_name", "pages", "reading_hours", "secret_note"]
+        extra_kwargs = {"secret_note": {"write_only": True}}
+
+    def get_reading_hours(self, book) -> float:
+        return round(book.pages / 40, 1)  # about 40 pages an hour
+
+
+migrate()
+herbert = Author.objects.create(name="Frank Herbert")
+dune = Book.objects.create(title="Dune", author=herbert, pages=412, secret_note="signed copy")
+print(BookSerializer(dune).data)
+print(list(BookSerializer().fields))
+print({name: f.read_only for name, f in BookSerializer().fields.items() if f.read_only})
+```
+
+```text title="Output"
+{'id': 1, 'title': 'Dune', 'author': 1, 'author_name': 'Frank Herbert', 'pages': 412, 'reading_hours': 10.3}
+['id', 'title', 'author', 'author_name', 'pages', 'reading_hours', 'secret_note']
+{'id': True, 'author_name': True, 'reading_hours': True}
+```
+
+`author` is the related primary key (writable); `author_name` follows the relation for display;
+`reading_hours` is computed; `secret_note` can be sent but is never returned. The `id` is read-only
+automatically. Remember lesson 12: `source="author.name"` on a list needs `select_related("author")`.
+
+### Validation order: why validate() didn't run
+
+```python
+import json
+
+from playground import setup
+
+setup(apps=["rest_framework"])
+
+from rest_framework import serializers
+
+
+class SignupSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password = serializers.CharField(min_length=8, write_only=True)
+    confirm = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):  # cross-field: runs only if every field is valid
+        if attrs["password"] != attrs["confirm"]:
+            raise serializers.ValidationError({"confirm": "Passwords don't match."})
+        return attrs
+
+
+cases = {
+    "mismatch only": {"email": "ada@example.com", "password": "long-enough", "confirm": "other"},
+    "bad email + mismatch": {"email": "nope", "password": "long-enough", "confirm": "other"},
+}
+for label, data in cases.items():
+    s = SignupSerializer(data=data)
+    s.is_valid()
+    print(f"{label}: {json.dumps(s.errors)}")
+```
+
+```text title="Output"
+mismatch only: {"confirm": ["Passwords don't match."]}
+bad email + mismatch: {"email": ["Enter a valid email address."]}
+```
+
+In the second case only the email error appears: field errors stop validation before `validate()`.
+If both messages must show together, check one of them at field level (the Auth starter project
+validates the password in `validate_password` for exactly this reason).
+
+### Saving: create, update and partial update
+
+```python
+import json
+
+from playground import migrate, setup
+
+setup(apps=["rest_framework"])
+
+from django.contrib.auth.models import User
+from django.db import models
+from rest_framework import serializers
+
+
+class Note(models.Model):
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    title = models.CharField(max_length=60)
+    body = models.TextField(blank=True)
+
+
+class NoteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Note
+        fields = ["id", "title", "body"]
+
+
+migrate()
+ada = User.objects.create_user("ada")
+
+create = NoteSerializer(data={"title": "Groceries", "body": "milk"})
+create.is_valid(raise_exception=True)
+note = create.save(owner=ada)  # server-side values go into save(), not into the input
+print("created:", NoteSerializer(note).data, "| owner:", note.owner.username)
+
+full = NoteSerializer(note, data={"body": "eggs"})  # PUT semantics: title is required
+print("PUT without title:", full.is_valid(), json.dumps(full.errors))
+
+partial = NoteSerializer(note, data={"body": "milk, eggs"}, partial=True)  # PATCH semantics
+partial.is_valid(raise_exception=True)
+print("PATCH:", NoteSerializer(partial.save()).data)
+```
+
+```text title="Output"
+created: {'id': 1, 'title': 'Groceries', 'body': 'milk'} | owner: ada
+PUT without title: False {"title": ["This field is required."]}
+PATCH: {'id': 1, 'title': 'Groceries', 'body': 'milk, eggs'}
+```
+
+Passing an instance makes `save()` call `update()`; without one it calls `create()`. `partial=True`
+is what a PATCH request needs. Never let clients send `owner`: it comes from `request.user`.
+
+### Nested data in and out
+
+```python
+import json
+from decimal import Decimal
+
+from playground import migrate, setup
+
+setup(apps=["rest_framework"])
+
+from django.db import models, transaction
+from rest_framework import serializers
+
+
+class Order(models.Model):
+    customer = models.CharField(max_length=50)
+
+
+class Item(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")
+    product = models.CharField(max_length=50)
+    qty = models.PositiveIntegerField()
+
+
+class ItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Item
+        fields = ["product", "qty"]
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    items = ItemSerializer(many=True)
+
+    class Meta:
+        model = Order
+        fields = ["id", "customer", "items"]
+
+    def validate_items(self, items):
+        if not items:
+            raise serializers.ValidationError("An order needs at least one item.")
+        return items
+
+    @transaction.atomic
+    def create(self, validated_data):  # writable nesting needs your own create()
+        items = validated_data.pop("items")
+        order = Order.objects.create(**validated_data)
+        Item.objects.bulk_create(Item(order=order, **item) for item in items)
+        return order
+
+
+migrate()
+s = OrderSerializer(data={"customer": "ada", "items": [{"product": "Dune", "qty": 2}, {"product": "Emma", "qty": 1}]})
+s.is_valid(raise_exception=True)
+print(OrderSerializer(s.save()).data)
+empty = OrderSerializer(data={"customer": "bob", "items": []})
+print(empty.is_valid(), json.dumps(empty.errors))
+bad = OrderSerializer(data={"customer": "cy", "items": [{"product": "Dune", "qty": -1}]})
+print(bad.is_valid(), json.dumps(bad.errors))
+```
+
+```text title="Output"
+{'id': 1, 'customer': 'ada', 'items': [{'product': 'Dune', 'qty': 2}, {'product': 'Emma', 'qty': 1}]}
+False {"items": ["An order needs at least one item."]}
+False {"items": {"0": {"qty": ["Ensure this value is greater than or equal to 0."]}}}
+```
+
+Nested serializers validate every element and report errors with the element's position. DRF won't
+guess how to save nested writes, so `create()` is yours, wrapped in a transaction so an order is never
+saved without its items.
+
+### Function views with @api_view
+
+```python
+from playground import setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+})
+
+from django.test import Client
+from django.urls import path
+from rest_framework import status
+from rest_framework.decorators import api_view
+from rest_framework.exceptions import NotFound
+from rest_framework.response import Response
+
+TEMPS = {"paris": 18, "oslo": 6}
+
+
+@api_view(["GET", "PUT"])
+def temperature(request, city):
+    if city not in TEMPS:
+        raise NotFound(f"No data for {city}.")
+    if request.method == "PUT":
+        TEMPS[city] = int(request.data["celsius"])
+    return Response({"city": city, "celsius": TEMPS[city]}, status=status.HTTP_200_OK)
+
+
+urlpatterns = [path("temps/<str:city>/", temperature)]
+client = Client()
+print(client.get("/temps/paris/").json())
+print(client.put("/temps/oslo/", {"celsius": 9}, content_type="application/json").json())
+r = client.get("/temps/rome/")
+print(r.status_code, r.json())
+r = client.put("/temps/oslo/", "{not json", content_type="application/json")
+print(r.status_code, r.json())
+r = client.delete("/temps/oslo/")
+print(r.status_code, r.json())
+```
+
+```text title="Output"
+{'city': 'paris', 'celsius': 18}
+{'city': 'oslo', 'celsius': 9}
+404 {'detail': 'No data for rome.'}
+400 {'detail': 'JSON parse error - Expecting property name enclosed in double quotes: line 1 column 2 (char 1)'}
+405 {'detail': 'Method "DELETE" not allowed.'}
+```
+
+Raising `NotFound` produced a JSON `404`; malformed JSON became a `400` `ParseError`; an unlisted
+method became a `405`, all without writing error-handling code. `request.data` parsed the JSON body.
+(The `REST_FRAMEWORK` settings here turn off authentication and the browsable API to keep the demo
+small.)
+
+## Putting it together
+
+The Library project's serializers: a computed `available` field that uses an annotation when the
+view provides one, a read-only `author_name`, and field validators for the ISBN and the year:
+
+<ProjectFile project="library" path="catalog/serializers.py" />
+
+A runnable book endpoint with `APIView`: list and create on the collection, read, partial update and
+delete on an item, with consistent status codes.
+
+```python title="book_apiview.py"
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+})
+
+from django.db import models
+from django.shortcuts import get_object_or_404
+from django.test import Client
+from django.urls import path
+from rest_framework import serializers, status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    isbn = models.CharField(max_length=13, unique=True)
+    year = models.IntegerField()
+
+
+class BookSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Book
+        fields = ["id", "title", "isbn", "year"]
+
+    def validate_isbn(self, value):
+        if len(value) != 13 or not value.isdigit():
+            raise serializers.ValidationError("ISBN must be 13 digits.")
+        return value
+
+
+class BookList(APIView):
+    def get(self, request):
+        return Response(BookSerializer(Book.objects.order_by("id"), many=True).data)
+
+    def post(self, request):
+        serializer = BookSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class BookDetail(APIView):
+    def get(self, request, pk):
+        return Response(BookSerializer(get_object_or_404(Book, pk=pk)).data)
+
+    def patch(self, request, pk):
+        serializer = BookSerializer(get_object_or_404(Book, pk=pk), data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.save() and serializer.data)
+
+    def delete(self, request, pk):
+        get_object_or_404(Book, pk=pk).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+urlpatterns = [path("books/", BookList.as_view()), path("books/<int:pk>/", BookDetail.as_view())]
+migrate()
+c = Client()
+post = lambda data: c.post("/books/", data, content_type="application/json")  # noqa: E731
+print("create:", post({"title": "Dune", "isbn": "9780441172719", "year": 1965}).status_code)
+print("duplicate:", post({"title": "Dune 2", "isbn": "9780441172719", "year": 1965}).json())
+print("bad isbn:", post({"title": "X", "isbn": "12", "year": 2000}).json())
+r = c.patch("/books/1/", {"year": 1966}, content_type="application/json")
+print("patch:", r.status_code, r.json())
+print("list:", c.get("/books/").json())
+print("delete:", c.delete("/books/1/").status_code, "| then:", c.get("/books/1/").status_code)
+```
+
+```text title="Output"
+create: 201
+duplicate: {'isbn': ['book with this isbn already exists.']}
+bad isbn: {'isbn': ['ISBN must be 13 digits.']}
+patch: 200 {'id': 1, 'title': 'Dune', 'isbn': '9780441172719', 'year': 1966}
+list: [{'id': 1, 'title': 'Dune', 'isbn': '9780441172719', 'year': 1966}]
+delete: 204 | then: 404
+```
+
+This is already a correct API, but notice the repetition: every resource needs the same list, create,
+retrieve, update and delete plumbing. Lesson 19 replaces both classes with one `ModelViewSet` and a
+router.
+
+## Common mistakes
+
+<Callout type="warning" title="fields = '__all__' and mass assignment">
+  A serializer that accepts every model field lets clients set `is_staff`, `owner` or `price` by
+  adding them to the JSON. List fields explicitly, mark server-controlled ones `read_only`, and pass
+  them to `save(...)` instead.
+</Callout>
+
+- **Expecting `validate()` to run when a field is invalid.** It doesn't; move checks that must always
+  report to field level.
+- **`serializer.data` before `is_valid()`** on input serializers: `AssertionError`. Validate first.
+- **Forgetting `partial=True` for PATCH.** Required fields you didn't send fail validation.
+- **Nested writes without your own `create()`/`update()`.** DRF raises an error telling you to write
+  them; do it inside a transaction.
+- **Returning `Response(serializer.errors)` with status 200.** Use `raise_exception=True` or pass
+  `status=400`.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: how do you accept a password on signup but never return it?">
+  `password = serializers.CharField(write_only=True)` (or `extra_kwargs = {"password": {"write_only":
+  True}}`), and hash it in `create()` with `User.objects.create_user(...)`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: show the author's name in a book's JSON without allowing it to be changed."
+>
+  `author_name = serializers.CharField(source="author.name", read_only=True)` (and
+  `select_related("author")` in the view's queryset).
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: where do you put 'end date must be after start date'?">
+  In `validate(self, attrs)`, raising `ValidationError({"end": "..."})` so the error is attached to the
+  `end` field.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: how does the logged-in user become a note's owner?">
+  `serializer.save(owner=request.user)` in the view (or `perform_create` in a generic view), with
+  `owner` absent from the input fields.
+</Reveal>
+
+<KeyTakeaways>
+
+- DRF = serializers + API views + auth/permissions/throttling + pagination + schemas, on top of Django.
+- Serializers validate input (`is_valid`, `validated_data`, `errors`) and shape output (`.data`).
+- ModelSerializer: explicit `fields`, `read_only`/`write_only`, `source=`, `SerializerMethodField`.
+- Field validation first; `validate()` only when every field passed.
+- `save()` → `create()`/`update()`; pass server-side values to `save()`; `partial=True` for PATCH.
+- APIView/@api_view turn exceptions into correct JSON errors (400/401/403/404/405).
+
+</KeyTakeaways>

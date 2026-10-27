@@ -1,0 +1,554 @@
+---
+title: API authentication & permissions
+summary: Secure a DRF API. Session, token and JWT authentication (simplejwt access and refresh tokens, rotation, blacklisting, custom claims), why you get 401 or 403, built-in and custom permission classes, object-level permissions and their trap, combining permissions, and throttling with 429 and Retry-After.
+estimatedMinutes: 25
+difficulty: medium
+section: REST APIs with DRF
+objectives:
+  - Configure session, token and JWT authentication and explain when to use each
+  - Issue, refresh, rotate and revoke JWTs with simplejwt, including custom claims
+  - Write permission classes for roles and for object ownership, and combine them
+  - Rate-limit endpoints with throttles and return 429 with Retry-After
+prerequisites:
+  - Authentication & authorization
+  - A complete CRUD API
+tags: [drf, jwt, authentication, permissions, throttling, security]
+---
+
+## Intuition: the ID check, the guest list and the bouncer's patience
+
+Every API request passes three checkpoints, in this order:
+
+1. **Authentication**: who is this? (a session cookie, a token, a JWT). It never rejects by itself;
+   an unknown caller simply becomes anonymous.
+2. **Permissions**: may this caller do this, and to this object?
+3. **Throttling**: has this caller asked too often lately?
+
+DRF runs all three before your view code, so a view only ever runs for an allowed, not-too-greedy
+caller.
+
+## See it
+
+<HttpExchange
+  recording="jwt-flow"
+  caption="401 means 'I don't know who you are' (no token, bad token, wrong password); 403 means 'I know, and no' (Bob's note). The access token is short-lived; the refresh token gets a new one without the password."
+/>
+
+## The precise rules
+
+**Authentication classes** (`DEFAULT_AUTHENTICATION_CLASSES`, tried in order; the first that
+recognises the request wins):
+
+| Class                         | Client sends                                     | Good for                                 |
+| ----------------------------- | ------------------------------------------------ | ---------------------------------------- |
+| `SessionAuthentication`       | the session cookie (CSRF enforced)               | your own website's JavaScript            |
+| `TokenAuthentication`         | `Authorization: Token <key>` (a DB row per user) | simple server-to-server clients          |
+| simplejwt `JWTAuthentication` | `Authorization: Bearer <access>`                 | mobile apps, SPAs, other services        |
+| `BasicAuthentication`         | username:password on every request               | tests and internal tools over HTTPS only |
+
+**simplejwt** gives you `TokenObtainPairView` (password → access + refresh), `TokenRefreshView`
+(refresh → new access), `TokenBlacklistView` (revoke a refresh token). Settings: `ACCESS_TOKEN_LIFETIME`
+(minutes), `REFRESH_TOKEN_LIFETIME` (days), `ROTATE_REFRESH_TOKENS` + `BLACKLIST_AFTER_ROTATION`
+(each refresh token works once), `SIGNING_KEY` (from the environment). Add custom claims by
+subclassing `TokenObtainPairSerializer.get_token()`.
+
+**401 or 403?** No or bad credentials → `401 Unauthorized` **if** the first authentication class can
+send a `WWW-Authenticate` challenge (Token, JWT, Basic); with only `SessionAuthentication` it's `403`.
+Authenticated but not allowed → `403 Forbidden`.
+
+**Permission classes** (`DEFAULT_PERMISSION_CLASSES` and `permission_classes` per view): `AllowAny`,
+`IsAuthenticated`, `IsAdminUser` (is_staff), `IsAuthenticatedOrReadOnly`, `DjangoModelPermissions`.
+Custom: subclass `BasePermission` and implement `has_permission(request, view)` (every request)
+and/or `has_object_permission(request, view, obj)` (called by `get_object()`, i.e. retrieve, update,
+destroy and detail actions). Combine with `&`, `|` and `~`.
+
+**The object-permission trap:** `has_object_permission` is **not** called for list endpoints or for
+objects you fetch yourself. Filter `get_queryset()` by the user as well.
+
+**Throttling** (`DEFAULT_THROTTLE_CLASSES` and `DEFAULT_THROTTLE_RATES`): `AnonRateThrottle` (by IP),
+`UserRateThrottle` (by user), `ScopedRateThrottle` (`throttle_scope = "login"`). Rates like
+`"5/minute"`, `"1000/day"`. Exceeding one gives `429 Too Many Requests` with `Retry-After`. Counters
+live in the cache, so use a shared cache (Redis) in production.
+
+## Worked example
+
+simplejwt end to end: log in, call a protected endpoint, refresh, and see what's inside the access
+token.
+
+```python title="jwt_basics.py"
+from playground import migrate, setup
+
+setup(
+    apps=["rest_framework", "rest_framework_simplejwt"],
+    REST_FRAMEWORK={
+        "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework_simplejwt.authentication.JWTAuthentication"],
+        "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+        "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    },
+    SIMPLE_JWT={"SIGNING_KEY": "fake-jwt-key-change-me-abcdefghijklmnopqrstuvwxyz0123456789"},
+)
+
+import jwt
+from django.contrib.auth.models import User
+from django.test import Client
+from django.urls import path
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+
+@api_view(["GET"])
+def me(request):
+    return Response({"username": request.user.username})
+
+
+urlpatterns = [path("token/", TokenObtainPairView.as_view()), path("token/refresh/", TokenRefreshView.as_view()),
+               path("me/", me)]
+migrate()
+User.objects.create_user("ada", password="correct-horse-battery")
+c = Client()
+
+pair = c.post("/token/", {"username": "ada", "password": "correct-horse-battery"}).json()
+print("got:", sorted(pair))
+claims = jwt.decode(pair["access"], options={"verify_signature": False})  # anyone can read it
+print("claims:", sorted(claims), "| type:", claims["token_type"], "| lifetime:", claims["exp"] - claims["iat"], "s")
+
+print("no token:", c.get("/me/").status_code)
+print("with token:", c.get("/me/", headers={"Authorization": f"Bearer {pair['access']}"}).json())
+fresh = c.post("/token/refresh/", {"refresh": pair["refresh"]}).json()
+print("refreshed:", sorted(fresh), "| new access differs:", fresh["access"] != pair["access"])
+print("refresh token as access:", c.get("/me/", headers={"Authorization": f"Bearer {pair['refresh']}"}).status_code)
+```
+
+```text title="Output"
+got: ['access', 'refresh']
+claims: ['exp', 'iat', 'jti', 'token_type', 'user_id'] | type: access | lifetime: 300 s
+no token: 401
+with token: {'username': 'ada'}
+refreshed: ['access'] | new access differs: True
+refresh token as access: 401
+```
+
+- The password is sent once; afterwards the client sends `Authorization: Bearer <access>`.
+- The access token carries `user_id`, its type, a unique `jti` and an expiry: five minutes by
+  default (300 s). Decoding without verifying shows anyone can **read** it.
+- A refresh token can't be used as an access token: simplejwt checks `token_type`.
+
+## Variations
+
+### Custom claims
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework", "rest_framework_simplejwt"],
+      SIMPLE_JWT={"SIGNING_KEY": "fake-jwt-key-change-me-abcdefghijklmnopqrstuvwxyz0123456789"})
+
+import jwt
+from django.contrib.auth.models import User
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+
+
+class ShopTokenSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        token["role"] = "staff" if user.is_staff else "customer"  # small, non-secret facts only
+        return token
+
+
+migrate()
+User.objects.create_user("sam", password="pw-for-learning-123", is_staff=True)
+s = ShopTokenSerializer(data={"username": "sam", "password": "pw-for-learning-123"})
+s.is_valid(raise_exception=True)
+access = s.validated_data["access"]
+print(jwt.decode(access, options={"verify_signature": False})["role"])
+```
+
+```text title="Output"
+staff
+```
+
+Use the serializer in a `TokenObtainPairView` subclass (`serializer_class = ShopTokenSerializer`) or the
+`TOKEN_OBTAIN_SERIALIZER` setting. Claims let clients show a role without another request, but the
+server should still check permissions from the database: a role change only reaches the token at the
+next login or refresh.
+
+### DRF's database tokens
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework", "rest_framework.authtoken"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.TokenAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+})
+
+from django.contrib.auth.models import User
+from django.test import Client
+from django.urls import path
+from rest_framework.authtoken.models import Token
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+urlpatterns = [path("whoami/", api_view(["GET"])(lambda request: Response(request.user.username)))]
+migrate()
+token = Token.objects.create(user=User.objects.create_user("billing-service"))
+print("key length:", len(token.key))
+c = Client()
+print(c.get("/whoami/", headers={"Authorization": f"Token {token.key}"}).json())
+token.delete()  # revoke instantly
+r = c.get("/whoami/", headers={"Authorization": f"Token {token.key}"})
+print(r.status_code, r["WWW-Authenticate"], r.json())
+```
+
+```text title="Output"
+key length: 40
+billing-service
+401 Token {'detail': 'Invalid token.'}
+```
+
+A DRF token is a random key stored in the database: easy to revoke (delete the row) but looked up on
+every request and never expiring by itself. Fine for a handful of internal service accounts; JWTs scale
+better for many end users.
+
+### Object permissions, and the list trap
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+})
+
+from django.contrib.auth.models import User
+from django.db import models
+from django.test import Client
+from rest_framework import permissions, routers, serializers, viewsets
+
+
+class Doc(models.Model):
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    text = models.CharField(max_length=50)
+
+
+class IsOwnerOrReadOnly(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        return request.method in permissions.SAFE_METHODS or obj.owner == request.user
+
+
+class DocSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Doc
+        fields = ["id", "text"]
+
+
+class DocViewSet(viewsets.ModelViewSet):
+    queryset = Doc.objects.order_by("id")  # every doc: on purpose, to show the trap
+    serializer_class = DocSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrReadOnly]
+
+
+router = routers.DefaultRouter()
+router.register("docs", DocViewSet)
+urlpatterns = router.urls
+migrate()
+ada, bob = User.objects.create_user("ada"), User.objects.create_user("bob")
+Doc.objects.create(owner=ada, text="ada's private plan")
+c = Client()
+c.force_login(bob)
+print("bob edits ada's doc:", c.patch("/docs/1/", {"text": "x"}, content_type="application/json").status_code)
+print("bob reads it:", c.get("/docs/1/").status_code)
+print("bob lists docs:", c.get("/docs/").json(), "<- the list never calls has_object_permission")
+```
+
+```text title="Output"
+bob edits ada's doc: 403
+bob reads it: 200
+bob lists docs: [{'id': 1, 'text': "ada's private plan"}] <- the list never calls has_object_permission
+```
+
+Edits are blocked (`403`), but reads and the list are not: here that's what `ReadOnly` asked for, yet
+it shows the trap clearly. Object permissions run only inside `get_object()`. If documents are
+private, filter `get_queryset()` by `owner=self.request.user` and keep the object permission as a
+second line of defence.
+
+### Combining permissions, and 401 vs 403
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework", "rest_framework_simplejwt"], REST_FRAMEWORK={
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+}, SIMPLE_JWT={"SIGNING_KEY": "fake-jwt-key-change-me-abcdefghijklmnopqrstuvwxyz0123456789"})
+
+from django.contrib.auth.models import Group, User
+from django.test import Client
+from django.urls import path
+from rest_framework import permissions
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.tokens import AccessToken
+
+
+class IsSupport(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return request.user.groups.filter(name="support").exists()
+
+
+class Report(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [permissions.IsAuthenticated & (permissions.IsAdminUser | IsSupport)]
+
+    def get(self, request):
+        return Response({"report": "ok"})
+
+
+class SessionOnly(Report):
+    authentication_classes = [SessionAuthentication]
+
+
+urlpatterns = [path("report/", Report.as_view()), path("session-report/", SessionOnly.as_view())]
+migrate()
+support = Group.objects.create(name="support")
+users = {"customer": User.objects.create_user("cy"), "staff": User.objects.create_user("sam", is_staff=True)}
+users["support"] = User.objects.create_user("sue")
+users["support"].groups.add(support)
+c = Client()
+print("anonymous, JWT view:", c.get("/report/").status_code, "| session view:", c.get("/session-report/").status_code)
+for role, user in users.items():
+    bearer = {"Authorization": f"Bearer {AccessToken.for_user(user)}"}
+    print(f"{role:<8}", c.get("/report/", headers=bearer).status_code)
+```
+
+```text title="Output"
+anonymous, JWT view: 401 | session view: 403
+customer 403
+staff    200
+support  200
+```
+
+`IsAuthenticated & (IsAdminUser | IsSupport)` reads like the rule it implements. An anonymous call gets
+`401` from the JWT view (it can send a `WWW-Authenticate: Bearer` challenge) but `403` from the
+session-only view (cookies can't be "challenged"). Clients should treat both as "not allowed", and
+your tests should assert the exact code your configuration produces.
+
+### Throttling: 429 and Retry-After
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_THROTTLE_RATES": {"login": "3/minute"},
+})
+
+from django.test import Client
+from django.urls import path
+from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.views import APIView
+
+
+class Login(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"  # 3 attempts per minute per client IP
+
+    def post(self, request):
+        return Response({"detail": "wrong password"}, status=401)
+
+
+urlpatterns = [path("login/", Login.as_view())]
+c = Client()
+codes = [c.post("/login/").status_code for _ in range(4)]
+print(codes)
+r = c.post("/login/")
+print(r.status_code, "Retry-After" in r, r.json()["detail"].split(".")[0])
+other_ip = Client(REMOTE_ADDR="198.51.100.7")
+print("another client:", other_ip.post("/login/").status_code)
+```
+
+```text title="Output"
+[401, 401, 401, 429]
+429 True Request was throttled
+another client: 401
+```
+
+Three guesses a minute makes brute-forcing a password hopeless. Each client (by IP here, by user for
+`UserRateThrottle`) has its own counter. Behind a proxy, configure `NUM_PROXIES` so DRF reads the real
+client IP from `X-Forwarded-For` instead of throttling everyone as one.
+
+## Putting it together
+
+The Auth starter API: register with password validation and its own throttle, JWT login with rotation
+and blacklisting, logout by blacklisting the refresh token, and a `me` endpoint where the email can't be
+changed:
+
+<ProjectFiles
+  project="auth-starter"
+  paths="accounts/api.py accounts/api_urls.py accounts/tests/test_api.py"
+/>
+
+A runnable store API with three roles enforced at every layer: JWT authentication, role and ownership
+permissions, a scoped queryset and a throttle on order creation.
+
+```python title="secure_orders_api.py"
+from playground import migrate, setup
+
+setup(apps=["rest_framework", "rest_framework_simplejwt"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework_simplejwt.authentication.JWTAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_THROTTLE_RATES": {"orders": "2/minute"},
+}, SIMPLE_JWT={"SIGNING_KEY": "fake-jwt-key-change-me-abcdefghijklmnopqrstuvwxyz0123456789"})
+
+from django.contrib.auth.models import User
+from django.db import models
+from django.test import Client
+from django.urls import path
+from rest_framework import permissions, routers, serializers, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
+from rest_framework_simplejwt.views import TokenObtainPairView
+
+
+class Order(models.Model):
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    item = models.CharField(max_length=50)
+    status = models.CharField(max_length=10, default="pending")
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = ["id", "item", "status"]
+        read_only_fields = ["status"]
+
+
+class IsOwnerOrStaff(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        return request.user.is_staff or obj.owner_id == request.user.id
+
+
+class OrderViewSet(viewsets.ModelViewSet):
+    serializer_class = OrderSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrStaff]
+
+    def get_queryset(self):  # layer 1: you only ever see your own orders (staff: all)
+        orders = Order.objects.order_by("id")
+        return orders if self.request.user.is_staff else orders.filter(owner=self.request.user)
+
+    def get_throttles(self):
+        self.throttle_scope = "orders" if self.action == "create" else None  # only creating is limited
+        return [ScopedRateThrottle()]
+
+    def perform_create(self, serializer):
+        serializer.save(owner=self.request.user)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
+    def ship(self, request, pk=None):
+        order = self.get_object()
+        order.status = "shipped"
+        order.save(update_fields=["status"])
+        return Response(OrderSerializer(order).data)
+
+
+router = routers.DefaultRouter()
+router.register("orders", OrderViewSet, basename="order")
+urlpatterns = [path("token/", TokenObtainPairView.as_view()), *router.urls]
+migrate()
+for name, staff in [("ada", False), ("bob", False), ("sam", True)]:
+    User.objects.create_user(name, password=f"{name}-password-123", is_staff=staff)
+c = Client()
+
+
+def as_user(name):
+    access = c.post("/token/", {"username": name, "password": f"{name}-password-123"}).json()["access"]
+    return {"Authorization": f"Bearer {access}"}
+
+
+ada, bob, sam = as_user("ada"), as_user("bob"), as_user("sam")
+json = "application/json"
+print("ada orders:", [c.post("/orders/", {"item": i}, content_type=json, headers=ada).status_code for i in ["Dune", "Emma", "Chess"]])
+print("ada sees:", [o["item"] for o in c.get("/orders/", headers=ada).json()])
+print("bob reads ada's:", c.get("/orders/1/", headers=bob).status_code, "| bob ships:", c.post("/orders/1/ship/", headers=bob).status_code)
+print("ada ships her own:", c.post("/orders/1/ship/", headers=ada).status_code)
+print("staff ships:", c.post("/orders/1/ship/", headers=sam).json())
+print("staff sees all:", len(c.get("/orders/", headers=sam).json()))
+```
+
+```text title="Output"
+ada orders: [201, 201, 429]
+ada sees: ['Dune', 'Emma']
+bob reads ada's: 404 | bob ships: 403
+ada ships her own: 403
+staff ships: {'id': 1, 'item': 'Dune', 'status': 'shipped'}
+staff sees all: 2
+```
+
+Ada's third order hit the throttle (`429`). Bob can't even see Ada's order (`404` from the scoped
+queryset) and can't ship (`403` from `IsAdminUser`, checked before the object is looked up). Ada can't
+ship her own order either: shipping is staff work. Defence in depth means each rule is enforced in one
+obvious place, and the layers back each other up.
+
+## Common mistakes
+
+<Callout type="warning" title="Relying on has_object_permission for privacy">
+  List views and any object you load yourself skip it. Scope `get_queryset()` to the user; use
+  object permissions for finer rules on top.
+</Callout>
+
+- **Long-lived access tokens** (days). Keep them short (5–15 minutes) and refresh; rotate and blacklist
+  refresh tokens.
+- **The JWT signing key hard-coded or shared with everything.** Read `SIGNING_KEY` from the
+  environment; rotating it logs every client out.
+- **`AllowAny` by accident.** Make `IsAuthenticated` the default and open endpoints explicitly.
+- **Throttles with the local-memory cache on several servers.** Each server counts separately; use
+  Redis.
+- **Telling users which half of a login failed** ("no such user"): one message for both.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: authenticated but not allowed: which status, and which method decides it for one object?"
+>
+  `403 Forbidden`; `has_object_permission(request, view, obj)`, called by `get_object()`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: write a permission for 'read: anyone; write: staff only'.">
+  `return request.method in SAFE_METHODS or (request.user and request.user.is_staff)` in
+  `has_permission` (the Library project's `IsStaffOrReadOnly`).
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: a user's access token leaked. What limits the damage, and how do you stop it now?"
+>
+  Its short lifetime limits the window. To stop it immediately: blacklist the user's refresh tokens
+  and, if needed, rotate the signing key (logs everyone out) or deactivate the account
+  (`is_active=False`).
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: limit login attempts to 5 per minute per IP.">
+  A view with `throttle_classes = [ScopedRateThrottle]`, `throttle_scope = "login"`, and `"login":
+  "5/minute"` in `DEFAULT_THROTTLE_RATES`.
+</Reveal>
+
+<KeyTakeaways>
+
+- Authentication identifies, permissions decide, throttles limit, in that order, before your view.
+- Sessions for your own site, JWT (simplejwt) for apps and services, DB tokens for a few internal
+  clients.
+- Short access tokens + rotated, blacklistable refresh tokens; signing key from the environment.
+- `has_permission` per request, `has_object_permission` per object (only via `get_object()`); scope
+  querysets anyway; combine with `&`, `|`, `~`.
+- Throttle logins and expensive endpoints; 429 with Retry-After; shared cache in production.
+
+</KeyTakeaways>

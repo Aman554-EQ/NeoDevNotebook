@@ -1,0 +1,655 @@
+---
+title: A complete CRUD API
+summary: Build full resources with very little code. Generic API views, ViewSets and routers, the six actions (list, create, retrieve, update, partial_update, destroy), per-user querysets and per-action serializers, extra actions, and pagination, filtering, search and ordering done properly.
+estimatedMinutes: 25
+difficulty: medium
+section: REST APIs with DRF
+objectives:
+  - Build CRUD endpoints with generic views and with a ModelViewSet plus a router
+  - Customise ViewSets with get_queryset, get_serializer_class, perform_create and extra actions
+  - Paginate with page numbers, limit/offset or cursors, and cap the page size
+  - Add filtering, search and ordering with explicit whitelists
+prerequisites:
+  - DRF fundamentals
+  - Relationships & efficient queries
+tags: [drf, viewsets, routers, pagination, filtering, crud]
+---
+
+## Intuition: one class, a whole resource
+
+Almost every resource needs the same five things: list, create, read, update, delete. DRF packages
+that pattern. A **ViewSet** holds the code for a resource, and a **router** generates its URLs. You
+describe _what_ differs (which objects, which serializer, who may do what) and inherit the rest.
+
+## See it
+
+<HttpExchange
+  recording="crud-api"
+  caption="One ModelViewSet registered on a router serves every request here: paginated lists, filters, search, ordering, create, retrieve, partial update and delete."
+/>
+
+## The precise rules
+
+**Generic views** combine mixins: `ListCreateAPIView` (GET list, POST) and
+`RetrieveUpdateDestroyAPIView` (GET one, PUT, PATCH, DELETE). Configure with `queryset`,
+`serializer_class`, `permission_classes`, `lookup_field`.
+
+**ViewSets** group the actions of one resource; `ModelViewSet` has all six:
+
+| Action           | Method & URL          | Status    |
+| ---------------- | --------------------- | --------- |
+| `list`           | `GET /books/`         | 200       |
+| `create`         | `POST /books/`        | 201       |
+| `retrieve`       | `GET /books/{pk}/`    | 200 / 404 |
+| `update`         | `PUT /books/{pk}/`    | 200       |
+| `partial_update` | `PATCH /books/{pk}/`  | 200       |
+| `destroy`        | `DELETE /books/{pk}/` | 204       |
+
+`ReadOnlyModelViewSet` has list and retrieve only; or compose `GenericViewSet` with the mixins you
+want (`CreateModelMixin`, `ListModelMixin`...).
+
+**Routers:** `router = DefaultRouter(); router.register("books", BookViewSet)` then
+`urlpatterns = router.urls`. Route names are `<basename>-list` and `<basename>-detail`
+(`reverse("book-detail", args=[7])`). `DefaultRouter` also adds an API root page.
+
+**Customisation hooks:**
+
+- `get_queryset()`: per-user data (`Order.objects.filter(user=self.request.user)`), and the place
+  for `select_related`/`prefetch_related`.
+- `get_serializer_class()`: different serializers per `self.action` (a lighter one for `list`).
+- `perform_create(serializer)` / `perform_update` / `perform_destroy`: set server-side fields
+  (`serializer.save(owner=self.request.user)`) or call a service.
+- `@action(detail=True, methods=["post"])` adds routes like `POST /orders/{pk}/cancel/`;
+  `detail=False` adds collection routes like `GET /books/recent/`.
+
+**Pagination** (`DEFAULT_PAGINATION_CLASS`, `PAGE_SIZE`): `PageNumberPagination` (`?page=2`,
+optional `?page_size=` with `max_page_size`), `LimitOffsetPagination` (`?limit=20&offset=40`),
+`CursorPagination` (opaque `?cursor=`, stable for feeds, requires an ordering field). Always cap the
+page size.
+
+**Filtering:** `django-filter`'s `DjangoFilterBackend` with `filterset_fields` (exact matches) or a
+`FilterSet` class (ranges, custom lookups); `SearchFilter` with `search_fields` (`?search=`);
+`OrderingFilter` with `ordering_fields` (`?ordering=-year`) and a default `ordering`. Only listed
+fields can be filtered or sorted on.
+
+## Worked example
+
+A complete resource in about ten lines: a `ModelViewSet`, a router, and the URLs it generated.
+
+```python title="viewset_router.py"
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+})
+
+from django.db import models
+from django.test import Client
+from django.urls import reverse
+from rest_framework import routers, serializers, viewsets
+
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    year = models.IntegerField()
+
+
+class BookSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Book
+        fields = ["id", "title", "year"]
+
+
+class BookViewSet(viewsets.ModelViewSet):
+    queryset = Book.objects.order_by("id")
+    serializer_class = BookSerializer
+
+
+router = routers.DefaultRouter()
+router.register("books", BookViewSet)
+urlpatterns = router.urls
+
+print(sorted({p.name for p in router.urls}))  # the route names the router generated
+migrate()
+c = Client()
+json = "application/json"
+print(c.post("/books/", {"title": "Dune", "year": 1965}, content_type=json).status_code)
+print(c.get(reverse("book-list")).json())
+print(c.put(reverse("book-detail", args=[1]), {"title": "Dune", "year": 1966}, content_type=json).json())
+print(c.patch("/books/1/", {"title": "Dune (revised)"}, content_type=json).json())
+print(c.delete("/books/1/").status_code, c.get("/books/1/").status_code)
+```
+
+```text title="Output"
+['api-root', 'book-detail', 'book-list']
+201
+[{'id': 1, 'title': 'Dune', 'year': 1965}]
+{'id': 1, 'title': 'Dune', 'year': 1966}
+{'id': 1, 'title': 'Dune (revised)', 'year': 1966}
+204 404
+```
+
+- `register("books", ...)` produced `books/` (list) and `books/<pk>/` (detail) routes named
+  `book-list` and `book-detail` (from the model name), so `reverse()` works as usual.
+  `DefaultRouter` also added `api-root`, a page listing every registered resource.
+- PUT replaced the whole object (every field required); PATCH changed one field.
+- Every status code (201, 200, 204, 404) came from the inherited actions.
+
+## Variations
+
+### Generic views and perform_create
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+})
+
+from django.contrib.auth.models import User
+from django.db import models
+from django.test import Client
+from django.urls import path
+from rest_framework import generics, serializers
+
+
+class Note(models.Model):
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    text = models.CharField(max_length=100)
+
+
+class NoteSerializer(serializers.ModelSerializer):
+    owner = serializers.CharField(source="owner.username", read_only=True)
+
+    class Meta:
+        model = Note
+        fields = ["id", "text", "owner"]
+
+
+class NoteList(generics.ListCreateAPIView):
+    serializer_class = NoteSerializer
+
+    def get_queryset(self):
+        return Note.objects.filter(owner=self.request.user).order_by("id")
+
+    def perform_create(self, serializer):
+        serializer.save(owner=self.request.user)
+
+
+class NoteDetail(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = NoteSerializer
+
+    def get_queryset(self):
+        return Note.objects.filter(owner=self.request.user)
+
+
+urlpatterns = [path("notes/", NoteList.as_view()), path("notes/<int:pk>/", NoteDetail.as_view())]
+migrate()
+ada, bob = User.objects.create_user("ada"), User.objects.create_user("bob")
+c = Client()
+c.force_login(ada)
+print(c.post("/notes/", {"text": "ada's note", "owner": "bob"}, content_type="application/json").json())
+c.force_login(bob)
+print("bob's list:", c.get("/notes/").json(), "| bob opens note 1:", c.get("/notes/1/").status_code)
+```
+
+```text title="Output"
+{'id': 1, 'text': "ada's note", 'owner': 'ada'}
+bob's list: [] | bob opens note 1: 404
+```
+
+The client tried to set `owner` to bob; it's read-only, so `perform_create` set it from
+`request.user`. Because `get_queryset()` only contains the caller's notes, Bob can neither list nor
+open Ada's note: object-level safety for free.
+
+### Pagination styles
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+})
+
+from django.db import models
+from django.test import Client
+from django.urls import path
+from rest_framework import generics, pagination, serializers
+
+
+class Post(models.Model):
+    title = models.CharField(max_length=20)
+    created = models.IntegerField()  # a sortable "timestamp"
+
+
+class PostSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Post
+        fields = ["title"]
+
+
+class Pages(pagination.PageNumberPagination):
+    page_size, page_size_query_param, max_page_size = 2, "page_size", 3
+
+
+class Feed(pagination.CursorPagination):
+    page_size, ordering = 2, "-created"
+
+
+def view(pager):
+    return generics.ListAPIView.as_view(queryset=Post.objects.order_by("id"),
+                                        serializer_class=PostSerializer, pagination_class=pager)
+
+
+urlpatterns = [path("pages/", view(Pages)), path("offset/", view(pagination.LimitOffsetPagination)),
+               path("feed/", view(Feed))]
+migrate()
+Post.objects.bulk_create(Post(title=f"post {n}", created=n) for n in range(1, 8))
+c = Client()
+page = c.get("/pages/", {"page": 2}).json()
+print("page number:", page["count"], [p["title"] for p in page["results"]], page["next"])
+print("size capped:", len(c.get("/pages/", {"page_size": 100}).json()["results"]))
+off = c.get("/offset/", {"limit": 3, "offset": 4}).json()
+print("limit/offset:", [p["title"] for p in off["results"]], off["next"])
+first = c.get("/feed/").json()
+print("cursor:", [p["title"] for p in first["results"]], "| next has a cursor:", "cursor=" in first["next"])
+second = c.get(first["next"].replace("http://testserver", "")).json()
+print("cursor page 2:", [p["title"] for p in second["results"]], "| no count:", "count" not in second)
+```
+
+```text title="Output"
+page number: 7 ['post 3', 'post 4'] http://testserver/pages/?page=3
+size capped: 3
+limit/offset: ['post 5', 'post 6', 'post 7'] None
+cursor: ['post 7', 'post 6'] | next has a cursor: True
+cursor page 2: ['post 5', 'post 4'] | no count: True
+```
+
+Page numbers suit UIs with numbered pages; limit/offset suits clients that compute their own windows;
+cursors suit infinite feeds (no duplicates when new posts arrive, constant-time deep pages, but no
+total count and no jumping to page 50). `max_page_size` capped the request for 100 rows at 3.
+
+### Filtering, search and ordering
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework", "django_filters"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+})
+
+import django_filters
+from django.db import models
+from django.test import Client
+from rest_framework import filters, routers, serializers, viewsets
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=50)
+    category = models.CharField(max_length=20)
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+
+class ProductFilter(django_filters.FilterSet):
+    min_price = django_filters.NumberFilter(field_name="price", lookup_expr="gte")
+    max_price = django_filters.NumberFilter(field_name="price", lookup_expr="lte")
+
+    class Meta:
+        model = Product
+        fields = ["category"]
+
+
+class ProductSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = ["name", "price"]
+
+
+class ProductViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
+    filter_backends = [django_filters.rest_framework.DjangoFilterBackend, filters.SearchFilter,
+                       filters.OrderingFilter]
+    filterset_class = ProductFilter
+    search_fields = ["name"]
+    ordering_fields = ["price", "name"]
+    ordering = ["name"]  # the default
+
+
+router = routers.DefaultRouter()
+router.register("products", ProductViewSet)
+urlpatterns = router.urls
+migrate()
+for name, cat, price in [("Dune", "books", "12.50"), ("Emma", "books", "8.00"),
+                         ("Chess set", "games", "30.00"), ("Dune board game", "games", "45.00")]:
+    Product.objects.create(name=name, category=cat, price=price)
+c = Client()
+names = lambda **q: [p["name"] for p in c.get("/products/", q).json()]  # noqa: E731
+print("category:   ", names(category="books"))
+print("price range:", names(min_price=10, max_price=40))
+print("search:     ", names(search="dune"))
+print("ordering:   ", names(ordering="-price"))
+print("combined:   ", names(category="games", search="dune", ordering="price"))
+print("not allowed:", names(ordering="id"), "<- unknown ordering fields are ignored")
+```
+
+```text title="Output"
+category:    ['Dune', 'Emma']
+price range: ['Chess set', 'Dune']
+search:      ['Dune', 'Dune board game']
+ordering:    ['Dune board game', 'Chess set', 'Dune', 'Emma']
+combined:    ['Dune board game']
+not allowed: ['Chess set', 'Dune', 'Dune board game', 'Emma'] <- unknown ordering fields are ignored
+```
+
+Each query parameter maps to a whitelisted field: `category` exactly, `min_price`/`max_price` as a
+range, `search` across `search_fields`, `ordering` among `ordering_fields`. Anything else falls back
+to the default ordering, so clients can't sort by columns you didn't intend to expose.
+
+### Per-action serializers and extra actions
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+})
+
+from django.db import models
+from django.test import Client
+from rest_framework import routers, serializers, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
+
+class Order(models.Model):
+    customer = models.CharField(max_length=50)
+    status = models.CharField(max_length=10, default="pending")
+    notes = models.TextField(blank=True)
+
+
+class OrderListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = ["id", "status"]
+
+
+class OrderDetailSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = ["id", "customer", "status", "notes"]
+        read_only_fields = ["status"]  # changed only through actions
+
+
+class OrderViewSet(viewsets.ModelViewSet):
+    queryset = Order.objects.order_by("id")
+
+    def get_serializer_class(self):
+        return OrderListSerializer if self.action == "list" else OrderDetailSerializer
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        order = self.get_object()
+        if order.status != "pending":
+            return Response({"detail": f"A {order.status} order can't be cancelled."},
+                            status=status.HTTP_409_CONFLICT)
+        order.status = "cancelled"
+        order.save(update_fields=["status"])
+        return Response(OrderDetailSerializer(order).data)
+
+    @action(detail=False)
+    def pending(self, request):
+        return Response(OrderListSerializer(self.get_queryset().filter(status="pending"), many=True).data)
+
+
+router = routers.DefaultRouter()
+router.register("orders", OrderViewSet)
+urlpatterns = router.urls
+migrate()
+Order.objects.create(customer="ada", notes="ring the bell")
+Order.objects.create(customer="bob")
+c = Client()
+print("list:", c.get("/orders/").json())
+print("detail:", c.get("/orders/1/").json())
+print("cancel:", c.post("/orders/1/cancel/").json())
+print("again:", c.post("/orders/1/cancel/").status_code)
+print("pending:", c.get("/orders/pending/").json())
+print("PATCH status ignored:", c.patch("/orders/2/", {"status": "shipped"}, content_type="application/json").json()["status"])
+```
+
+```text title="Output"
+list: [{'id': 1, 'status': 'pending'}, {'id': 2, 'status': 'pending'}]
+detail: {'id': 1, 'customer': 'ada', 'status': 'pending', 'notes': 'ring the bell'}
+cancel: {'id': 1, 'customer': 'ada', 'status': 'cancelled', 'notes': 'ring the bell'}
+again: 409
+pending: [{'id': 2, 'status': 'pending'}]
+PATCH status ignored: pending
+```
+
+A lighter list serializer keeps list responses small; the detail serializer has everything.
+State changes go through an explicit action (`POST /orders/1/cancel/`) with its own rules, while
+`status` stays read-only in normal updates. `detail=False` actions add collection-level routes.
+
+### Only the actions you want
+
+```python
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+})
+
+from django.db import models
+from django.test import Client
+from rest_framework import mixins, routers, serializers, viewsets
+
+
+class AuditEvent(models.Model):
+    message = models.CharField(max_length=100)
+
+
+class AuditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AuditEvent
+        fields = ["id", "message"]
+
+
+class AuditViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin,
+                   viewsets.GenericViewSet):
+    """An append-only log: create and read, never update or delete."""
+
+    queryset = AuditEvent.objects.order_by("id")
+    serializer_class = AuditSerializer
+
+
+router = routers.DefaultRouter()
+router.register("audit", AuditViewSet)
+urlpatterns = router.urls
+migrate()
+c = Client()
+c.post("/audit/", {"message": "user 7 exported data"}, content_type="application/json")
+print(c.get("/audit/1/").json())
+print("PUT:", c.put("/audit/1/", {"message": "edited"}, content_type="application/json").status_code,
+      "| DELETE:", c.delete("/audit/1/").status_code)
+```
+
+```text title="Output"
+{'id': 1, 'message': 'user 7 exported data'}
+PUT: 405 | DELETE: 405
+```
+
+Composing `GenericViewSet` with mixins gives exactly the actions the resource should have; anything
+else is a `405 Method Not Allowed`. An audit log that can't be edited through the API is a feature.
+
+## Putting it together
+
+The Library project's ViewSets and router: annotated, `select_related` querysets with explicit
+ordering, staff-only writes, filtering, search and ordering, members who only ever see their own
+loans, and a `return` action that refuses to run twice:
+
+<ProjectFiles project="library" paths="catalog/views.py catalog/urls.py config/settings.py" />
+
+Its tests check pagination, filters, permissions and the query budget (two queries for any page of
+books). A runnable task API built the same way:
+
+```python title="tasks_api.py"
+from playground import migrate, setup
+
+setup(apps=["rest_framework", "django_filters"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 3,
+    "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend",
+                                "rest_framework.filters.SearchFilter", "rest_framework.filters.OrderingFilter"],
+})
+
+from django.contrib.auth.models import User
+from django.db import connection, models
+from django.test import Client
+from django.test.utils import CaptureQueriesContext
+from rest_framework import routers, serializers, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
+
+class Project(models.Model):
+    name = models.CharField(max_length=50)
+
+
+class Task(models.Model):
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    project = models.ForeignKey(Project, on_delete=models.CASCADE)
+    title = models.CharField(max_length=100)
+    priority = models.IntegerField(default=2)
+    done = models.BooleanField(default=False)
+
+
+class TaskSerializer(serializers.ModelSerializer):
+    project_name = serializers.CharField(source="project.name", read_only=True)
+
+    class Meta:
+        model = Task
+        fields = ["id", "title", "project", "project_name", "priority", "done"]
+
+
+class TaskViewSet(viewsets.ModelViewSet):
+    serializer_class = TaskSerializer
+    filterset_fields = ["done", "project"]
+    search_fields = ["title"]
+    ordering_fields = ["priority", "id"]
+    ordering = ["id"]
+
+    def get_queryset(self):
+        return Task.objects.filter(owner=self.request.user).select_related("project")
+
+    def perform_create(self, serializer):
+        serializer.save(owner=self.request.user)
+
+    @action(detail=True, methods=["post"])
+    def complete(self, request, pk=None):
+        task = self.get_object()
+        task.done = True
+        task.save(update_fields=["done"])
+        return Response(self.get_serializer(task).data)
+
+
+router = routers.DefaultRouter()
+router.register("tasks", TaskViewSet, basename="task")
+urlpatterns = router.urls
+migrate()
+ada = User.objects.create_user("ada")
+api, website = Project.objects.create(name="API"), Project.objects.create(name="Website")
+c = Client()
+c.force_login(ada)
+for title, project, priority in [("Write tests", api, 1), ("Fix login", website, 1), ("Docs", api, 3),
+                                 ("Deploy", api, 2), ("Logo", website, 3)]:
+    c.post("/tasks/", {"title": title, "project": project.pk, "priority": priority}, content_type="application/json")
+c.post("/tasks/2/complete/")
+
+with CaptureQueriesContext(connection) as ctx:
+    page = c.get("/tasks/", {"ordering": "priority"}).json()
+print(page["count"], [t["title"] for t in page["results"]], "| queries:", len(ctx))
+print("open API tasks:", [t["title"] for t in c.get("/tasks/", {"project": api.pk, "done": False}).json()["results"]])
+print("search:", [t["title"] for t in c.get("/tasks/", {"search": "log"}).json()["results"]])
+print("page 2:", [t["title"] for t in c.get("/tasks/", {"page": 2}).json()["results"]])
+c.force_login(User.objects.create_user("bob"))
+print("bob sees:", c.get("/tasks/").json()["count"], "| bob completes task 1:", c.post("/tasks/1/complete/").status_code)
+```
+
+```text title="Output"
+5 ['Write tests', 'Fix login', 'Deploy'] | queries: 4
+open API tasks: ['Write tests', 'Docs', 'Deploy']
+search: ['Fix login', 'Logo']
+page 2: ['Deploy', 'Logo']
+bob sees: 0 | bob completes task 1: 404
+```
+
+Ordering by priority uses the explicit whitelist; filters combine; search is case-insensitive; the
+page costs a fixed number of queries thanks to `select_related("project")`. Bob gets an empty list
+and a `404`, because `get_queryset()` is the only source of objects for every action, including the
+extra one.
+
+## Common mistakes
+
+<Callout type="warning" title="queryset = Model.objects.all() on a per-user resource">
+  A class-level `queryset` returns every user's data from list, retrieve, update and delete.
+  Override `get_queryset()` to filter by `self.request.user`, and every action, extra ones included,
+  inherits it.
+</Callout>
+
+- **No pagination**, or no `max_page_size`: one request for a million rows.
+- **N+1 in list endpoints** from `source="author.name"` or nested serializers: add `select_related`
+  / `prefetch_related` in `get_queryset()` and test the query count.
+- **Unordered paginated querysets** (especially after `annotate()`): pages can repeat or skip rows.
+  Always order.
+- **Changing state with PATCH on a status field.** Make it read-only and expose an action that
+  enforces the rules.
+- **`basename` missing** when a ViewSet has no `queryset` attribute: the router can't name the routes.
+  Pass `basename="task"`.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: which ViewSet gives a read-only catalogue (list and retrieve only)?"
+>
+  `viewsets.ReadOnlyModelViewSet`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: add POST /articles/{id}/publish/ to a ViewSet.">
+  `@action(detail=True, methods=["post"]) def publish(self, request, pk=None): article =
+  self.get_object(); ...`
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: a mobile feed shows duplicates when new posts arrive while scrolling. Fix?"
+>
+  Switch to `CursorPagination` with an ordering on the creation time: each page continues "after
+  this item", so insertions don't shift pages.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: let clients filter products by a price range.">
+  A `FilterSet` with `min_price = NumberFilter(field_name="price", lookup_expr="gte")` and
+  `max_price = NumberFilter(field_name="price", lookup_expr="lte")`, set as `filterset_class`.
+</Reveal>
+
+<KeyTakeaways>
+
+- `ModelViewSet` + router = list, create, retrieve, update, partial_update, destroy at two URLs.
+- Customise with `get_queryset()` (per user, select_related), `get_serializer_class()` (per action),
+  `perform_create()` (server-side fields) and `@action` (extra routes).
+- Compose mixins for resources that shouldn't support every action.
+- Paginate always: page numbers, limit/offset or cursors, with a capped page size and a stable order.
+- Filter, search and order only on whitelisted fields.
+
+</KeyTakeaways>
