@@ -9,6 +9,7 @@ export function ModuleParts({ module: m }: { module: NavModule }) {
     {
       href: m.lessons[0] ? `/learn/${m.slug}/${m.lessons[0].slug}` : `/learn/${m.slug}`,
       icon: BookOpen,
+      kicker: "Learn",
       title: "Course",
       stat: `${m.lessons.length} lessons · ~${Math.round(minutes / 60)} h`,
       blurb: "Concepts, visuals and verified code, in order.",
@@ -16,6 +17,7 @@ export function ModuleParts({ module: m }: { module: NavModule }) {
     m.projects.length > 0 && {
       href: `/projects/${m.slug}`,
       icon: Hammer,
+      kicker: "Build",
       title: "Projects",
       stat: `${m.projects.length} projects`,
       blurb: "Build real apps step by step, with solutions.",
@@ -23,6 +25,7 @@ export function ModuleParts({ module: m }: { module: NavModule }) {
     m.problemCount > 0 && {
       href: `/practice/${m.slug}`,
       icon: ListChecks,
+      kicker: "Practise",
       title: "Practice",
       stat: `${m.problemCount} problems`,
       blurb: "Easy to hard, with hints and full solutions.",
@@ -30,6 +33,7 @@ export function ModuleParts({ module: m }: { module: NavModule }) {
     m.interviewCount > 0 && {
       href: `/interview/${m.slug}`,
       icon: MessageSquareText,
+      kicker: "Prepare",
       title: "Interview",
       stat: `${m.interviewCount} questions`,
       blurb: "Short answer first, then the details.",
@@ -39,7 +43,7 @@ export function ModuleParts({ module: m }: { module: NavModule }) {
   return (
     <nav aria-label={`${m.title} parts`} className="mt-8" data-testid="module-parts">
       <ol className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {parts.map((p, i) => (
+        {parts.map((p) => (
           <li key={p.title}>
             <Link
               href={p.href}
@@ -47,7 +51,7 @@ export function ModuleParts({ module: m }: { module: NavModule }) {
             >
               <span className="text-muted flex items-center gap-2 text-xs font-semibold tracking-wide uppercase">
                 <p.icon className="text-accent size-4" aria-hidden />
-                Part {i + 1}
+                {p.kicker}
               </span>
               <span className="font-display group-hover:text-accent text-lg font-semibold">
                 {p.title}

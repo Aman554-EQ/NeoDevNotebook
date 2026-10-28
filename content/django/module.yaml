@@ -2,7 +2,7 @@ title: Django
 part: 2
 order: 0
 description: Build, secure, test and ship real backends with Django and Django REST Framework. Web and backend fundamentals, the ORM, REST APIs with JWT, databases, guided projects and a full e-commerce capstone.
-icon: server
+icon: django
 idPrefix: dj
 # Targets from plan/part-2-django/plan.md, enforced by pnpm verify:content (soul.md §12).
 targets:

@@ -17,10 +17,8 @@ export function ModuleCard({
       href={href}
       className="group border-rule bg-surface hover:border-accent flex flex-col rounded-[var(--radius-card)] border p-5"
     >
-      <span className="text-muted flex items-center gap-2 font-mono text-xs">
-        <ModuleIcon icon={m.icon} className="text-accent size-4" /> Part {m.part}
-      </span>
-      <span className="font-display group-hover:text-accent mt-2 text-xl font-semibold">
+      <span className="font-display group-hover:text-accent flex items-center gap-3 text-xl font-semibold">
+        <ModuleIcon icon={m.icon} className="text-accent size-7" />
         {m.title}
       </span>
       <span className="text-muted mt-2 flex-1 text-[0.95rem]">{m.description}</span>
