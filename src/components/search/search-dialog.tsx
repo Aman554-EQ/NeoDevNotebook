@@ -142,7 +142,8 @@ export function SearchDialog() {
           <Dialog.Description className="sr-only">
             Type to search lessons, problems and interview questions. Use arrow keys and Enter.
           </Dialog.Description>
-          <div className="border-rule flex items-center gap-3 border-b px-4">
+          {/* Focus shows as an accent underline inside the panel (an outline would be clipped). */}
+          <div className="border-rule focus-within:border-accent flex items-center gap-3 border-b-2 px-4">
             <Search className="text-muted size-5" aria-hidden />
             <input
               autoFocus
@@ -155,7 +156,7 @@ export function SearchDialog() {
               aria-expanded={hits.length > 0}
               aria-controls={listId}
               aria-activedescendant={hits.length ? `${listId}-${active}` : undefined}
-              className="placeholder:text-muted h-14 flex-1 bg-transparent text-base outline-none"
+              className="search-input placeholder:text-muted h-14 min-w-0 flex-1 bg-transparent text-base"
             />
           </div>
           <div className="max-h-[60vh] overflow-y-auto p-2" aria-live="polite">
