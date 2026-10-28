@@ -172,6 +172,10 @@ body {
   outline-offset: 2px;
   border-radius: 4px;
 }
+/* The search box shows focus with its panel's accent underline instead. */
+.search-input:focus-visible {
+  outline: none;
+}
 
 ::selection {
   background: var(--highlight);
