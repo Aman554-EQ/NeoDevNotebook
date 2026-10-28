@@ -4,6 +4,7 @@ import { notFound } from "next/navigation"
 import { ListChecks, MessageSquareText } from "lucide-react"
 import { DifficultyBadge, MinutesBadge } from "@/components/lesson/badges"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
+import { ModuleIcon } from "@/components/layout/module-icon"
 import { ModuleParts } from "@/components/layout/module-parts"
 import { getModule, getNavTree } from "@/lib/content"
 import { groupBySection, sectionId } from "@/lib/content/sections"
@@ -30,8 +31,10 @@ export default async function ModulePage({ params }: PageProps<"/learn/[module]"
   return (
     <main>
       <Breadcrumbs items={[{ href: "/learn", label: "Learn" }, { label: m.title }]} />
-      <p className="text-muted font-mono text-sm">Part {m.part}</p>
-      <h1 className="font-display mt-1 text-3xl font-semibold sm:text-4xl">{m.title}</h1>
+      <h1 className="font-display mt-1 flex items-center gap-3 text-3xl font-semibold sm:text-4xl">
+        <ModuleIcon icon={m.icon} className="text-accent size-9" />
+        {m.title}
+      </h1>
       <p className="text-muted mt-3 max-w-2xl text-lg">{m.description}</p>
       <ModuleParts module={m} />
 

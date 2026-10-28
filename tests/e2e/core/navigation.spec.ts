@@ -1,22 +1,17 @@
+import { ROADMAP } from "../../../src/lib/roadmap"
 import { content, expect, isDesktop, test } from "../fixtures"
 
 test.describe("navigation", () => {
-  test("home shows the full learning path with built parts linked", async ({ page }) => {
+  test("home shows the full learning path with built tracks linked", async ({ page }) => {
     await page.goto("/")
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Remember it")
-    for (const part of [0, 1, 2, 3, 4, 5, 6])
-      await expect(page.getByTestId(`part-${part}`)).toBeVisible()
-    // A part is linked exactly when a module for it exists in content/; others say "Coming soon".
-    for (const part of [0, 1, 2, 3, 4, 5, 6]) {
-      const modules = content.filter((b) => b.module.part === part)
-      const card = page.getByTestId(`part-${part}`)
-      if (modules.length) {
-        for (const b of modules) {
-          await expect(card.getByRole("link", { name: b.module.title })).toBeVisible()
-        }
-      } else {
-        await expect(card).toContainText("Coming soon")
-      }
+    // A track links to its module exactly when content/<slug>/ exists; others say "Coming soon".
+    for (const track of ROADMAP) {
+      const card = page.getByTestId(`track-${track.slug}`)
+      await expect(card).toBeVisible()
+      const built = content.find((b) => b.module.slug === track.slug)
+      if (built) await expect(card.getByRole("link", { name: track.title })).toBeVisible()
+      else await expect(card).toContainText("Coming soon")
     }
   })
 

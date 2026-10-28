@@ -1,13 +1,15 @@
 import type { Metadata } from "next"
 import { ModuleCard } from "@/components/layout/module-card"
 import { getNavTree } from "@/lib/content"
+import { HubBackdrop } from "@/components/brand/hub-backdrop"
 
 export const metadata: Metadata = { title: "Learn" }
 
 export default async function LearnHub() {
   const modules = await getNavTree()
   return (
-    <main>
+    <main className="relative isolate">
+      <HubBackdrop />
       <h1 className="font-display text-3xl font-semibold sm:text-4xl">Learn</h1>
       <p className="text-muted mt-2 max-w-2xl">
         Pick a module. Each lesson goes concept → visual → example → explanation → practice.

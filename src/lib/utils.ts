@@ -6,3 +6,4 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export const SITE_NAME = "NeoDevNotebook"
+export const GITHUB_URL = "https://github.com/Aman554-EQ"

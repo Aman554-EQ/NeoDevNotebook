@@ -165,3 +165,10 @@ export const bookmarks = pgTable(
   },
   (t) => [primaryKey({ columns: [t.userId, t.itemType, t.itemId] })],
 )
+
+/** Footer newsletter sign-ups (no emails are sent yet; the list is kept for later). */
+export const subscribers = pgTable("subscribers", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+})
