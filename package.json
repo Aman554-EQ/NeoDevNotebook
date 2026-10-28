@@ -29,7 +29,7 @@
     "prepare": "husky",
     "gen:viz": "tsx scripts/gen-viz-registry.ts",
     "predev": "pnpm gen:viz",
-    "prebuild": "pnpm gen:viz",
+    "prebuild": "pnpm gen:viz && tsx scripts/db-sync.ts",
     "pretest": "pnpm gen:viz",
     "perf": "node scripts/lighthouse.mjs",
     "traces": "python scripts/trace_python.py",
