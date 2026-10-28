@@ -32,6 +32,8 @@ describe("code sample extraction", () => {
             objectives: ["o"],
             prerequisites: [],
             tags: [],
+            practice: [],
+            interview: [],
             module: "m",
             slug: "l",
             order: 1,
@@ -41,6 +43,7 @@ describe("code sample extraction", () => {
         ],
         problems: [],
         interview: [],
+        projects: [],
       },
     ]
     const samples = extractSamples(bundles)

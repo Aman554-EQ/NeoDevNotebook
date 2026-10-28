@@ -1,0 +1,509 @@
+---
+title: Iterators and generators
+summary: What a for loop really does, how to write your own iterables, and how generators pause and resume with yield to produce values lazily, one at a time.
+estimatedMinutes: 28
+difficulty: medium
+section: Core Language
+objectives:
+  - Explain the iteration protocol (`iter`, `next`, `StopIteration`)
+  - Write generator functions with `yield` and `yield from`
+  - Chain generators into memory-efficient pipelines
+  - Tell an iterable (reusable) from an iterator (single-use)
+prerequisites:
+  - Loops
+  - Comprehensions and generator expressions
+tags: [python, iterators, generators, lazy]
+practice: [py-p-025, py-p-038, py-p-045, py-p-052]
+interview: [py-i-030, py-i-031]
+---
+
+## Intuition: a bookmark in a book
+
+An **iterable** is a book. An **iterator** is a **bookmark** in it: it knows where you are and gives
+you the next page when asked. When the pages run out, it says so. A **generator** is a function that
+keeps its own bookmark. It runs until `yield`, hands over a value, and **pauses** with all its local
+variables intact until the next value is requested.
+
+## See it
+
+A recorded run. Watch `countdown` **pause** at each `yield` (its frame leaves the stack) and
+**resume** on the very next line when the `for` loop asks for another value.
+
+<CodeStepper
+  trace="generators-countdown"
+  title="A generator pausing and resuming"
+  caption="Nothing in countdown runs until the loop asks for the first value, and 'starting' prints only then. Each yield pauses the function with n remembered; the next request resumes it right after the yield."
+/>
+
+## The precise rules
+
+- `for x in obj` calls `iter(obj)` once to get an iterator, then calls `next(it)` repeatedly until it
+  raises `StopIteration`.
+- A function containing `yield` returns a **generator object** when called. Its body runs only as
+  `next()` is called.
+- `return value` inside a generator ends it. The value travels on `StopIteration.value`.
+- `yield from other` delegates: it yields every item of `other`.
+- Iterators are **single-use**. An iterable such as a list (or a class whose `__iter__` is a
+  generator) gives a fresh iterator each time.
+
+## Worked example
+
+```python title="iteration.py"
+import itertools
+
+it = iter([1, 2])
+print(next(it), next(it))
+try:
+    next(it)
+except StopIteration:
+    print("StopIteration: the loop's signal to stop")
+
+
+def gen():
+    yield 1
+    yield 2
+    return "done"
+
+
+g = gen()
+print(next(g), next(g))
+try:
+    next(g)
+except StopIteration as stop:
+    print("return value:", stop.value)
+
+
+def chain(*iterables):
+    for it in iterables:
+        yield from it
+
+
+print(list(chain([1, 2], "ab")))
+
+
+def read_numbers(lines):
+    for line in lines:
+        yield int(line)
+
+
+def evens(numbers):
+    for n in numbers:
+        if n % 2 == 0:
+            yield n
+
+
+print(sum(evens(read_numbers(["1", "2", "3", "4"]))))  # a lazy pipeline
+
+
+class Countdown:
+    def __init__(self, start: int) -> None:
+        self.start = start
+
+    def __iter__(self):  # a fresh generator every time, so it's reusable
+        n = self.start
+        while n > 0:
+            yield n
+            n -= 1
+
+
+c = Countdown(3)
+print(list(c), list(c))
+print(list(itertools.islice(itertools.count(10), 3)))  # take 3 from an infinite iterator
+```
+
+```text title="Output"
+1 2
+StopIteration: the loop's signal to stop
+1 2
+return value: done
+[1, 2, 'a', 'b']
+6
+[3, 2, 1] [3, 2, 1]
+[10, 11, 12]
+```
+
+What to notice:
+
+- `read_numbers → evens → sum` processes one value at a time, from the first line to the final
+  total. With a file of a billion lines, memory use stays flat.
+- `Countdown` is **iterable** (it has `__iter__`), not an iterator, so you can loop over it twice. A
+  generator object can be looped over only once.
+- `itertools.count` is infinite. `islice` takes just what you need, which is only possible because
+  everything is lazy.
+
+## Variations
+
+### The iterator protocol by hand
+
+```python title="manual_iterator.py"
+class Squares:
+    """Iterator over 1², 2², … n², written without a generator."""
+
+    def __init__(self, n: int):
+        self.n = n
+        self.i = 0
+
+    def __iter__(self):
+        return self              # an iterator returns itself
+
+    def __next__(self) -> int:
+        if self.i >= self.n:
+            raise StopIteration   # tells for-loops (and list, sum, ...) to stop
+        self.i += 1
+        return self.i ** 2
+
+
+sq = Squares(4)
+print(list(sq), list(sq))         # the second pass is empty: iterators are single-use
+
+
+def squares(n: int):              # the same thing as a generator
+    for i in range(1, n + 1):
+        yield i ** 2
+
+
+print(list(squares(4)), sum(squares(100)))
+```
+
+```text title="Output"
+[1, 4, 9, 16] []
+[1, 4, 9, 16] 338350
+```
+
+A generator function writes `__iter__`, `__next__`, the saved position **and** the
+`StopIteration` for you. The class is worth seeing once so you know what a `for` loop relies on.
+
+### Generators that remember state
+
+```python title="stateful_generators.py"
+from itertools import batched, islice
+
+
+def fibonacci():
+    a, b = 0, 1
+    while True:                       # infinite: the caller decides when to stop
+        yield a
+        a, b = b, a + b
+
+
+def running_average(values):
+    total = 0
+    for count, v in enumerate(values, start=1):
+        total += v
+        yield round(total / count, 2)
+
+
+def windows(items, size):
+    window = []
+    for x in items:
+        window.append(x)
+        if len(window) > size:
+            window.pop(0)
+        if len(window) == size:
+            yield tuple(window)
+
+
+print(list(islice(fibonacci(), 10)))
+print(list(running_average([10, 20, 60, 10])))
+print(list(windows("abcde", 3)))
+print(list(batched(range(7), 3)))      # Python 3.12+: fixed-size chunks
+```
+
+```text title="Output"
+[0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+[10.0, 15.0, 30.0, 25.0]
+[('a', 'b', 'c'), ('b', 'c', 'd'), ('c', 'd', 'e')]
+[(0, 1, 2), (3, 4, 5), (6,)]
+```
+
+Local variables survive between `yield`s, so a generator is a natural place for "remember the
+last few items" or "keep a running total" logic, without a class.
+
+### Sending values in: a generator as a coroutine
+
+```python title="send_demo.py"
+def averager():
+    total, count, average = 0.0, 0, None
+    while True:
+        value = yield average        # pauses here; send() resumes with a value
+        total += value
+        count += 1
+        average = total / count
+
+
+avg = averager()
+next(avg)                            # "prime" it: run up to the first yield
+print(avg.send(10), avg.send(30), avg.send(5))
+avg.close()                          # raises GeneratorExit inside it, ending it
+```
+
+```text title="Output"
+10.0 20.0 15.0
+```
+
+`yield` is an expression: `gen.send(x)` resumes the generator and makes the paused `yield`
+evaluate to `x`. This two-way communication is how Python's early coroutines worked; today
+`async def` (lesson 27) covers most of those uses.
+
+### `yield from` and return values
+
+```python title="yield_from.py"
+def read_section(lines, name):
+    count = 0
+    for line in lines:
+        yield f"{name}: {line}"
+        count += 1
+    return count                      # becomes the value of `yield from`
+
+
+def report(sections):
+    totals = {}
+    for name, lines in sections.items():
+        totals[name] = yield from read_section(lines, name)
+    yield f"totals: {totals}"
+
+
+for line in report({"intro": ["hello", "welcome"], "body": ["text"]}):
+    print(line)
+```
+
+```text title="Output"
+intro: hello
+intro: welcome
+body: text
+totals: {'intro': 2, 'body': 1}
+```
+
+`yield from sub` passes every item of `sub` straight through **and** evaluates to the sub-generator's
+`return` value. It lets you split a big generator into smaller ones without losing results.
+
+### Cleanup and `iter(callable, sentinel)`
+
+```python title="cleanup.py"
+import io
+
+
+def numbered(lines):
+    print("  [open]")
+    try:
+        for i, line in enumerate(lines, start=1):
+            yield f"{i}: {line}"
+    finally:
+        print("  [closed]")             # runs even if the consumer stops early
+
+
+for row in numbered(["a", "b", "c"]):
+    print(row)
+    if row.startswith("2"):
+        break                           # nothing refers to the generator any more
+
+stream = io.StringIO("abcdefghij")
+for chunk in iter(lambda: stream.read(4), ""):    # call until it returns ""
+    print(repr(chunk))
+```
+
+```text title="Output"
+  [open]
+1: a
+2: b
+  [closed]
+'abcd'
+'efgh'
+'ij'
+```
+
+- When a `for` loop exits early and nothing else refers to the generator, CPython frees it at once,
+  which calls its `close()` and runs the `finally` block. Files and connections opened inside
+  generators are released. (Call `gen.close()` yourself if you keep a reference.)
+- `iter(func, sentinel)` calls `func()` repeatedly and stops when it returns `sentinel`: the
+  idiom for reading fixed-size chunks from a file or socket.
+
+### More `itertools`
+
+```python title="itertools_more.py"
+from itertools import (combinations, cycle, dropwhile, groupby, islice, permutations,
+                       takewhile, zip_longest)
+
+temps = [3, 5, 9, 12, 8, 4, 2]
+print(list(takewhile(lambda t: t < 10, temps)), list(dropwhile(lambda t: t < 10, temps)))
+
+logs = ["ERROR a", "ERROR b", "INFO c", "ERROR d", "INFO e", "INFO f"]
+for level, group in groupby(logs, key=lambda s: s.split()[0]):   # consecutive runs!
+    print(level, [s.split()[1] for s in group])
+
+by_level = groupby(sorted(logs), key=lambda s: s.split()[0])      # sort first to group all
+print({level: len(list(g)) for level, g in by_level})
+
+print(list(combinations("abc", 2)), len(list(permutations(range(4), 2))))
+print(list(zip_longest([1, 2, 3], "ab", fillvalue="-")))
+print(list(islice(cycle(["red", "green"]), 5)))
+```
+
+```text title="Output"
+[3, 5, 9] [12, 8, 4, 2]
+ERROR ['a', 'b']
+INFO ['c']
+ERROR ['d']
+INFO ['e', 'f']
+{'ERROR': 3, 'INFO': 3}
+[('a', 'b'), ('a', 'c'), ('b', 'c')] 12
+[(1, 'a'), (2, 'b'), (3, '-')]
+['red', 'green', 'red', 'green', 'red']
+```
+
+- `takewhile` stops at the first failing item; `dropwhile` skips until the first failing item.
+- `groupby` groups **consecutive** equal keys, like the Unix `uniq` command. Sort by the same key
+  first if you want one group per key.
+- `combinations` ignores order (`ab` = `ba`); `permutations` counts both (4 × 3 = 12 pairs).
+
+## Putting it together
+
+### Paging through an API lazily
+
+```python title="pager.py"
+PAGES = {1: ["a", "b", "c"], 2: ["d", "e", "f"], 3: ["g"]}   # a pretend server
+requests = 0
+
+
+def fetch_page(number: int) -> dict:
+    global requests
+    requests += 1
+    items = PAGES.get(number, [])
+    return {"items": items, "next": number + 1 if number + 1 in PAGES else None}
+
+
+def all_items():
+    page = 1
+    while page is not None:
+        data = fetch_page(page)
+        yield from data["items"]
+        page = data["next"]
+
+
+first_four = []
+for item in all_items():
+    first_four.append(item)
+    if len(first_four) == 4:
+        break
+print(first_four, "after", requests, "requests")
+
+requests = 0
+print(len(list(all_items())), "items after", requests, "requests")
+```
+
+```text title="Output"
+['a', 'b', 'c', 'd'] after 2 requests
+7 items after 3 requests
+```
+
+Callers see one flat stream of items and never deal with pages. Because the generator is lazy,
+asking for 4 items costs only 2 requests: page 3 is never downloaded.
+
+### A streaming log pipeline
+
+```python title="log_pipeline.py"
+import io
+from itertools import groupby
+
+LOG_FILE = io.StringIO("""\
+2026-10-27T09:00 user=ada action=login
+2026-10-27T09:05 user=bob action=login
+2026-10-27T09:07 user=ada action=view
+garbage line
+2026-10-27T10:01 user=ada action=logout
+2026-10-27T10:15 user=cy action=login
+""")
+
+
+def lines(f):
+    for line in f:
+        yield line.rstrip("\n")
+
+
+def parse(rows):
+    for row in rows:
+        try:
+            stamp, *fields = row.split()
+            data = dict(field.split("=") for field in fields)
+        except ValueError:
+            continue                              # skip malformed lines
+        yield {"hour": stamp[11:13], **data}
+
+
+def logins(events):
+    return (e for e in events if e["action"] == "login")
+
+
+for hour, group in groupby(logins(parse(lines(LOG_FILE))), key=lambda e: e["hour"]):
+    print(f"{hour}:00", sorted(e["user"] for e in group))
+```
+
+```text title="Output"
+09:00 ['ada', 'bob']
+10:00 ['cy']
+```
+
+Each stage handles one concern (read, parse, filter, group) and passes items on one at a time, so
+the same code would process a multi-gigabyte log in constant memory. `groupby` works here
+because log lines are already in time order.
+
+## Common mistakes
+
+<Callout type="warning" title="Consuming an iterator twice">
+  `rows = csv.reader(f)` can be looped over once. A second `for` loop or `len(list(rows))` finds it
+  empty. Convert to a list if you need several passes.
+</Callout>
+
+- **Calling a generator function and expecting it to run.** `gen()` alone does nothing. You must
+  iterate it.
+- **`return [..]` in a generator.** It doesn't produce the list for the caller. It ends the
+  iteration (the value goes to `StopIteration.value`).
+- **Using `next()` without a default** on a possibly empty iterator raises `StopIteration`. Use
+  `next(it, None)`.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: how do you get the first even number from a huge iterable without scanning it all?"
+>
+  `next((x for x in numbers if x % 2 == 0), None)`. The generator stops at the first match, and
+  `None` is returned if there's none.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what does `g = (x for x in [1, 2]); print(list(g), list(g))` print?"
+>
+  `[1, 2] []`. A generator is an iterator: the first `list` consumes it, and the second finds it
+  exhausted.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: write a generator `evens()` that yields 0, 2, 4, … forever."
+>
+  `def evens(): n = 0` / `while True: yield n; n += 2`. Take a few with
+  `list(itertools.islice(evens(), 5))`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why does `groupby('aabbaa')` give three groups, not two?">
+  `groupby` only merges **consecutive** equal items: `aa`, `bb`, `aa`. Sort first (`'aaaabb'`) to
+  get one group per letter, or use `Counter` if you only need counts.
+</Reveal>
+
+<KeyTakeaways>
+
+- `for` = `iter()` once + `next()` until `StopIteration`.
+- `yield` turns a function into a generator that pauses and resumes with its state intact.
+- Generators make lazy pipelines, so memory stays flat however big the data is.
+- Iterables can be reused. Iterators (including generator objects) are single-use.
+- A generator implements the iterator protocol for you; locals survive between `yield`s.
+- `yield from` delegates and returns the sub-generator's result; `finally` runs when a consumer
+  stops early.
+- Generators hide paging and stream huge inputs in constant memory; `groupby` needs sorted (or
+  already grouped) data.
+
+</KeyTakeaways>
+
+{/* enriched */}

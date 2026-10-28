@@ -1,0 +1,480 @@
+---
+title: Authentication & authorization
+summary: Who are you, and what may you do? Password hashing with salts, sessions and cookies, tokens and the anatomy of a JWT, refresh tokens, OAuth2 and OpenID Connect in one picture, roles and object-level permissions, with working code.
+estimatedMinutes: 28
+difficulty: simple
+section: Web & Backend Foundations
+objectives:
+  - Tell authentication (who) from authorization (what) and map each to 401 and 403
+  - Store passwords safely with a slow, salted hash and verify them in constant time
+  - Explain how session cookies and JWTs keep a user logged in, and their trade-offs
+  - Build, read and verify a JWT, including expiry and tampering
+  - Design role-based and object-level permission checks
+prerequisites:
+  - How the web works
+  - Backend fundamentals & REST
+tags: [auth, security, jwt, sessions, passwords, permissions]
+practice: [dj-p-020, dj-p-013]
+interview: [dj-i-020, dj-i-015]
+---
+
+## Intuition: the ID card and the guest list
+
+At a concert, the door staff check two different things. **Authentication**: is this ID card real,
+and does the face match? **Authorization**: is this person on the guest list for the backstage area?
+
+A backend does the same on every request. First it works out **who** is calling (from a session
+cookie, a token, an API key). Then it decides whether **that** caller may do **this** thing to
+**this** object. Mixing the two up is the source of many security bugs.
+
+## See it
+
+<JwtAnatomyViz />
+
+## The precise rules
+
+**Authentication (authN)** answers "who are you?". Failure: `401 Unauthorized`.
+**Authorization (authZ)** answers "may you do this?". Failure: `403 Forbidden` (or `404` to hide that
+the object exists).
+
+**Passwords are never stored.** You store a **hash**: a one-way fingerprint. Good password hashes are:
+
+- **salted**: a random value per user, so two users with the same password get different hashes and
+  precomputed tables are useless;
+- **slow on purpose**: PBKDF2 with hundreds of thousands of iterations, bcrypt, scrypt or Argon2, so
+  guessing billions of passwords takes years instead of minutes.
+
+Never use a fast hash like plain SHA-256 or MD5 for passwords. Compare hashes with a
+**constant-time** comparison (`hmac.compare_digest`), so response timing reveals nothing.
+
+**Staying logged in:**
+
+|                     | Session + cookie                        | Token (JWT)                                        |
+| ------------------- | --------------------------------------- | -------------------------------------------------- |
+| Server stores       | session data, keyed by a random id      | nothing (the token is signed)                      |
+| Client sends        | `Cookie: sessionid=…` (automatic)       | `Authorization: Bearer …` (the app adds it)        |
+| Log out             | delete the session: instant, everywhere | token valid until it expires                       |
+| Must defend against | CSRF (cookies are sent automatically)   | token theft (XSS, leaky storage)                   |
+| Typical client      | websites                                | mobile apps, other services, SPAs on other domains |
+
+**A JWT** (JSON Web Token) is `header.payload.signature`, each part base64url-encoded:
+
+- **header**: the algorithm, e.g. `{"alg": "HS256", "typ": "JWT"}`;
+- **payload**: **claims** such as `sub`/`user_id` (who), `exp` (expiry, Unix time), `iat` (issued
+  at), `role`;
+- **signature**: `HMAC-SHA256(secret, header + "." + payload)`.
+
+Anyone can **read** a JWT: base64url is encoding, not encryption, so never put secrets in it. Nobody
+can **change** it without the key. Keep access tokens short-lived (minutes) and use a longer-lived
+**refresh token** to get new ones; refresh tokens can be revoked (blacklisted).
+
+**OAuth2 and OpenID Connect** are for "log in with Google/GitHub" and for apps acting on a user's
+behalf: the user signs in at the provider, your app receives an authorization code, exchanges it
+server-to-server for tokens, and (with OIDC) gets an **ID token** saying who the user is. You use a
+library for this, never hand-written code.
+
+**Authorization models:**
+
+- **RBAC** (role-based): users have roles (`customer`, `staff`, `admin`); roles grant permissions.
+- **Object-level** (ownership): "a customer may only see **their own** orders". Must be checked
+  per object, on every request.
+
+## Worked example
+
+Storing and checking a password the right way, with Python's standard library. Django does exactly
+this (PBKDF2-SHA256 by default) when you call `user.set_password()`.
+
+```python title="passwords.py"
+import hashlib
+import hmac
+import secrets
+
+ITERATIONS = 600_000  # slow on purpose; OWASP's 2023+ guidance for PBKDF2-SHA256
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)  # random per user
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), ITERATIONS)
+    return f"pbkdf2_sha256${ITERATIONS}${salt}${digest.hex()}"
+
+
+def check_password(password: str, stored: str) -> bool:
+    algorithm, iterations, salt, expected = stored.split("$")
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), int(iterations))
+    return hmac.compare_digest(digest.hex(), expected)  # constant-time comparison
+
+
+ada = hash_password("correct horse battery staple")
+bob = hash_password("correct horse battery staple")  # same password, different user
+
+print(ada.split("$")[:2], "salt and hash follow")
+print("same password, same hash?", ada == bob)
+print("right password:", check_password("correct horse battery staple", ada))
+print("wrong password:", check_password("Correct horse battery staple", ada))
+```
+
+```text title="Output"
+['pbkdf2_sha256', '600000'] salt and hash follow
+same password, same hash? False
+right password: True
+wrong password: False
+```
+
+- The stored string carries everything needed to check later: algorithm, iterations, salt and hash.
+  Django stores passwords in this same `algorithm$iterations$salt$hash` format.
+- Because each user gets a random salt, identical passwords produce different hashes, so a leaked
+  table reveals nothing about which users share a password.
+- `check_password` recomputes the hash with the stored salt and compares in constant time.
+- Raising `ITERATIONS` later is easy: new logins can be re-hashed with the new cost. Django does
+  this automatically when it upgrades its default.
+
+## Variations
+
+### Why a fast hash is wrong for passwords
+
+```python
+import hashlib
+import time
+
+start = time.perf_counter()
+for i in range(100_000):
+    hashlib.sha256(f"guess{i}".encode()).hexdigest()
+fast = time.perf_counter() - start
+
+start = time.perf_counter()
+for i in range(3):
+    hashlib.pbkdf2_hmac("sha256", f"guess{i}".encode(), b"salt", 600_000)
+slow = (time.perf_counter() - start) / 3
+
+print("SHA-256: more than 10,000 guesses per second:", 100_000 / fast > 10_000)
+print("PBKDF2 (600k iterations): fewer than 100 guesses per second:", 1 / slow < 100)
+```
+
+```text title="Output"
+SHA-256: more than 10,000 guesses per second: True
+PBKDF2 (600k iterations): fewer than 100 guesses per second: True
+```
+
+An attacker with a stolen database tries guesses offline, as fast as their hardware allows. A slow
+hash multiplies the cost of every guess; a GPU that cracks SHA-256 passwords in hours would need
+centuries against a well-tuned PBKDF2, bcrypt or Argon2.
+
+### A session, by hand
+
+```python
+import secrets
+
+SESSIONS = {}  # the server's session store (Django keeps it in the django_session table)
+
+
+def login(user_id):
+    session_id = secrets.token_urlsafe(32)  # unguessable
+    SESSIONS[session_id] = {"user_id": user_id}
+    return f"sessionid={session_id}; HttpOnly; Secure; SameSite=Lax"
+
+
+def current_user(cookie_header):
+    session_id = cookie_header.removeprefix("sessionid=")
+    session = SESSIONS.get(session_id)
+    return session["user_id"] if session else None
+
+
+def logout(cookie_header):
+    SESSIONS.pop(cookie_header.removeprefix("sessionid="), None)
+
+
+set_cookie = login(user_id=7)
+cookie = set_cookie.split(";")[0]  # what the browser sends back
+print("logged in as:", current_user(cookie))
+logout(cookie)
+print("after logout:", current_user(cookie))
+print("a guessed id:", current_user("sessionid=guess"))
+```
+
+```text title="Output"
+logged in as: 7
+after logout: None
+a guessed id: None
+```
+
+The cookie is only a **random key**; the data stays on the server. Logging out deletes the server
+side, so even a stolen cookie stops working immediately.
+
+### A JWT by hand
+
+```python
+import base64
+import hashlib
+import hmac
+import json
+
+SECRET = b"fake-jwt-key-change-me-abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def sign(payload: dict) -> str:
+    header = b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    body = b64url(json.dumps(payload, separators=(",", ":")).encode())
+    signature = hmac.new(SECRET, f"{header}.{body}".encode(), hashlib.sha256).digest()
+    return f"{header}.{body}.{b64url(signature)}"
+
+
+def verify(token: str) -> bool:
+    header, body, signature = token.split(".")
+    expected = b64url(hmac.new(SECRET, f"{header}.{body}".encode(), hashlib.sha256).digest())
+    return hmac.compare_digest(expected, signature)
+
+
+token = sign({"user_id": 7, "role": "customer", "iat": 1767225000, "exp": 1767225600})
+print(token)
+header, body, signature = token.split(".")
+print(json.loads(base64.urlsafe_b64decode(body + "==")))  # anyone can read the payload
+print("valid:", verify(token))
+
+forged_body = b64url(json.dumps({"user_id": 1, "role": "staff", "iat": 1767225000,
+                                 "exp": 1767225600}, separators=(",", ":")).encode())
+print("forged valid:", verify(f"{header}.{forged_body}.{signature}"))
+```
+
+```text title="Output"
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo3LCJyb2xlIjoiY3VzdG9tZXIiLCJpYXQiOjE3NjcyMjUwMDAsImV4cCI6MTc2NzIyNTYwMH0.dD43VxURc6iD30cnXSfYyLxXiWIQdNoSWB3rEmGjYgo
+{'user_id': 7, 'role': 'customer', 'iat': 1767225000, 'exp': 1767225600}
+valid: True
+forged valid: False
+```
+
+This produces exactly the token PyJWT would, so you can see there's no magic. The forged token keeps
+the old signature, which no longer matches the new payload. In real code, use a library.
+
+### The same with PyJWT, including expiry
+
+```python
+from datetime import UTC, datetime, timedelta
+
+import jwt  # python -m pip install PyJWT
+
+SECRET = "fake-jwt-key-change-me-abcdefghijklmnopqrstuvwxyz0123456789"
+now = datetime.now(UTC)
+
+fresh = jwt.encode({"user_id": 7, "exp": now + timedelta(minutes=5)}, SECRET, algorithm="HS256")
+stale = jwt.encode({"user_id": 7, "exp": now - timedelta(seconds=1)}, SECRET, algorithm="HS256")
+
+print(jwt.decode(fresh, SECRET, algorithms=["HS256"])["user_id"])
+for label, token, key in [("expired", stale, SECRET), ("wrong key", fresh, "x" * 40)]:
+    try:
+        jwt.decode(token, key, algorithms=["HS256"])
+    except jwt.InvalidTokenError as exc:
+        print(f"{label}: {type(exc).__name__}: {exc}")
+```
+
+```text title="Output"
+7
+expired: ExpiredSignatureError: Signature has expired
+wrong key: InvalidSignatureError: Signature verification failed
+```
+
+Always pass `algorithms=[...]` when decoding: it stops an attacker from choosing a weaker algorithm
+in the token's header. `djangorestframework-simplejwt` (lesson 20) wraps PyJWT and adds refresh
+tokens, rotation and blacklisting.
+
+### Roles and object-level permissions
+
+```python
+ROLE_PERMISSIONS = {
+    "customer": {"order.create", "order.view_own"},
+    "staff": {"order.create", "order.view_own", "order.view_all", "order.ship"},
+}
+ORDERS = {41: {"owner": "ada"}, 42: {"owner": "bob"}}
+
+
+def can(user, action, order_id=None):
+    perms = ROLE_PERMISSIONS[user["role"]]
+    if action == "view":
+        if "order.view_all" in perms:
+            return True
+        return "order.view_own" in perms and ORDERS[order_id]["owner"] == user["name"]
+    return f"order.{action}" in perms
+
+
+ada = {"name": "ada", "role": "customer"}
+staff = {"name": "sam", "role": "staff"}
+print("ada views 41:", can(ada, "view", 41))
+print("ada views 42:", can(ada, "view", 42), "<- someone else's order")
+print("ada ships:", can(ada, "ship"))
+print("staff views 42:", can(staff, "view", 42))
+```
+
+```text title="Output"
+ada views 41: True
+ada views 42: False <- someone else's order
+ada ships: False
+staff views 42: True
+```
+
+The role says what **kind** of thing a user may do; the object check says **which** objects. The
+classic bug (an "IDOR", insecure direct object reference) is checking only the role, so any customer
+can read `/orders/42` by changing the number.
+
+## Putting it together
+
+A tiny auth service: register, log in, receive short-lived access and refresh tokens, call a
+protected endpoint, refresh, and log out by revoking the refresh token.
+
+```python title="auth_service.py"
+import hashlib
+import hmac
+import secrets
+import uuid
+from datetime import UTC, datetime, timedelta
+
+import jwt
+
+KEY = "fake-jwt-key-change-me-abcdefghijklmnopqrstuvwxyz0123456789"
+USERS, REVOKED = {}, set()
+
+
+def register(email, password):
+    if email in USERS:
+        return 400, "email already registered"
+    if len(password) < 12:
+        return 400, "password must be at least 12 characters"
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000).hex()
+    USERS[email] = {"salt": salt, "hash": digest, "role": "customer"}
+    return 201, "registered"
+
+
+def issue(email, kind, lifetime):
+    claims = {"sub": email, "type": kind, "jti": uuid.uuid4().hex,
+              "exp": datetime.now(UTC) + lifetime}
+    if kind == "access":
+        claims["role"] = USERS[email]["role"]
+    return jwt.encode(claims, KEY, algorithm="HS256")
+
+
+def login(email, password):
+    user = USERS.get(email)
+    if user:
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode(), user["salt"].encode(), 100_000)
+    if not user or not hmac.compare_digest(digest.hex(), user["hash"]):
+        return 401, "invalid email or password"  # never say which part was wrong
+    return 200, {"access": issue(email, "access", timedelta(minutes=5)),
+                 "refresh": issue(email, "refresh", timedelta(days=1))}
+
+
+def authenticate(token, kind="access"):
+    try:
+        claims = jwt.decode(token, KEY, algorithms=["HS256"])
+    except jwt.InvalidTokenError:
+        return None
+    if claims["type"] != kind or claims["jti"] in REVOKED:
+        return None
+    return claims
+
+
+def my_profile(access_token):
+    claims = authenticate(access_token)
+    return (200, f"hello {claims['sub']} ({claims['role']})") if claims else (401, "log in")
+
+
+def refresh(refresh_token):
+    claims = authenticate(refresh_token, kind="refresh")
+    if not claims:
+        return 401, "refresh token invalid or revoked"
+    REVOKED.add(claims["jti"])  # rotation: each refresh token works once
+    return 200, {"access": issue(claims["sub"], "access", timedelta(minutes=5)),
+                 "refresh": issue(claims["sub"], "refresh", timedelta(days=1))}
+
+
+print(register("ada@example.com", "short"))
+print(register("ada@example.com", "correct horse battery staple"))
+print(login("ada@example.com", "wrong password")[0])
+status, tokens = login("ada@example.com", "correct horse battery staple")
+print(status, sorted(tokens))
+print(my_profile(tokens["access"]))
+print(my_profile(tokens["refresh"]), "<- a refresh token is not an access token")
+status, new_tokens = refresh(tokens["refresh"])
+print(status, my_profile(new_tokens["access"]))
+print(refresh(tokens["refresh"]), "<- the old refresh token was rotated out")
+```
+
+```text title="Output"
+(400, 'password must be at least 12 characters')
+(201, 'registered')
+401
+200 ['access', 'refresh']
+(200, 'hello ada@example.com (customer)')
+(401, 'log in') <- a refresh token is not an access token
+200 (200, 'hello ada@example.com (customer)')
+(401, 'refresh token invalid or revoked') <- the old refresh token was rotated out
+```
+
+Each piece maps onto a real library feature: Django's password hashers, simplejwt's access and
+refresh tokens, its `jti` blacklist and refresh-token rotation. Knowing the mechanics helps you
+configure those libraries well and explain them in interviews.
+
+## Common mistakes
+
+<Callout type="warning" title="Checking the role but not the object">
+  "Logged in as a customer" doesn't mean "may read order 42". Filter queries by the current user
+  (`Order.objects.filter(user=request.user)`) or check ownership on every object.
+</Callout>
+
+- **Storing passwords with SHA-256, MD5 or (worse) in plain text.** Use a slow salted hash; in Django,
+  `set_password()` and `check_password()` do it for you.
+- **Secrets inside a JWT payload.** Anyone can base64-decode it.
+- **Long-lived access tokens.** A leaked token that's valid for a month is a month-long breach. Keep
+  access tokens short and refresh them.
+- **Saying which part of a login was wrong** ("no such email"). It lets attackers find valid
+  accounts. Use one message for both.
+- **No rate limit on login.** Attackers will try thousands of passwords; throttle and lock out.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: a request has a valid token, but the user tries to delete someone else's comment. Which status code?"
+>
+  `403 Forbidden`: the caller is authenticated but not authorized. (Many APIs return `404` instead,
+  so they don't confirm that the comment exists.)
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why does each user get their own random salt?">
+  So identical passwords hash differently, and an attacker can't use one precomputed table (or one
+  cracked hash) against every user at once.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: a user changes their role from customer to staff by editing the JWT payload. What happens?"
+>
+  The server recomputes the signature over the edited header and payload, it doesn't match, and the
+  token is rejected (`401`). Without the secret key the attacker can't produce a valid signature.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: how do you log a user out 'everywhere' with JWTs?">
+  Revoke their refresh tokens (blacklist), keep access tokens short-lived so the rest expire within
+  minutes, or rotate the signing key, which invalidates every token for everyone.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: website on the same domain, or a mobile app: sessions or JWT?"
+>
+  Same-domain website: sessions with secure, HttpOnly cookies (simple and instantly revocable).
+  Mobile app or third-party client: tokens in the `Authorization` header.
+</Reveal>
+
+<KeyTakeaways>
+
+- Authentication = who you are (401). Authorization = what you may do (403).
+- Store only slow, salted password hashes; compare in constant time.
+- Sessions keep data on the server behind a random cookie; JWTs carry signed claims anyone can read.
+- JWT = header.payload.signature; short-lived access tokens plus revocable refresh tokens.
+- Check permissions per object, not just per role.
+- Use maintained libraries (Django auth, simplejwt, an OAuth/OIDC client) for the real thing.
+
+</KeyTakeaways>

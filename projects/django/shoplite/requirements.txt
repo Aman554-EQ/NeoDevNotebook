@@ -1,0 +1,12 @@
+Django>=5.2,<5.3
+djangorestframework>=3.16
+djangorestframework-simplejwt>=5.5
+django-filter>=25
+drf-spectacular>=0.28
+django-environ>=0.12
+django-cors-headers>=4.6
+psycopg[binary]>=3.2      # PostgreSQL driver (production database)
+gunicorn>=23              # production WSGI server (Linux/macOS)
+# development and tests
+pytest>=8
+pytest-django>=4.9

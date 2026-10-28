@@ -1,0 +1,40 @@
+id: py-i-021
+question: What are `Counter` and `defaultdict`, and when would you use each?
+difficulty: simple
+tags:
+  - collections
+  - counter
+  - defaultdict
+shortAnswer: |
+  `Counter` is a dict that counts things: missing keys read as 0, and it has `most_common`
+  and multiset arithmetic. `defaultdict(factory)` creates a default value the first time a
+  missing key is accessed. `defaultdict(list)` is the go-to for grouping, and `int` for
+  general counting.
+detailedAnswer: |
+  Both remove the "is the key there yet?" boilerplate.
+
+  - `Counter(iterable)` counts in one call. `c.most_common(3)` returns the top 3, and
+    `c1 + c2`, `c1 - c2` and `c1 & c2` act like multiset operations.
+  - `defaultdict(list)` then `groups[key].append(item)` groups items in one line.
+
+  Gotcha: with a defaultdict, **reading** a missing key inserts it. Use `key in d` or
+  `d.get(key)` to test without side effects. Convert to `dict(...)` before printing or
+  serialising, to avoid the factory in the repr.
+code:
+  language: python
+  code: |
+    from collections import Counter, defaultdict
+
+    print(Counter("banana").most_common(2))
+    groups = defaultdict(list)
+    for word in ["apple", "avocado", "banana"]:
+        groups[word[0]].append(word)
+    print(dict(groups))
+    _ = groups["z"]  # reading creates the key
+    print("z" in groups)
+pitfalls:
+  - "Passing a value instead of a factory: `defaultdict([])`."
+followUps:
+  - How would you check if two strings are anagrams with Counter?
+verify: |
+  assert Counter('banana')['a'] == 3

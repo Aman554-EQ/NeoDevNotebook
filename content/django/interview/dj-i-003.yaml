@@ -1,0 +1,25 @@
+id: dj-i-003
+question: Walk through what happens when Django receives a request.
+difficulty: easy
+tags:
+  - http
+  - views
+shortAnswer: |
+  The web server calls Django through WSGI/ASGI; Django builds an HttpRequest, runs middleware top to bottom, resolves the URL to a view, the view uses models/templates and returns an HttpResponse, which passes back through middleware bottom to top to the server.
+detailedAnswer: |
+  1. **gunicorn/uvicorn** accepts the connection and calls Django's WSGI or ASGI handler.
+  2. Django creates an **`HttpRequest`** (method, path, headers, body, cookies).
+  3. **Middleware** in `settings.MIDDLEWARE` runs top to bottom: security headers, sessions, CSRF,
+     authentication (which sets `request.user`)... Any middleware may return a response early.
+  4. The **URL resolver** matches the path against `ROOT_URLCONF` and picks a view, with captured
+     arguments converted (e.g. `<int:pk>`).
+  5. The **view** reads/writes data through the **ORM** and renders a **template** (or JSON).
+  6. The **`HttpResponse`** goes back through the middleware **in reverse order** (bottom to top),
+     which can add headers or save the session.
+  7. The server sends the bytes to the client; `request_finished` fires.
+pitfalls:
+  - Forgetting middleware runs twice (in and out).
+  - Thinking the ORM runs before URL routing.
+followUps:
+  - Where would you add rate limiting, and why there?
+  - What changes under ASGI?

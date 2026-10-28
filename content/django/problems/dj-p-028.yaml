@@ -1,0 +1,93 @@
+id: dj-p-028
+title: 🐞 The half-placed order
+difficulty: hard
+tags:
+  - debugging
+  - transactions
+  - orm
+statement: |
+  When a line item fails validation, customers end up with an order that has some lines
+  and reduced stock for products they never got. Fix `place_order(lines)` so that any failure leaves
+  **nothing** behind, and stock can't be oversold.
+
+  ```python
+  def place_order(lines):
+      order = Order.objects.create()
+      for product_id, qty in lines:
+          product = Product.objects.get(pk=product_id)
+          if product.stock < qty:
+              raise ValueError(f"not enough {product.name}")
+          product.stock -= qty
+          product.save()
+          Line.objects.create(order=order, product=product, qty=qty)
+      return order
+  ```
+examples:
+  - input: place_order([(dune, 1), (chess, 99)])
+    output: ValueError, no order, stock unchanged
+hints:
+  - Wrap the work in `transaction.atomic()`.
+  - Lock the rows with `select_for_update()` and decrement with `F()`.
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models, transaction
+    from django.db.models import F
+
+
+    class Product(models.Model):
+        name = models.CharField(max_length=50)
+        stock = models.PositiveIntegerField()
+
+
+    class Order(models.Model):
+        pass
+
+
+    class Line(models.Model):
+        order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="lines")
+        product = models.ForeignKey(Product, on_delete=models.PROTECT)
+        qty = models.PositiveIntegerField()
+
+
+    def place_order(lines):
+        with transaction.atomic():  # all or nothing
+            order = Order.objects.create()
+            for product_id, qty in sorted(lines):  # lock rows in a consistent order (no deadlocks)
+                product = Product.objects.select_for_update().get(pk=product_id)
+                if product.stock < qty:
+                    raise ValueError(f"not enough {product.name}")
+                Product.objects.filter(pk=product_id).update(stock=F("stock") - qty)
+                Line.objects.create(order=order, product=product, qty=qty)
+        return order
+
+
+    migrate()
+  explanation: |
+    Without a transaction each `save()` and `create()` committed on its own, so an exception
+    halfway through left the order, the earlier lines and their stock decrements in place. `transaction.atomic()`
+    turns the whole function into one unit: the `ValueError` rolls everything back. Inside it,
+    `select_for_update()` locks each product row until the commit (on PostgreSQL/MySQL), so a concurrent
+    order for the same product waits instead of reading the same stock, and `F("stock") - qty` does the
+    arithmetic in the database. Sorting the lines means every order locks rows in the same sequence, which
+    prevents two orders from deadlocking each other.
+complexity:
+  time: O(lines)
+  space: O(lines)
+verify: |
+  dune = Product.objects.create(name="Dune", stock=5)
+  chess = Product.objects.create(name="Chess", stock=1)
+  try:
+      place_order([(dune.pk, 2), (chess.pk, 3)])
+      raise AssertionError("no error")
+  except ValueError as exc:
+      assert str(exc) == "not enough Chess"
+  assert Order.objects.count() == 0 and Line.objects.count() == 0
+  assert Product.objects.get(pk=dune.pk).stock == 5
+  order = place_order([(chess.pk, 1), (dune.pk, 2)])
+  assert order.lines.count() == 2
+  assert dict(Product.objects.values_list("name", "stock")) == {"Dune": 3, "Chess": 0}

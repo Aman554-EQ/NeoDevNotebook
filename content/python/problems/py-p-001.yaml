@@ -1,0 +1,48 @@
+id: py-p-001
+title: Reverse the words in a sentence
+difficulty: easy
+tags:
+  - strings
+  - split-join
+statement: |
+  Write `reverse_words(sentence)` that returns the words of `sentence` in reverse order,
+  separated by single spaces. Extra spaces between or around words should disappear.
+constraints:
+  - "`0 <= len(sentence) <= 10**5`"
+  - Words are separated by one or more spaces.
+examples:
+  - input: reverse_words("hello big world")
+    output: "'world big hello'"
+  - input: reverse_words("  python   rocks ")
+    output: "'rocks python'"
+  - input: reverse_words("")
+    output: "''"
+hints:
+  - "`str.split()` with no argument splits on runs of whitespace and drops empty pieces."
+  - Reverse a list with slicing `[::-1]`, then glue with `' '.join(...)`.
+solution:
+  language: python
+  code: |
+    def reverse_words(sentence: str) -> str:
+        return " ".join(sentence.split()[::-1])
+
+
+    print(reverse_words("hello big world"))
+    print(repr(reverse_words("  python   rocks ")))
+  explanation: |
+    `sentence.split()` (no argument) splits on any run of whitespace and ignores leading
+    and trailing spaces, so `"  python   rocks "` becomes `['python', 'rocks']`.
+
+    `[::-1]` returns a reversed copy of the list, and `" ".join(...)` puts exactly one space
+    between the words. An empty sentence splits into `[]`, which joins to `''`.
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Reverse the letters inside each word but keep the word order.
+  - 'Keep the original spacing exactly (hint: `re.split(r''(\s+)'', s)` keeps the separators).'
+verify: |
+  assert reverse_words("hello big world") == "world big hello"
+  assert reverse_words("  python   rocks ") == "rocks python"
+  assert reverse_words("") == ""
+  assert reverse_words("one") == "one"

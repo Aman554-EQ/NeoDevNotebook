@@ -1,0 +1,692 @@
+---
+title: Inheritance and special methods
+summary: Reuse behaviour with inheritance and super(), understand the method resolution order, make your objects work with operators and built-ins through dunder methods, and cut boilerplate with properties, classmethods and dataclasses.
+estimatedMinutes: 32
+difficulty: medium
+section: Core Language
+objectives:
+  - Use inheritance and `super()`, and read a class's MRO
+  - Implement `__repr__`, `__eq__`, `__add__` and `__len__`, and know the `__eq__`/`__hash__` contract
+  - Use `@property`, `@classmethod` and `@staticmethod` for their intended jobs
+  - Replace boilerplate classes with `@dataclass`
+prerequisites:
+  - Classes and objects
+tags: [python, oop, inheritance, dunder, dataclasses]
+practice: [py-p-055, py-p-060]
+interview: [py-i-026, py-i-034, py-i-035, py-i-037, py-i-038, py-i-039]
+---
+
+## Intuition: family resemblance, with a fixed lookup order
+
+A child class inherits its parents' abilities and can override some of them. When a class has
+several parents that share a grandparent (a "diamond"), Python needs one unambiguous order to search.
+That order, the **MRO**, is computed once, and every lookup and every `super()` call follows it.
+
+## See it
+
+<MroViz />
+
+## The precise rules
+
+- `class B(A):` makes `B` inherit `A`'s attributes. Overriding replaces them for `B`.
+- `super().method()` calls the **next class in the MRO** after the current one. It's not
+  necessarily the parent you're thinking of, and that's what makes cooperative multiple
+  inheritance work.
+- **Special ("dunder") methods** hook into syntax: `__repr__` → `repr()`, `__str__` → `str()`,
+  `__eq__` → `==`, `__lt__` → `<`, `__add__` → `+`, `__len__` → `len()`, `__iter__` → `for`.
+- Defining `__eq__` without `__hash__` makes instances **unhashable**, so they can't go in sets or be
+  dict keys. Equal objects must have equal hashes.
+- `@property` makes a method read like an attribute. `@classmethod` receives the class (`cls`), which
+  makes it good for alternative constructors. `@staticmethod` receives nothing, so it's a plain
+  helper kept in the class's namespace.
+
+## Worked example
+
+```python title="inheritance.py"
+from dataclasses import dataclass, field
+
+
+class A:
+    def hello(self) -> str:
+        return "A"
+
+
+class B(A):
+    def hello(self) -> str:
+        return "B>" + super().hello()
+
+
+class C(A):
+    def hello(self) -> str:
+        return "C>" + super().hello()
+
+
+class D(B, C):
+    def hello(self) -> str:
+        return "D>" + super().hello()
+
+
+print([k.__name__ for k in D.__mro__], D().hello())
+
+
+class Vec:
+    def __init__(self, x: float, y: float) -> None:
+        self.x, self.y = x, y
+
+    def __repr__(self) -> str:
+        return f"Vec({self.x}, {self.y})"
+
+    def __add__(self, other: "Vec") -> "Vec":
+        return Vec(self.x + other.x, self.y + other.y)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Vec) and (self.x, self.y) == (other.x, other.y)
+
+
+print(Vec(1, 2) + Vec(3, 4), Vec(1, 2) == Vec(1, 2))
+try:
+    {Vec(1, 2)}
+except TypeError as err:
+    print("TypeError:", err)
+
+
+class Temperature:
+    def __init__(self, celsius: float) -> None:
+        self._c = celsius
+
+    @property
+    def fahrenheit(self) -> float:
+        return self._c * 9 / 5 + 32
+
+    @fahrenheit.setter
+    def fahrenheit(self, value: float) -> None:
+        self._c = (value - 32) * 5 / 9
+
+
+t = Temperature(100)
+print(t.fahrenheit)
+t.fahrenheit = 32
+print(t._c)
+
+
+class Pizza:
+    def __init__(self, size: int) -> None:
+        self.size = size
+
+    @classmethod
+    def small(cls) -> "Pizza":  # alternative constructor
+        return cls(20)
+
+    @staticmethod
+    def is_valid(size: int) -> bool:
+        return 20 <= size <= 40
+
+
+print(Pizza.small().size, Pizza.is_valid(50))
+
+
+@dataclass(order=True)
+class Card:
+    rank: int
+    suit: str = "spades"
+    tags: list = field(default_factory=list)  # a new list per instance
+
+
+print(Card(10), Card(2) < Card(10), Card(3) == Card(3))
+```
+
+```text title="Output"
+['D', 'B', 'C', 'A', 'object'] D>B>C>A
+Vec(4, 6) True
+TypeError: unhashable type: 'Vec'
+212.0
+0.0
+20 False
+Card(rank=10, suit='spades', tags=[]) True True
+```
+
+What to notice:
+
+- `B`'s `super().hello()` called **C**, not A, because the MRO of a `D` instance is D → B → C → A.
+  Each class contributes once.
+- `Vec` defined `__eq__`, so Python set `__hash__ = None`. To use it in sets, also define
+  `__hash__` (for example `hash((self.x, self.y))`), and keep the object immutable.
+- `@dataclass` generated `__init__`, `__repr__`, `__eq__` and (with `order=True`) comparisons. That's
+  about 20 lines you didn't have to write.
+
+## Variations
+
+### Extending vs overriding
+
+```python title="extend_override.py"
+class Employee:
+    def __init__(self, name: str, salary: int):
+        self.name, self.salary = name, salary
+
+    def describe(self) -> str:
+        return f"{self.name} earns {self.salary}"
+
+    def bonus(self) -> int:
+        return self.salary // 10
+
+
+class Manager(Employee):
+    def __init__(self, name: str, salary: int, reports: list[str]):
+        super().__init__(name, salary)          # EXTEND: reuse the parent's setup
+        self.reports = reports
+
+    def describe(self) -> str:                  # EXTEND: parent's text plus more
+        return super().describe() + f" and manages {len(self.reports)}"
+
+    def bonus(self) -> int:                     # OVERRIDE: a different rule entirely
+        return self.salary // 5
+
+
+staff = [Employee("ada", 5000), Manager("grace", 8000, ["ada", "alan"])]
+for person in staff:
+    print(person.describe(), "| bonus", person.bonus())
+print(isinstance(staff[1], Employee), issubclass(Manager, Employee), type(staff[1]).__name__)
+```
+
+```text title="Output"
+ada earns 5000 | bonus 500
+grace earns 8000 and manages 2 | bonus 1600
+True True Manager
+```
+
+Overriding replaces a method; extending calls `super()` and adds to it. Forgetting
+`super().__init__(...)` in a subclass is a classic bug: the parent's attributes are never set.
+
+### Abstract base classes: a contract for subclasses
+
+```python title="abstract.py"
+import math
+from abc import ABC, abstractmethod
+
+
+class Shape(ABC):
+    @abstractmethod
+    def area(self) -> float: ...
+
+    def describe(self) -> str:                   # concrete methods can use abstract ones
+        return f"{type(self).__name__} with area {self.area():.2f}"
+
+
+class Circle(Shape):
+    def __init__(self, r: float):
+        self.r = r
+
+    def area(self) -> float:
+        return math.pi * self.r**2
+
+
+class Square(Shape):
+    def __init__(self, side: float):
+        self.side = side
+
+    def area(self) -> float:
+        return self.side**2
+
+
+class Blob(Shape):
+    pass                                          # forgot to implement area()
+
+
+for shape in [Circle(1), Square(3)]:
+    print(shape.describe())
+for cls in [Shape, Blob]:
+    try:
+        cls()
+    except TypeError as err:
+        print("TypeError:", err)
+```
+
+```text title="Output"
+Circle with area 3.14
+Square with area 9.00
+TypeError: Can't instantiate abstract class Shape without an implementation for abstract method 'area'
+TypeError: Can't instantiate abstract class Blob without an implementation for abstract method 'area'
+```
+
+An ABC can't be instantiated, and neither can a subclass that leaves an `@abstractmethod`
+unimplemented. The error appears when the object is **created**, not later when the missing method
+would have been called.
+
+### Duck typing and `Protocol`
+
+```python title="duck_typing.py"
+from typing import Protocol
+
+
+class Speaker(Protocol):
+    def speak(self) -> str: ...
+
+
+class Dog:
+    def speak(self) -> str:
+        return "woof"
+
+
+class Robot:                           # unrelated class, no common base
+    def speak(self) -> str:
+        return "beep"
+
+
+def chorus(speakers: list[Speaker]) -> str:
+    return " ".join(s.speak() for s in speakers)
+
+
+print(chorus([Dog(), Robot(), Dog()]))
+print(len("abc"), len([1, 2]), len({"a": 1}))   # len() works on anything with __len__
+```
+
+```text title="Output"
+woof beep woof
+3 2 1
+```
+
+"If it walks like a duck and quacks like a duck…": Python cares whether an object **has** the
+method, not what it inherits from. `typing.Protocol` writes that expectation down so a type
+checker can verify it, without forcing classes to inherit anything.
+
+### Making a class behave like a container
+
+```python title="container_dunders.py"
+class Deck:
+    RANKS = "23456789TJQKA"
+
+    def __init__(self):
+        self.cards = [r + s for s in "♠♥" for r in self.RANKS]
+
+    def __len__(self):
+        return len(self.cards)
+
+    def __getitem__(self, index):          # enables d[i], slicing AND iteration
+        return self.cards[index]
+
+    def __contains__(self, card):
+        return card in self.cards
+
+    def __bool__(self):
+        return bool(self.cards)
+
+
+deck = Deck()
+print(len(deck), deck[0], deck[-1], deck[:3])
+print("A♥" in deck, "A♦" in deck, bool(deck))
+print([c for c in deck if c[0] == "K"])        # iteration falls back to __getitem__
+print(sorted(deck, key=lambda c: Deck.RANKS.index(c[0]))[-2:])
+```
+
+```text title="Output"
+26 2♠ A♥ ['2♠', '3♠', '4♠']
+True False True
+['K♠', 'K♥']
+['A♠', 'A♥']
+```
+
+A handful of special methods make a class work with `len()`, indexing, slicing, `in`, `for`
+loops, `sorted` and truth tests. This is Python's **data model**: built-in functions call your
+dunder methods.
+
+### Comparisons, ordering and hashing
+
+```python title="ordering_hashing.py"
+from dataclasses import dataclass
+from functools import total_ordering
+
+
+@total_ordering
+class Version:
+    def __init__(self, text: str):
+        self.parts = tuple(int(p) for p in text.split("."))
+
+    def __eq__(self, other):
+        return isinstance(other, Version) and self.parts == other.parts
+
+    def __lt__(self, other):
+        return self.parts < other.parts       # tuples compare item by item
+
+    def __hash__(self):
+        return hash(self.parts)               # equal objects -> equal hashes
+
+    def __repr__(self):
+        return "Version('" + ".".join(map(str, self.parts)) + "')"
+
+
+versions = [Version("1.10.0"), Version("1.2.3"), Version("1.2.10"), Version("1.2.3")]
+print(sorted(versions), max(versions), Version("2.0") >= Version("1.9.9"))
+print(len(set(versions)))
+
+
+@dataclass(frozen=True)                       # frozen: immutable AND hashable
+class Point:
+    x: int
+    y: int
+
+
+print({Point(1, 2), Point(1, 2)}, Point(1, 2) == Point(1, 2))
+```
+
+```text title="Output"
+[Version('1.2.3'), Version('1.2.3'), Version('1.2.10'), Version('1.10.0')] Version('1.10.0') True
+3
+{Point(x=1, y=2)} True
+```
+
+- `@total_ordering` derives `<=`, `>`, `>=` from `__eq__` and `__lt__`.
+- Comparing tuples of ints gets version ordering right (`1.2.10` > `1.2.3`), which string comparison
+  gets wrong.
+- `__hash__` must agree with `__eq__`. `@dataclass(frozen=True)` generates both and forbids
+  changes, so instances are safe as set members and dict keys.
+
+### Arithmetic operators and `NotImplemented`
+
+```python title="arithmetic.py"
+class Vec:
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+
+    def __repr__(self):
+        return f"Vec({self.x}, {self.y})"
+
+    def __add__(self, other):
+        if not isinstance(other, Vec):
+            return NotImplemented             # let Python try the other operand / raise
+        return Vec(self.x + other.x, self.y + other.y)
+
+    def __mul__(self, k):                     # vec * 3
+        if not isinstance(k, (int, float)):
+            return NotImplemented
+        return Vec(self.x * k, self.y * k)
+
+    __rmul__ = __mul__                        # 3 * vec
+
+    def __neg__(self):
+        return Vec(-self.x, -self.y)
+
+    def __abs__(self):
+        return (self.x**2 + self.y**2) ** 0.5
+
+
+v = Vec(3, 4)
+print(v + Vec(1, 1), v * 2, 2 * v, -v, abs(v))
+try:
+    v + 5
+except TypeError as err:
+    print("TypeError:", err)
+```
+
+```text title="Output"
+Vec(4, 5) Vec(6, 8) Vec(6, 8) Vec(-3, -4) 5.0
+TypeError: unsupported operand type(s) for +: 'Vec' and 'int'
+```
+
+- Returning `NotImplemented` (not raising) tells Python "I can't handle this type". Python then
+  tries the other operand's reflected method (`__radd__`) and raises a clear `TypeError` if
+  nothing works.
+- `2 * v` calls `int.__mul__(2, v)` first, which returns `NotImplemented`, then `v.__rmul__(2)`.
+
+### Callable objects, formatting and mixins
+
+```python title="call_format_mixin.py"
+import json
+
+
+class JsonMixin:                              # reusable behaviour, no state of its own
+    def to_json(self) -> str:
+        return json.dumps(vars(self), sort_keys=True)
+
+
+class Discount(JsonMixin):
+    def __init__(self, percent: float):
+        self.percent = percent
+
+    def __call__(self, price: float) -> float:     # instances act like functions
+        return round(price * (1 - self.percent / 100), 2)
+
+    def __str__(self):
+        return f"{self.percent:g}% off"
+
+    def __format__(self, spec):                     # used by f"{d:...}"
+        return format(str(self), spec)
+
+
+sale = Discount(15)
+print(sale(80), list(map(sale, [10, 20])), callable(sale))
+print(str(sale), f"[{sale:>10}]", sale.to_json())
+```
+
+```text title="Output"
+68.0 [8.5, 17.0] True
+15% off [   15% off] {"percent": 15}
+```
+
+- `__call__` makes an object usable wherever a function is expected (here with `map`), while it
+  keeps configuration (`percent`) as state.
+- `__format__` controls f-string specs, so the discount can be aligned like any string.
+- A **mixin** adds one capability (`to_json`) to any class that lists it as a base.
+
+### More from `dataclasses`
+
+```python title="dataclass_more.py"
+from dataclasses import asdict, dataclass, field, replace
+
+
+@dataclass
+class Order:
+    item: str
+    qty: int = 1
+    price: float = 0.0
+    tags: list[str] = field(default_factory=list)
+    total: float = field(init=False)          # computed, not passed in
+
+    def __post_init__(self):                  # validation after the generated __init__
+        if self.qty <= 0:
+            raise ValueError("qty must be positive")
+        self.total = round(self.qty * self.price, 2)
+
+
+o = Order("pen", 3, 1.5, ["office"])
+print(o)
+print(asdict(o))
+print(replace(o, qty=10))                     # a modified COPY; __post_init__ runs again
+try:
+    Order("pen", 0)
+except ValueError as err:
+    print("ValueError:", err)
+```
+
+```text title="Output"
+Order(item='pen', qty=3, price=1.5, tags=['office'], total=4.5)
+{'item': 'pen', 'qty': 3, 'price': 1.5, 'tags': ['office'], 'total': 4.5}
+Order(item='pen', qty=10, price=1.5, tags=['office'], total=15.0)
+ValueError: qty must be positive
+```
+
+`__post_init__` runs after the generated `__init__`, the place for validation and derived fields.
+`asdict` converts (recursively) to a dict for JSON, and `replace` makes a changed copy.
+
+## Putting it together
+
+### A shape report with polymorphism
+
+```python title="shapes_report.py"
+import math
+from abc import ABC, abstractmethod
+
+
+class Shape(ABC):
+    @abstractmethod
+    def area(self) -> float: ...
+
+    @abstractmethod
+    def perimeter(self) -> float: ...
+
+    def __repr__(self):
+        return f"{type(self).__name__}({', '.join(f'{v:g}' for v in vars(self).values())})"
+
+
+class Rectangle(Shape):
+    def __init__(self, w, h):
+        self.w, self.h = w, h
+
+    def area(self):
+        return self.w * self.h
+
+    def perimeter(self):
+        return 2 * (self.w + self.h)
+
+
+class Square(Rectangle):                       # a square IS a rectangle
+    def __init__(self, side):
+        super().__init__(side, side)
+
+
+class Circle(Shape):
+    def __init__(self, r):
+        self.r = r
+
+    def area(self):
+        return math.pi * self.r**2
+
+    def perimeter(self):
+        return 2 * math.pi * self.r
+
+
+shapes = [Rectangle(2, 5), Circle(1.5), Square(3), Circle(0.5)]
+for s in sorted(shapes, key=lambda s: s.area(), reverse=True):
+    print(f"{s!r:18} area {s.area():6.2f}  perimeter {s.perimeter():6.2f}")
+print("total area:", round(sum(s.area() for s in shapes), 2))
+```
+
+```text title="Output"
+Rectangle(2, 5)    area  10.00  perimeter  14.00
+Square(3, 3)       area   9.00  perimeter  12.00
+Circle(1.5)        area   7.07  perimeter   9.42
+Circle(0.5)        area   0.79  perimeter   3.14
+total area: 26.85
+```
+
+The report loop never asks "which kind of shape is this?": each object answers `area()` and
+`perimeter()` in its own way. Adding a `Triangle` would need a new class and **no** change to the
+report: that's the practical payoff of polymorphism.
+
+### A `Money` value type
+
+```python title="money.py"
+from dataclasses import dataclass
+from decimal import Decimal
+
+
+@dataclass(frozen=True, order=True)
+class Money:
+    amount: Decimal
+    currency: str = "EUR"
+
+    def __post_init__(self):
+        object.__setattr__(self, "amount", Decimal(str(self.amount)).quantize(Decimal("0.01")))
+
+    def _check(self, other):
+        if not isinstance(other, Money):
+            return NotImplemented
+        if other.currency != self.currency:
+            raise ValueError(f"can't mix {self.currency} and {other.currency}")
+        return other
+
+    def __add__(self, other):
+        other = self._check(other)
+        if other is NotImplemented:
+            return other
+        return Money(self.amount + other.amount, self.currency)
+
+    def __mul__(self, factor):
+        return Money(self.amount * Decimal(str(factor)), self.currency)
+
+    def __str__(self):
+        return f"{self.amount} {self.currency}"
+
+
+prices = [Money("19.99"), Money(5), Money("0.1") + Money("0.2")]
+print([str(p) for p in prices], str(sum(prices[1:], prices[0])))
+print(str(Money("3.33") * 3), max(prices), Money(5) in {Money("5.00")})
+try:
+    Money(1) + Money(1, "USD")
+except ValueError as err:
+    print("ValueError:", err)
+```
+
+```text title="Output"
+['19.99 EUR', '5.00 EUR', '0.30 EUR'] 25.29 EUR
+9.99 EUR 19.99 EUR True
+ValueError: can't mix EUR and USD
+```
+
+- `frozen=True` makes Money immutable and hashable; `order=True` lets `max` and `sorted` compare by
+  amount. (Frozen dataclasses must use `object.__setattr__` to normalise a field in
+  `__post_init__`.)
+- Converting through `str` before `Decimal` keeps `0.1 + 0.2` exactly `0.30`.
+- Mixing currencies raises instead of silently adding euros to dollars: a value type that refuses
+  to be misused.
+
+## Common mistakes
+
+<Callout type="warning" title="Inheritance for code reuse only">
+  Inherit only when the child truly **is a** kind of the parent. If one class merely **uses**
+  another, store it as an attribute (composition). Deep inheritance trees are hard to change.
+</Callout>
+
+- **Calling the parent directly** (`A.hello(self)`) in multiple-inheritance code skips classes in
+  the MRO. Use `super()`.
+- **`__repr__` vs `__str__`.** `__repr__` is for developers (unambiguous, ideally valid code), and
+  `__str__` is for users. If you write only one, write `__repr__`.
+- **Inconsistent MRO.** `class Z(X, Y)` where `Y` subclasses `X` raises
+  `TypeError: Cannot create a consistent method resolution order (MRO)`.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: why can a dataclass with frozen=True be used in a set, but a plain one can't?"
+>
+  A plain dataclass generates `__eq__` but sets `__hash__` to `None`, because its fields can change.
+  `@dataclass(frozen=True)` makes the fields read-only and generates a `__hash__` from them.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what happens if a subclass's `__init__` doesn't call `super().__init__()`?"
+>
+  The parent's `__init__` never runs, so any attributes it sets are missing. The first method that
+  uses one fails with `AttributeError`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why return `NotImplemented` instead of raising `TypeError` in `__add__`?"
+>
+  It lets Python try the other operand's reflected method (`__radd__`). Only if that also returns
+  `NotImplemented` does Python raise a `TypeError` with a clear message.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: which special methods make `for x in obj` work?">
+  `__iter__` (returning an iterator), or, as a fallback, `__getitem__` with integer indexes starting
+  at 0 until it raises `IndexError`.
+</Reveal>
+
+<KeyTakeaways>
+
+- Lookups and `super()` follow the MRO (`Class.__mro__`), where each class comes before its bases.
+- Dunder methods connect your objects to operators and built-ins.
+- `__eq__` without `__hash__` makes objects unhashable.
+- Use `@property` for computed attributes, `@classmethod` for alternative constructors, and
+  `@dataclass` for data classes.
+- Extend with `super()`, override when the behaviour differs; ABCs enforce required methods at
+  creation time.
+- Dunder methods plug classes into Python's syntax: containers, comparisons, arithmetic, calls,
+  formatting.
+- Keep `__eq__` and `__hash__` consistent; frozen dataclasses make safe, hashable value types.
+
+</KeyTakeaways>
+
+{/* enriched */}

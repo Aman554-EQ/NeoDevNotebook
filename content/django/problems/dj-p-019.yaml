@@ -1,0 +1,69 @@
+id: dj-p-019
+title: Request-ID middleware
+difficulty: medium
+tags:
+  - middleware
+  - observability
+statement: |
+  Write `RequestIDMiddleware`: every response gets an `X-Request-ID` header. If the request
+  already has a **valid** one (8–64 characters of letters, digits or `-`), keep it; otherwise generate a
+  32-character hex id. Expose it to views as `request.request_id`.
+examples:
+  - input: "GET / with X-Request-ID: abc-12345"
+    output: "X-Request-ID: abc-12345"
+  - input: "GET / with X-Request-ID: <script>"
+    output: a new 32-char hex id
+hints:
+  - "`uuid.uuid4().hex`"
+  - Validate with a regex before trusting the header.
+solution:
+  language: python
+  code: |
+    import re
+    import uuid
+
+    from playground import setup
+
+    SAFE_ID = re.compile(r"^[A-Za-z0-9-]{8,64}$")
+
+
+    class RequestIDMiddleware:
+        def __init__(self, get_response):
+            self.get_response = get_response
+
+        def __call__(self, request):
+            incoming = request.headers.get("X-Request-ID", "")
+            request.request_id = incoming if SAFE_ID.match(incoming) else uuid.uuid4().hex
+            response = self.get_response(request)
+            response["X-Request-ID"] = request.request_id
+            return response
+
+
+    setup(middleware=["__main__.RequestIDMiddleware"])
+
+    from django.http import JsonResponse
+    from django.urls import path
+
+    urlpatterns = [path("", lambda request: JsonResponse({"id": request.request_id}))]
+  explanation: |
+    A middleware is a factory taking `get_response` and returning a callable for each request.
+    Setting `request.request_id` before calling the next layer makes the id available to views and to
+    logging; adding the header afterwards sends it back to the client. Reusing a caller's id links logs
+    across services, but only after validating it: reflecting arbitrary input into headers and logs
+    invites header and log injection. Put this middleware first in `MIDDLEWARE` so it wraps everything,
+    including responses other middleware return early.
+complexity:
+  time: O(1)
+  space: O(1)
+verify: |
+  import re as _re
+
+  from django.test import Client
+
+  c = Client()
+  r = c.get("/")
+  assert _re.fullmatch(r"[0-9a-f]{32}", r["X-Request-ID"]) and r.json()["id"] == r["X-Request-ID"]
+  assert c.get("/", headers={"X-Request-ID": "abc-12345"})["X-Request-ID"] == "abc-12345"
+  for bad in ["<script>", "short", "x" * 65, "has space here"]:
+      assert c.get("/", headers={"X-Request-ID": bad})["X-Request-ID"] != bad
+  assert c.get("/")["X-Request-ID"] != c.get("/")["X-Request-ID"]

@@ -1,0 +1,514 @@
+---
+title: How the web works
+summary: What really happens between typing a URL and seeing a page. URLs, DNS, TCP and TLS, the shape of HTTP requests and responses, methods, status codes, headers and cookies, shown with real messages from Python.
+estimatedMinutes: 25
+difficulty: easy
+section: Web & Backend Foundations
+objectives:
+  - Take a URL apart into scheme, host, port, path, query and fragment
+  - Describe the trip of a request (DNS, TCP, TLS, HTTP) and where your backend fits in
+  - Read and write raw HTTP requests and responses, including headers and bodies
+  - Choose the right method and status code, and explain what a cookie is for
+prerequisites:
+  - Functions
+  - Strings
+tags: [web, http, backend, networking]
+practice: [dj-p-001, dj-p-006]
+interview: [dj-i-003, dj-i-007]
+---
+
+## Intuition: letters with a strict format
+
+The web is two programs exchanging **letters**. The **client** (a browser, a phone app, `curl`,
+Postman) writes a **request**: what it wants, plus some notes on the envelope. The **server** (your
+Django app, behind a web server) writes back a **response**: how it went, plus the content.
+
+The letters follow a strict format called **HTTP**. It is plain text, so you can read every byte.
+Everything else, like finding the server's address or encrypting the letter, is delivery work that
+happens before your code ever runs.
+
+## See it
+
+<WebRequestViz />
+
+## The precise rules
+
+**A URL** names a resource: `https://shop.example.com:443/orders/7?expand=items#top`
+
+| Part     | Example            | Meaning                                                        |
+| -------- | ------------------ | -------------------------------------------------------------- |
+| scheme   | `https`            | protocol; https means HTTP inside TLS encryption               |
+| host     | `shop.example.com` | which server, found through DNS                                |
+| port     | `443`              | which program on that machine (default 443 for https, 80 http) |
+| path     | `/orders/7`        | which resource on the server: what your URL routing matches    |
+| query    | `expand=items`     | extra parameters, `key=value` pairs joined by `&`              |
+| fragment | `#top`             | a spot inside the page; **never sent to the server**           |
+
+**The trip:** DNS turns the host into an IP address → a **TCP** connection opens (reliable, ordered
+bytes) → for https, a **TLS** handshake proves the server's identity and sets up encryption → the
+HTTP request is sent → the server answers → the connection is usually kept open for the next request.
+
+**An HTTP request** is a start line, headers, a blank line, then an optional body:
+
+```http
+POST /api/orders/ HTTP/1.1
+Host: shop.example.com
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOi…
+
+{"product": 3, "quantity": 2}
+```
+
+**An HTTP response** has the same shape, with a status line first:
+
+```http
+HTTP/1.1 201 Created
+Content-Type: application/json
+Location: /api/orders/41/
+
+{"id": 41, "status": "pending"}
+```
+
+**Methods** say what the client wants to do:
+
+| Method   | Meaning                       | Safe (no changes) | Idempotent (repeat = same effect) |
+| -------- | ----------------------------- | ----------------- | --------------------------------- |
+| `GET`    | read                          | yes               | yes                               |
+| `POST`   | create / perform an action    | no                | **no**                            |
+| `PUT`    | replace a resource completely | no                | yes                               |
+| `PATCH`  | change part of a resource     | no                | not guaranteed                    |
+| `DELETE` | remove                        | no                | yes                               |
+
+**Status codes** come in five families: `1xx` informational, `2xx` success (200 OK, 201 Created,
+204 No Content), `3xx` redirection (301, 302, 304 Not Modified), `4xx` **the client's fault** (400
+Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 405, 409 Conflict, 422, 429 Too Many
+Requests), `5xx` **the server's fault** (500, 502, 503).
+
+**Headers** are `Name: value` metadata. Names are case-insensitive. You'll meet `Host`,
+`Content-Type`, `Accept`, `Authorization`, `Cookie`/`Set-Cookie`, `Location` and `Cache-Control`
+constantly.
+
+**HTTP is stateless:** each request stands alone, and the server doesn't remember the previous one.
+**Cookies** add memory: the server sends `Set-Cookie`, and the browser sends that value back in a
+`Cookie` header on every later request to the same site.
+
+## Worked example
+
+Start a tiny web server inside a script, send it a request, and look at the response. Everything
+here is Python's standard library, so it runs anywhere without installing anything.
+
+```python title="hello_http.py"
+import http.client
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = json.dumps({"path": self.path, "hello": "world"}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):  # keep the terminal quiet
+        pass
+
+
+server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)  # port 0: pick any free port
+threading.Thread(target=server.serve_forever, daemon=True).start()
+
+conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1])
+conn.request("GET", "/orders/7?expand=items", headers={"Accept": "application/json"})
+response = conn.getresponse()
+
+print(response.status, response.reason)
+print("Content-Type:", response.getheader("Content-Type"))
+print("Body:", response.read().decode())
+server.shutdown()
+```
+
+```text title="Output"
+200 OK
+Content-Type: application/json
+Body: {"path": "/orders/7?expand=items", "hello": "world"}
+```
+
+- `BaseHTTPRequestHandler` parses the raw request for us. `do_GET` runs for `GET` requests, and
+  `self.path` is the path **plus** the query string.
+- A response is built in the same order as the text format: status line (`send_response`), headers
+  (`send_header`, then `end_headers` writes the blank line), then the body bytes.
+- `Content-Length` tells the client exactly how many body bytes follow, so it knows where the
+  response ends on a connection that stays open.
+- On the client side, `getresponse()` reads the status line and headers; `read()` reads the body.
+  The body is **bytes**: decode it, then parse the JSON.
+
+## Variations
+
+### Taking a URL apart
+
+```python
+from urllib.parse import parse_qs, urlsplit
+
+url = urlsplit("https://shop.example.com:8443/orders/7?expand=items&expand=customer&page=2#top")
+print(url.scheme, url.hostname, url.port)
+print(url.path)
+print(parse_qs(url.query))
+print(url.fragment, "(stays in the browser)")
+```
+
+```text title="Output"
+https shop.example.com 8443
+/orders/7
+{'expand': ['items', 'customer'], 'page': ['2']}
+top (stays in the browser)
+```
+
+A query parameter can repeat, which is why `parse_qs` gives lists. Django's `request.GET.getlist()`
+handles the same case.
+
+### Building a query string safely
+
+```python
+from urllib.parse import quote, urlencode
+
+params = {"q": "jane austen & co", "page": 2, "tags": "café"}
+print("/search?" + urlencode(params))
+print("/files/" + quote("my report 2026.pdf"))
+```
+
+```text title="Output"
+/search?q=jane+austen+%26+co&page=2&tags=caf%C3%A9
+/files/my%20report%202026.pdf
+```
+
+Spaces, `&` and non-ASCII characters must be **percent-encoded** in a URL, or they change its
+meaning. Never glue user input into a URL with plain string formatting.
+
+### Status codes have names and families
+
+```python
+from http import HTTPStatus
+
+for code in (200, 201, 204, 301, 304, 400, 401, 403, 404, 409, 429, 500, 503):
+    status = HTTPStatus(code)
+    family = {2: "success", 3: "redirect", 4: "client error", 5: "server error"}[code // 100]
+    print(code, status.phrase.ljust(21), family)
+```
+
+```text title="Output"
+200 OK                    success
+201 Created               success
+204 No Content            success
+301 Moved Permanently     redirect
+304 Not Modified          redirect
+400 Bad Request           client error
+401 Unauthorized          client error
+403 Forbidden             client error
+404 Not Found             client error
+409 Conflict              client error
+429 Too Many Requests     client error
+500 Internal Server Error server error
+503 Service Unavailable   server error
+```
+
+`401 Unauthorized` really means _unauthenticated_ ("who are you?"); `403 Forbidden` means "I know
+who you are, and you may not". Interviewers love that difference.
+
+### A raw HTTP message, by hand
+
+HTTP/1.1 is just text over a connection. This builds a request exactly as a client sends it, then
+splits a raw response into its parts.
+
+```python
+request = (
+    "GET /api/books/?page=2 HTTP/1.1\r\n"
+    "Host: library.example.com\r\n"
+    "Accept: application/json\r\n"
+    "\r\n"
+)
+print(repr(request.split("\r\n")[0]))
+print(len(request.encode()), "bytes on the wire")
+
+raw = (
+    "HTTP/1.1 404 Not Found\r\n"
+    "Content-Type: application/json\r\n"
+    "Content-Length: 27\r\n"
+    "\r\n"
+    '{"detail": "No such book."}'
+)
+head, body = raw.split("\r\n\r\n", 1)
+status_line, *header_lines = head.split("\r\n")
+version, code, reason = status_line.split(" ", 2)
+headers = dict(line.split(": ", 1) for line in header_lines)
+print(version, int(code), reason)
+print(headers)
+print(body, len(body.encode()) == int(headers["Content-Length"]))
+```
+
+```text title="Output"
+'GET /api/books/?page=2 HTTP/1.1'
+88 bytes on the wire
+HTTP/1.1 404 Not Found
+{'Content-Type': 'application/json', 'Content-Length': '27'}
+{"detail": "No such book."} True
+```
+
+Lines end with `\r\n` (carriage return + newline), and an empty line separates headers from the
+body. Frameworks hide this, but it's what travels on the wire. (HTTP/2 and HTTP/3 encode the same
+information in binary frames, with the same methods, statuses and headers.)
+
+### Headers are case-insensitive
+
+```python
+from email.message import Message
+
+headers = Message()
+headers["Content-Type"] = "application/json"
+headers["X-Request-ID"] = "a1b2c3"
+print(headers["content-type"], headers["CONTENT-TYPE"])
+print(headers.get("x-request-id"))
+```
+
+```text title="Output"
+application/json application/json
+a1b2c3
+```
+
+Python's HTTP libraries store headers in this case-insensitive structure. Django does the same:
+`request.headers["content-type"]` and `request.headers["Content-Type"]` are the same header.
+
+### What a cookie looks like
+
+```python
+from http.cookies import SimpleCookie
+
+cookie = SimpleCookie()
+cookie["sessionid"] = "k2v9x7"
+cookie["sessionid"]["httponly"] = True  # JavaScript can't read it
+cookie["sessionid"]["secure"] = True  # only sent over HTTPS
+cookie["sessionid"]["samesite"] = "Lax"  # not sent on most cross-site requests
+cookie["sessionid"]["max-age"] = 1209600  # two weeks
+print(cookie.output())
+
+browser_sends = SimpleCookie("sessionid=k2v9x7; theme=dark")
+print({name: morsel.value for name, morsel in browser_sends.items()})
+```
+
+```text title="Output"
+Set-Cookie: sessionid=k2v9x7; HttpOnly; Max-Age=1209600; SameSite=Lax; Secure
+{'sessionid': 'k2v9x7', 'theme': 'dark'}
+```
+
+The server sets the cookie once with `Set-Cookie`; the browser returns just `name=value` pairs in the
+`Cookie` header on every later request. Login sessions (lesson 15) are built on exactly this.
+
+### Redirects: the server says "look over there"
+
+```python
+import threading
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/old-page":
+            self.send_response(301)
+            self.send_header("Location", "/new-page")
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"You found the new page")
+
+    def log_message(self, *args):
+        pass
+
+
+server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+base = f"http://127.0.0.1:{server.server_address[1]}"
+
+with urllib.request.urlopen(base + "/old-page") as response:  # follows the redirect
+    print(response.status, response.geturl().removeprefix(base))
+    print(response.read().decode())
+server.shutdown()
+```
+
+```text title="Output"
+200 /new-page
+You found the new page
+```
+
+`301 Moved Permanently` lets browsers and search engines update their links; `302 Found` is
+temporary (Django's `redirect()` uses 302 by default). After a successful form submission, Django
+views redirect so a browser refresh doesn't resubmit the form ("Post/Redirect/Get").
+
+## Putting it together
+
+A small JSON API and a client that exercises it the way an app would: read, create, fail
+validation, ask for something missing, and use a method the endpoint doesn't support.
+
+```python title="mini_api.py"
+import http.client
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+BOOKS = {1: {"id": 1, "title": "Dune"}}
+
+
+class Api(BaseHTTPRequestHandler):
+    def reply(self, status, data=None, headers=None):
+        body = json.dumps(data).encode() if data is not None else b""
+        self.send_response(status)
+        if body:
+            self.send_header("Content-Type", "application/json")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path == "/books":
+            return self.reply(200, list(BOOKS.values()))
+        book_id = self.path.removeprefix("/books/")
+        if book_id.isdigit() and int(book_id) in BOOKS:
+            return self.reply(200, BOOKS[int(book_id)])
+        self.reply(404, {"error": "not found"})
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            data = json.loads(self.rfile.read(length))
+            title = data["title"].strip()
+        except (ValueError, KeyError, AttributeError):
+            return self.reply(400, {"error": "send JSON with a title"})
+        new_id = max(BOOKS) + 1
+        BOOKS[new_id] = {"id": new_id, "title": title}
+        self.reply(201, BOOKS[new_id], {"Location": f"/books/{new_id}"})
+
+    def do_DELETE(self):
+        self.reply(405, {"error": "books can't be deleted"}, {"Allow": "GET, POST"})
+
+    def log_message(self, *args):
+        pass
+
+
+server = ThreadingHTTPServer(("127.0.0.1", 0), Api)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1])
+
+
+def call(method, path, payload=None):
+    body = json.dumps(payload) if payload is not None else None
+    headers = {"Content-Type": "application/json"} if body else {}
+    conn.request(method, path, body=body, headers=headers)
+    r = conn.getresponse()
+    raw = r.read()
+    extra = {k: r.getheader(k) for k in ("Location", "Allow") if r.getheader(k)}
+    line = f"{method:<6} {path:<9} -> {r.status} {r.reason:<18} {raw.decode()} {extra or ''}"
+    print(line.rstrip())
+
+
+call("GET", "/books")
+call("POST", "/books", {"title": "Emma"})
+call("POST", "/books", {"name": "no title"})
+call("GET", "/books/2")
+call("GET", "/books/99")
+call("DELETE", "/books/1")
+server.shutdown()
+```
+
+```text title="Output"
+GET    /books    -> 200 OK                 [{"id": 1, "title": "Dune"}]
+POST   /books    -> 201 Created            {"id": 2, "title": "Emma"} {'Location': '/books/2'}
+POST   /books    -> 400 Bad Request        {"error": "send JSON with a title"}
+GET    /books/2  -> 200 OK                 {"id": 2, "title": "Emma"}
+GET    /books/99 -> 404 Not Found          {"error": "not found"}
+DELETE /books/1  -> 405 Method Not Allowed {"error": "books can't be deleted"} {'Allow': 'GET, POST'}
+```
+
+One connection (`conn`) carried six requests: that's keep-alive. Each answer picks the most precise
+status code: `201` with a `Location` for a creation, `400` for bad input, `404` for an unknown id,
+`405` plus `Allow` for an unsupported method. A framework like Django gives you all of this, plus
+routing, parsing and security, so you never write `BaseHTTPRequestHandler` code in a real project.
+
+## Common mistakes
+
+<Callout type="warning" title="Changing data with GET">
+  Browsers prefetch links, crawlers follow them and caches replay them. A `GET /delete/7` link can
+  delete data without anyone clicking. Anything that changes state must be `POST`, `PUT`, `PATCH` or
+  `DELETE`.
+</Callout>
+
+- **Returning `200 OK` with `{"error": ...}` in the body.** Clients, monitoring and caches look at
+  the status code. Errors must use `4xx`/`5xx`.
+- **Mixing up 401 and 403.** No or invalid credentials: `401`. Valid credentials but not allowed:
+  `403`.
+- **Forgetting `Content-Type`.** A JSON body sent without `Content-Type: application/json` is often
+  parsed as a form, and the server sees no data.
+- **Putting secrets in the URL** (`?token=...`). URLs end up in server logs, browser history and
+  `Referer` headers. Send credentials in headers.
+- **Thinking the fragment reaches the server.** `#section` never leaves the browser.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: which parts of https://api.example.com/v1/users?id=3#bio does the server receive?"
+>
+  Everything except the fragment: the host (in the `Host` header, after DNS and TLS), the path
+  `/v1/users` and the query `id=3`. `#bio` stays in the browser.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: a client sends the same DELETE twice. The first gets 204, the second 404. Is DELETE still idempotent?"
+>
+  Yes. Idempotent means repeating the request leaves the server in the **same state** (the resource
+  is gone either way), not that every response is identical.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: which status code fits each case? (a) a new order was created, (b) you're logged in but it's someone else's order, (c) too many requests per minute"
+>
+  (a) `201 Created`, ideally with a `Location` header; (b) `403 Forbidden` (or `404` if you don't
+  want to reveal that the order exists); (c) `429 Too Many Requests` with `Retry-After`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why does a site stay logged in between page loads if HTTP is stateless?"
+>
+  The server sets a cookie (`Set-Cookie: sessionid=...`) at login, and the browser sends it back in
+  a `Cookie` header with every request. The server uses that value to look up who you are.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what's the difference between https and http, for your code?"
+>
+  None in the HTTP messages themselves. https wraps the same HTTP in TLS, so nobody between client
+  and server can read or change it, and the client knows it's talking to the real server. In
+  production you always use https.
+</Reveal>
+
+<KeyTakeaways>
+
+- A URL is scheme + host + port + path + query (+ a fragment that stays in the browser).
+- Before your code runs: DNS finds the server, TCP connects, TLS encrypts and proves identity.
+- HTTP messages are text: start line, headers, blank line, body. Requests have a method and path;
+  responses have a status code.
+- GET reads and must never change data; POST creates; PUT replaces; PATCH changes part; DELETE
+  removes. GET, PUT and DELETE are idempotent, POST is not.
+- 2xx success, 3xx redirect, 4xx the client's mistake, 5xx the server's. 401 = not logged in,
+  403 = not allowed.
+- HTTP is stateless; cookies give the server a way to recognise a returning browser.
+
+</KeyTakeaways>

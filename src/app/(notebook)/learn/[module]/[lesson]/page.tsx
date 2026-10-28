@@ -3,17 +3,19 @@ import { notFound } from "next/navigation"
 import "katex/dist/katex.min.css"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
 import { PrevNext } from "@/components/layout/prev-next"
+import { ReadingAids } from "@/components/layout/reading-aids"
 import { Toc } from "@/components/layout/toc"
-import { Callout } from "@/components/lesson/callout"
-import { KeyTakeaways } from "@/components/lesson/key-takeaways"
 import { LessonHeader } from "@/components/lesson/lesson-header"
-import { Reveal } from "@/components/lesson/reveal"
+import { RelatedPractice } from "@/components/lesson/related-practice"
 import { BookmarkButton, DoneToggle } from "@/components/progress/progress-buttons"
-import { vizComponents } from "@/components/viz/__generated__/registry"
-import { allLessonParams, getLesson } from "@/lib/content"
+import { allLessonParams, getInterviewQuestions, getLesson, getProblems } from "@/lib/content"
+import { moduleComponents } from "@/lib/mdx/module-components"
 import { renderMdx } from "@/lib/mdx/render"
 
 export const ensureStatic = "navigation"
+// Fully prerendered, so the complete page is in the first paint. Opting out of instant-navigation
+// validation avoids a Suspense skeleton that would flash (and shift the layout) on every page load.
+export const instant = false
 
 export async function generateStaticParams() {
   return allLessonParams()
@@ -33,9 +35,18 @@ export default async function LessonPage({ params }: PageProps<"/learn/[module]/
   if (!data) notFound()
   const { lesson, prev, next } = data
   const { content, toc } = await renderMdx(lesson.body, {
-    components: { Callout, Reveal, KeyTakeaways, ...vizComponents },
+    components: moduleComponents(module),
   })
   const href = `/learn/${module}/${slug}`
+  const [allProblems, allQuestions] = await Promise.all([
+    getProblems(module),
+    getInterviewQuestions(module),
+  ])
+  // Keep the order the lesson lists them in.
+  const related = {
+    problems: lesson.practice.flatMap((id) => allProblems.filter((p) => p.id === id)),
+    questions: lesson.interview.flatMap((id) => allQuestions.filter((q) => q.id === id)),
+  }
 
   return (
     <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_14rem] xl:gap-10">
@@ -53,6 +64,7 @@ export default async function LessonPage({ params }: PageProps<"/learn/[module]/
             {content}
           </div>
         </article>
+        <RelatedPractice problems={related.problems} questions={related.questions} />
         <div className="mt-10 flex flex-wrap gap-2">
           <DoneToggle itemKey={`lesson:${module}/${slug}`} />
           <BookmarkButton itemKey={`lesson:${module}/${slug}`} title={lesson.title} href={href} />
@@ -62,6 +74,7 @@ export default async function LessonPage({ params }: PageProps<"/learn/[module]/
       <aside className="sticky top-24 hidden max-h-[calc(100dvh-7rem)] self-start overflow-y-auto xl:block">
         <Toc items={toc} />
       </aside>
+      <ReadingAids items={toc} />
     </div>
   )
 }

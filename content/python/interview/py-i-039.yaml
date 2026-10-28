@@ -1,0 +1,53 @@
+id: py-i-039
+question: What is a metaclass, and when would you actually need one?
+difficulty: hard
+tags:
+  - oop
+  - metaclasses
+  - metaprogramming
+shortAnswer: |
+  A metaclass is the class of a class: it controls how class objects are created. `type`
+  is the default. You rarely need one. `__init_subclass__`, class decorators and
+  descriptors cover most uses (registration, validation, adding methods). Metaclasses appear
+  in frameworks such as ORMs and ABCs (`ABCMeta`).
+detailedAnswer: |
+  `class Foo: ...` is roughly `Foo = type("Foo", bases, namespace)`. A metaclass can
+  intercept that call (`__new__` / `__init__`) to modify the namespace, register the class,
+  or enforce rules for every subclass.
+
+  Simpler alternatives, in order of preference:
+
+  1. `__init_subclass__(cls, **kwargs)` runs whenever a subclass is created (3.6+), which is
+     perfect for plugin registries.
+  2. A class decorator, which transforms one class after creation.
+  3. Descriptors and `__set_name__`, for per-attribute behaviour.
+
+  Interview soundbite: "metaclasses are deeper magic than 99% of users should worry about"
+  (Tim Peters), and `__init_subclass__` usually suffices.
+code:
+  language: python
+  code: |
+    class Plugin:
+        registry: dict[str, type] = {}
+
+        def __init_subclass__(cls, **kwargs):
+            super().__init_subclass__(**kwargs)
+            Plugin.registry[cls.__name__.lower()] = cls
+
+
+    class Csv(Plugin):
+        pass
+
+
+    class Json(Plugin):
+        pass
+
+
+    print(sorted(Plugin.registry), type(Plugin).__name__, type(type).__name__)
+pitfalls:
+  - Reaching for a metaclass when `__init_subclass__` or a decorator is enough.
+followUps:
+  - What is `type(type)`?
+  - How does `abc.ABCMeta` enforce abstract methods?
+verify: |
+  assert Plugin.registry['csv'] is Csv

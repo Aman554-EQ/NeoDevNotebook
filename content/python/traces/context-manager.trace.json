@@ -1,0 +1,774 @@
+{
+ "version": 1,
+ "python": "3.13",
+ "source": "class Timer:\n    def __enter__(self):\n        print(\"enter\")\n        return self\n\n    def __exit__(self, exc_type, exc, tb):\n        print(\"exit, error:\", exc_type.__name__ if exc_type else None)\n        return False  # don't swallow the exception\n\n\nwith Timer():\n    print(\"working\")\n\ntry:\n    with Timer():\n        raise ValueError(\"boom\")\nexcept ValueError:\n    print(\"handled outside\")\n",
+ "steps": [
+  {
+   "line": 1,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": []
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 1,
+   "event": "call",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": []
+    },
+    {
+     "name": "Timer",
+     "locals": []
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 1,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": []
+    },
+    {
+     "name": "Timer",
+     "locals": []
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 2,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": []
+    },
+    {
+     "name": "Timer",
+     "locals": []
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 6,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": []
+    },
+    {
+     "name": "Timer",
+     "locals": []
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 6,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": []
+    },
+    {
+     "name": "Timer",
+     "locals": []
+    }
+   ],
+   "stdout": "",
+   "returnValue": "None"
+  },
+  {
+   "line": 11,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 2,
+   "event": "call",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__enter__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 3,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__enter__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 4,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__enter__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\n"
+  },
+  {
+   "line": 4,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__enter__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\n",
+   "returnValue": "<__main__.Timer object>"
+  },
+  {
+   "line": 12,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\n"
+  },
+  {
+   "line": 11,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\n"
+  },
+  {
+   "line": 6,
+   "event": "call",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__exit__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ],
+      [
+       "exc_type",
+       "None"
+      ],
+      [
+       "exc",
+       "None"
+      ],
+      [
+       "tb",
+       "None"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\n"
+  },
+  {
+   "line": 7,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__exit__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ],
+      [
+       "exc_type",
+       "None"
+      ],
+      [
+       "exc",
+       "None"
+      ],
+      [
+       "tb",
+       "None"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\n"
+  },
+  {
+   "line": 8,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__exit__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ],
+      [
+       "exc_type",
+       "None"
+      ],
+      [
+       "exc",
+       "None"
+      ],
+      [
+       "tb",
+       "None"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\n"
+  },
+  {
+   "line": 8,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__exit__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ],
+      [
+       "exc_type",
+       "None"
+      ],
+      [
+       "exc",
+       "None"
+      ],
+      [
+       "tb",
+       "None"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\n",
+   "returnValue": "False"
+  },
+  {
+   "line": 14,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\n"
+  },
+  {
+   "line": 15,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\n"
+  },
+  {
+   "line": 2,
+   "event": "call",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__enter__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\n"
+  },
+  {
+   "line": 3,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__enter__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\n"
+  },
+  {
+   "line": 4,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__enter__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\nenter\n"
+  },
+  {
+   "line": 4,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__enter__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\nenter\n",
+   "returnValue": "<__main__.Timer object>"
+  },
+  {
+   "line": 16,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\nenter\n"
+  },
+  {
+   "line": 16,
+   "event": "exception",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\nenter\n",
+   "exception": "ValueError: boom"
+  },
+  {
+   "line": 15,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\nenter\n"
+  },
+  {
+   "line": 6,
+   "event": "call",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__exit__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ],
+      [
+       "exc_type",
+       "class ValueError"
+      ],
+      [
+       "exc",
+       "ValueError('boom')"
+      ],
+      [
+       "tb",
+       "<traceback object>"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\nenter\n"
+  },
+  {
+   "line": 7,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__exit__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ],
+      [
+       "exc_type",
+       "class ValueError"
+      ],
+      [
+       "exc",
+       "ValueError('boom')"
+      ],
+      [
+       "tb",
+       "<traceback object>"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\nenter\n"
+  },
+  {
+   "line": 8,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__exit__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ],
+      [
+       "exc_type",
+       "class ValueError"
+      ],
+      [
+       "exc",
+       "ValueError('boom')"
+      ],
+      [
+       "tb",
+       "<traceback object>"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\nenter\nexit, error: ValueError\n"
+  },
+  {
+   "line": 8,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    },
+    {
+     "name": "__exit__",
+     "locals": [
+      [
+       "self",
+       "<__main__.Timer object>"
+      ],
+      [
+       "exc_type",
+       "class ValueError"
+      ],
+      [
+       "exc",
+       "ValueError('boom')"
+      ],
+      [
+       "tb",
+       "<traceback object>"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\nenter\nexit, error: ValueError\n",
+   "returnValue": "False"
+  },
+  {
+   "line": 17,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\nenter\nexit, error: ValueError\n"
+  },
+  {
+   "line": 18,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\nenter\nexit, error: ValueError\n"
+  },
+  {
+   "line": 18,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "Timer",
+       "class Timer"
+      ]
+     ]
+    }
+   ],
+   "stdout": "enter\nworking\nexit, error: None\nenter\nexit, error: ValueError\nhandled outside\n",
+   "returnValue": "None"
+  }
+ ],
+ "stdout": "enter\nworking\nexit, error: None\nenter\nexit, error: ValueError\nhandled outside\n",
+ "truncated": false
+}

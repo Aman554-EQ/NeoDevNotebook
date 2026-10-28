@@ -1,0 +1,12 @@
+{% extends "notes/base.html" %}
+
+{% block title %}{% if note %}Edit {{ note.title }}{% else %}New note{% endif %}{% endblock %}
+
+{% block content %}
+  <h1>{% if note %}Edit note{% else %}New note{% endif %}</h1>
+  <form method="post" novalidate>
+    {% csrf_token %}
+    {{ form.as_div }}
+    <button type="submit">Save</button>
+  </form>
+{% endblock %}

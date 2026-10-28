@@ -1,0 +1,77 @@
+id: py-p-058
+title: "Log report: status counts and p95 latency"
+difficulty: hard
+tags:
+  - parsing
+  - statistics
+  - counter
+statement: |
+  Each log line looks like `2026-10-26T10:00:01 GET /api/users 200 123ms`. Write
+  `report(lines)` that returns a dict with `"total"` (valid lines), `"by_status"` (a dict of
+  status code counts, sorted by code), `"p95_ms"` (the 95th-percentile latency, nearest-rank
+  method) and `"bad_lines"` (the count of lines that don't match the format).
+constraints:
+  - Up to 10**6 lines.
+  - "Nearest-rank: sort latencies; p95 = value at index ceil(0.95 × n) - 1."
+examples:
+  - input: 20 lines with latencies 10..200 ms
+    output: p95_ms == 190
+hints:
+  - Parse with one regular expression and skip lines that don't match.
+  - Nearest-rank needs only sorting and `math.ceil`.
+solution:
+  language: python
+  code: |
+    import math
+    import re
+    from collections import Counter
+
+    LINE = re.compile(r"^\S+ (GET|POST|PUT|PATCH|DELETE) (\S+) (\d{3}) (\d+)ms$")
+
+
+    def report(lines: list[str]) -> dict:
+        statuses: Counter = Counter()
+        latencies: list[int] = []
+        bad = 0
+        for line in lines:
+            match = LINE.match(line.strip())
+            if not match:
+                bad += 1
+                continue
+            statuses[int(match.group(3))] += 1
+            latencies.append(int(match.group(4)))
+        latencies.sort()
+        p95 = latencies[math.ceil(0.95 * len(latencies)) - 1] if latencies else None
+        return {
+            "total": len(latencies),
+            "by_status": dict(sorted(statuses.items())),
+            "p95_ms": p95,
+            "bad_lines": bad,
+        }
+
+
+    logs = [f"2026-10-26T10:00:{i:02} GET /api/items {500 if i % 7 == 0 else 200} {10 * i}ms" for i in range(1, 21)]
+    logs.append("garbage line")
+    print(report(logs))
+  explanation: |
+    One anchored regex both validates and extracts the fields, so malformed lines are
+    counted instead of crashing the report. Real logs always contain some. `Counter`
+    tallies status codes, and sorting its items gives stable output.
+
+    Percentiles have several definitions, so the problem fixes one: **nearest rank**. With
+    20 sorted latencies, `ceil(0.95 × 20) - 1 = 18`, the 19th value, which is 190 ms. An
+    average would hide slow outliers, and p95 says "95% of requests were at least this
+    fast". The standard library's `statistics.quantiles` interpolates instead, so it can
+    give slightly different numbers.
+complexity:
+  time: O(n log n)
+  space: O(n)
+variations:
+  - Group p95 by endpoint, and only keep the 1000 most recent lines (streaming).
+verify: |
+  logs = [f"2026-10-26T10:00:{i:02} GET /api/items {500 if i % 7 == 0 else 200} {10 * i}ms" for i in range(1, 21)]
+  r = report(logs + ["garbage line", ""])
+  assert r == {"total": 20, "by_status": {200: 18, 500: 2}, "p95_ms": 190, "bad_lines": 2}
+  assert report([]) == {"total": 0, "by_status": {}, "p95_ms": None, "bad_lines": 0}
+  one = report(["t POST /x 201 7ms"])
+  assert one["p95_ms"] == 7 and one["by_status"] == {201: 1}

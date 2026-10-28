@@ -1,0 +1,57 @@
+id: py-i-028
+question: What does `functools.wraps` do, and why does it matter?
+difficulty: simple
+tags:
+  - decorators
+  - functools
+shortAnswer: |
+  It copies the wrapped function's metadata (`__name__`, `__qualname__`, `__doc__`,
+  `__module__`, `__dict__`) onto the wrapper and sets `__wrapped__`. Without it, every
+  decorated function looks like `wrapper`, which breaks debugging, logging, documentation
+  and tools that introspect signatures.
+detailedAnswer: |
+  `inspect.signature` follows `__wrapped__`, so help text and frameworks (FastAPI, pytest,
+  click) see the real parameters. `__wrapped__` also lets you reach the undecorated function,
+  for example to test it without a cache.
+
+  It's implemented with `functools.update_wrapper`, which you can call directly when the
+  wrapper is a class instance.
+code:
+  language: python
+  code: |
+    import functools
+    import inspect
+
+
+    def plain(func):
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        return wrapper
+
+
+    def kept(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        return wrapper
+
+
+    @plain
+    def area(w: float, h: float) -> float:
+        return w * h
+
+
+    @kept
+    def volume(w: float, h: float, d: float) -> float:
+        return w * h * d
+
+
+    print(area.__name__, volume.__name__, inspect.signature(volume))
+pitfalls:
+  - Thinking wraps changes behaviour. It only copies metadata.
+followUps:
+  - How would you bypass a cache decorator in a test?
+verify: |
+  assert volume.__wrapped__(1, 2, 3) == 6 and area.__name__ == 'wrapper'

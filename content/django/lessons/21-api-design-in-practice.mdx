@@ -1,0 +1,626 @@
+---
+title: API design in practice
+summary: The details that make an API safe to depend on. Versioning and deprecation, one error format for every failure, idempotency keys so retries never double-charge, ETags for caching and optimistic concurrency, rate-limit signals, and webhooks sent and received with signatures, replay protection and retries.
+estimatedMinutes: 28
+difficulty: hard
+section: REST APIs with DRF
+objectives:
+  - Version an API and evolve it without breaking existing clients
+  - Return one consistent error shape from every failure with a custom exception handler
+  - Implement idempotency keys for POST and explain the edge cases
+  - Use ETags for 304 responses and If-Match for lost-update protection
+  - Send and receive webhooks with HMAC signatures, timestamps, replay protection and retries
+prerequisites:
+  - API authentication & permissions
+  - Relationships & efficient queries
+tags: [api-design, idempotency, webhooks, versioning, etag, hmac]
+practice: [dj-p-024, dj-p-025, dj-p-029]
+interview: [dj-i-024, dj-i-025]
+---
+
+## Intuition: an API is a promise to strangers
+
+Once someone builds on your API (a mobile app in an app store, a partner's integration) you can't
+update their code. Every response shape, error and status code becomes a promise. Good API design is
+about keeping those promises while you keep changing your system, and about the network being
+unreliable: requests time out, get retried, arrive twice, arrive late.
+
+## See it
+
+<IdempotencyReplayViz />
+
+<HttpExchange
+  recording="api-design"
+  caption="v1 and v2 of the same product side by side, a 304 when the client's copy is still current, one error shape for every failure, and a 429 with Retry-After."
+/>
+
+## The precise rules
+
+**Versioning.** Put the version where clients can't miss it: the URL (`/api/v1/`, DRF's
+`URLPathVersioning`) or a header (`Accept: application/json; version=2`,
+`AcceptHeaderVersioning`). **Additive** changes (new endpoints, new optional fields) don't need a new
+version; **breaking** ones (removed or renamed fields, changed types or meanings) do. Announce
+retirement with `Deprecation` and `Sunset` headers and docs, then keep the old version running until
+its traffic is gone.
+
+**One error format.** Every error, from validation to 404 to 429 to your own business rules, gets the
+same shape, e.g. `{"error": {"code", "message", "details", "request_id"}}`. In DRF that's one
+`EXCEPTION_HANDLER`. Machine-readable `code`s let clients branch; `request_id` links a bug report to
+your logs.
+
+**Idempotency keys** (for POSTs that create or charge):
+
+1. The client generates a unique key (a UUID) **per operation attempt** and sends it as
+   `Idempotency-Key`, reusing it on every retry of that attempt.
+2. The server stores (user, key) → request fingerprint + response, in the same transaction as the work.
+3. A repeat with the same key and body gets the stored response (no new work); the same key with a
+   different body is a client bug: `422`.
+4. A unique constraint on (user, key) handles two simultaneous retries; keys expire after a while
+   (e.g. 24 h).
+
+**Conditional requests.** `ETag` is a fingerprint of a representation. `If-None-Match` + unchanged
+→ `304 Not Modified` (save bandwidth). `If-Match` on PUT/PATCH + changed since the client read it →
+`412 Precondition Failed`: **optimistic concurrency** that prevents one user silently overwriting
+another's edit.
+
+**Rate limits.** Return `429` with `Retry-After`; many APIs also send `RateLimit-Limit`,
+`RateLimit-Remaining` and `RateLimit-Reset` so clients can slow down before being blocked.
+
+**Webhooks out** (your system notifies others): send JSON with an event `id`, `type` and data; sign
+`timestamp + "." + body` with HMAC-SHA256 and a per-receiver secret; deliver from a background worker
+with retries and exponential backoff; log every attempt; let receivers replay events.
+
+**Webhooks in** (a provider notifies you): verify the signature on the **raw body** before parsing,
+reject old timestamps (replay protection), compare with `hmac.compare_digest`, deduplicate by event
+id (providers deliver at least once), answer `2xx` quickly and do slow work in the background, and
+never trust the payload's amounts without checking them against your own records.
+
+**Small conventions that matter:** `201` + `Location` for creations; ISO 8601 UTC timestamps; money as
+decimal strings (`"12.50"`) plus a currency; enums as stable strings; consistent naming (snake_case);
+lists always paginated.
+
+## Worked example
+
+Idempotent order creation, the heart of safe retries, in a few dozen lines. ShopLite's version (below)
+adds per-user keys inside the same transaction and race handling.
+
+```python title="idempotent_post.py"
+import hashlib
+import json
+
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+})
+
+from django.db import models, transaction
+from django.test import Client
+from django.urls import path
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+
+class Order(models.Model):
+    item = models.CharField(max_length=50)
+    qty = models.PositiveIntegerField()
+
+
+class IdempotencyRecord(models.Model):
+    key = models.CharField(max_length=100, unique=True)
+    fingerprint = models.CharField(max_length=64)
+    status = models.PositiveSmallIntegerField()
+    body = models.JSONField()
+
+
+def fingerprint(data):
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+
+@api_view(["POST"])
+def create_order(request):
+    key = request.headers.get("Idempotency-Key")
+    if not key:
+        return Response({"error": "Idempotency-Key header required"}, status=400)
+    previous = IdempotencyRecord.objects.filter(key=key).first()
+    if previous:
+        if previous.fingerprint != fingerprint(request.data):
+            return Response({"error": "key reused with a different body"}, status=422)
+        return Response(previous.body, status=previous.status, headers={"Idempotent-Replayed": "true"})
+    with transaction.atomic():  # the order and the record commit together
+        order = Order.objects.create(item=request.data["item"], qty=request.data["qty"])
+        body = {"id": order.pk, "item": order.item, "qty": order.qty}
+        IdempotencyRecord.objects.create(key=key, fingerprint=fingerprint(request.data), status=201, body=body)
+    return Response(body, status=201)
+
+
+urlpatterns = [path("orders/", create_order)]
+migrate()
+c = Client()
+post = lambda body, key: c.post("/orders/", body, content_type="application/json",  # noqa: E731
+                                headers={"Idempotency-Key": key} if key else {})
+
+first = post({"item": "Dune", "qty": 2}, "7f3a9c1e")
+retry = post({"item": "Dune", "qty": 2}, "7f3a9c1e")
+print("first:", first.status_code, first.json())
+print("retry:", retry.status_code, retry.json(), "| replayed:", retry.get("Idempotent-Replayed"))
+print("same key, new body:", post({"item": "Dune", "qty": 5}, "7f3a9c1e").status_code)
+print("new key:", post({"item": "Dune", "qty": 2}, "b81d44a0").json()["id"])
+print("no key:", post({"item": "Dune", "qty": 2}, None).status_code)
+print("orders in the database:", Order.objects.count())
+```
+
+```text title="Output"
+first: 201 {'id': 1, 'item': 'Dune', 'qty': 2}
+retry: 201 {'id': 1, 'item': 'Dune', 'qty': 2} | replayed: true
+same key, new body: 422
+new key: 2
+no key: 400
+orders in the database: 2
+```
+
+- The retry returned exactly the first response, marked as replayed, and created nothing: two orders in
+  total came from two distinct keys, not from the retry.
+- Reusing a key with a different body is a client bug, answered with `422` rather than silently doing
+  either operation.
+- Saving the order and the record in **one transaction** matters: if the order were saved and the
+  record lost, the retry would create a second order.
+
+## Variations
+
+### Versioning with a header instead of the URL
+
+```python
+from playground import setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_VERSIONING_CLASS": "rest_framework.versioning.AcceptHeaderVersioning",
+    "DEFAULT_VERSION": "1", "ALLOWED_VERSIONS": ["1", "2"],
+})
+
+from django.test import Client
+from django.urls import path
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+
+@api_view(["GET"])
+def product(request):
+    if request.version == "2":
+        return Response({"name": "Dune", "price": {"amount": "12.50", "currency": "EUR"}})
+    response = Response({"name": "Dune", "price": "12.50"})
+    response["Deprecation"] = "true"
+    response["Sunset"] = "Wed, 31 Dec 2026 23:59:59 GMT"  # when v1 goes away
+    return response
+
+
+urlpatterns = [path("product/", product)]
+c = Client()
+v1 = c.get("/product/")
+print("default:", v1.json(), "| Sunset:", v1["Sunset"])
+print("v2:", c.get("/product/", headers={"Accept": "application/json; version=2"}).json())
+print("v3:", c.get("/product/", headers={"Accept": "application/json; version=3"}).status_code)
+```
+
+```text title="Output"
+default: {'name': 'Dune', 'price': '12.50'} | Sunset: Wed, 31 Dec 2026 23:59:59 GMT
+v2: {'name': 'Dune', 'price': {'amount': '12.50', 'currency': 'EUR'}}
+v3: 406
+```
+
+Header versioning keeps URLs stable (an unknown version is refused with `406 Not Acceptable`); URL
+versioning is easier to see in logs, share in a browser and route at a gateway. Either way, the `Deprecation` and `Sunset` headers give integrators a machine-
+readable warning long before you switch v1 off.
+
+### One error shape for every failure
+
+```python
+from playground import setup
+
+
+def api_errors(exc, context):
+    from rest_framework.exceptions import ValidationError
+    from rest_framework.views import exception_handler
+
+    response = exception_handler(exc, context)
+    if response is None:
+        return None
+    if isinstance(exc, ValidationError):
+        code, message, details = "validation_error", "Some fields are invalid.", response.data
+    else:
+        code = getattr(exc, "default_code", "error")
+        message, details = str(response.data.get("detail", exc)), {}
+    response.data = {"error": {"code": code, "message": message, "details": details}}
+    return response
+
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "EXCEPTION_HANDLER": "__main__.api_errors",
+})
+
+from django.test import Client
+from django.urls import path
+from rest_framework import serializers
+from rest_framework.decorators import api_view
+from rest_framework.exceptions import APIException, NotFound
+from rest_framework.response import Response
+
+
+class OutOfStock(APIException):
+    status_code, default_code, default_detail = 409, "out_of_stock", "Not enough stock."
+
+
+class Input(serializers.Serializer):
+    qty = serializers.IntegerField(min_value=1)
+
+
+@api_view(["POST"])
+def order(request, product):
+    if product == "ghost":
+        raise NotFound("No such product.")
+    data = Input(data=request.data)
+    data.is_valid(raise_exception=True)
+    if data.validated_data["qty"] > 3:
+        raise OutOfStock("Only 3 left.")
+    return Response({"ok": True}, status=201)
+
+
+urlpatterns = [path("products/<str:product>/order/", order)]
+c = Client()
+for product, body in [("dune", {"qty": 0}), ("ghost", {"qty": 1}), ("dune", {"qty": 9}), ("dune", {"qty": 1})]:
+    r = c.post(f"/products/{product}/order/", body, content_type="application/json")
+    print(r.status_code, r.json())
+print(c.get("/products/dune/order/").json())
+```
+
+```text title="Output"
+400 {'error': {'code': 'validation_error', 'message': 'Some fields are invalid.', 'details': {'qty': ['Ensure this value is greater than or equal to 1.']}}}
+404 {'error': {'code': 'not_found', 'message': 'No such product.', 'details': {}}}
+409 {'error': {'code': 'out_of_stock', 'message': 'Only 3 left.', 'details': {}}}
+201 {'ok': True}
+{'error': {'code': 'method_not_allowed', 'message': 'Method "GET" not allowed.', 'details': {}}}
+```
+
+Validation, not-found, your own business error and even the wrong method all come back in the same
+envelope with a stable `code`. Defining domain errors as `APIException` subclasses keeps the status
+code and code string next to the rule that raises them. ShopLite's handler also adds the `request_id`.
+
+### ETag + If-Match: preventing lost updates
+
+```python
+import hashlib
+import json
+
+from playground import migrate, setup
+
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+})
+
+from django.db import models
+from django.test import Client
+from django.urls import path
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+
+class Page(models.Model):
+    title = models.CharField(max_length=50)
+    body = models.TextField()
+
+
+def etag(page):
+    data = json.dumps({"title": page.title, "body": page.body}, sort_keys=True)
+    return '"' + hashlib.sha256(data.encode()).hexdigest()[:16] + '"'
+
+
+@api_view(["GET", "PUT"])
+def page_detail(request, pk):
+    page = Page.objects.get(pk=pk)
+    if request.method == "PUT":
+        if request.headers.get("If-Match") != etag(page):
+            return Response({"error": "Changed since you loaded it. Reload and retry."}, status=412)
+        page.title, page.body = request.data["title"], request.data["body"]
+        page.save()
+    if request.method == "GET" and request.headers.get("If-None-Match") == etag(page):
+        return Response(status=304)
+    return Response({"title": page.title, "body": page.body}, headers={"ETag": etag(page)})
+
+
+urlpatterns = [path("pages/<int:pk>/", page_detail)]
+migrate()
+Page.objects.create(title="FAQ", body="v1")
+c = Client()
+put = lambda body, tag: c.put("/pages/1/", body, content_type="application/json", headers={"If-Match": tag})  # noqa: E731
+
+ada_tag = c.get("/pages/1/")["ETag"]  # Ada and Bob both open the editor
+bob_tag = c.get("/pages/1/")["ETag"]
+print("cached copy still current:", c.get("/pages/1/", headers={"If-None-Match": ada_tag}).status_code)
+print("ada saves:", put({"title": "FAQ", "body": "v2 by ada"}, ada_tag).status_code)
+print("bob saves his stale copy:", put({"title": "FAQ", "body": "v2 by bob"}, bob_tag).status_code)
+print("body now:", c.get("/pages/1/").json()["body"])
+```
+
+```text title="Output"
+cached copy still current: 304
+ada saves: 200
+bob saves his stale copy: 412
+body now: v2 by ada
+```
+
+Without `If-Match`, Bob's save would silently erase Ada's change: the classic **lost update**. With
+it, Bob gets `412 Precondition Failed`, reloads, sees Ada's version and merges. The same ETag also
+gave a `304` for an unchanged read.
+
+### Signing and verifying a webhook
+
+```python
+import hashlib
+import hmac
+import json
+
+SECRET = "whsec_fake_0123456789abcdefghijklmnopqrstuv"
+TOLERANCE = 300  # seconds
+
+
+def sign(body: bytes, timestamp: int) -> str:
+    mac = hmac.new(SECRET.encode(), f"{timestamp}.".encode() + body, hashlib.sha256).hexdigest()
+    return f"t={timestamp},v1={mac}"
+
+
+def verify(body: bytes, header: str, now: int) -> str:
+    try:
+        parts = dict(item.split("=", 1) for item in header.split(","))
+        timestamp, received = int(parts["t"]), parts["v1"]
+    except (KeyError, ValueError):
+        return "rejected: malformed header"
+    if abs(now - timestamp) > TOLERANCE:
+        return "rejected: too old (possible replay)"
+    expected = sign(body, timestamp).split("v1=")[1]
+    return "valid" if hmac.compare_digest(expected, received) else "rejected: bad signature"
+
+
+now = 1_767_225_600
+body = json.dumps({"id": "evt_1", "type": "payment.succeeded", "data": {"amount": "25.00"}}).encode()
+header = sign(body, now)
+print(header[:22] + "…")
+print("genuine:", verify(body, header, now + 5))
+print("tampered:", verify(body.replace(b"25.00", b"0.01"), header, now + 5))
+print("replayed an hour later:", verify(body, header, now + 3600))
+print("wrong secret:", verify(body, f"t={now},v1=" + "0" * 64, now))
+print("garbage header:", verify(body, "nonsense", now))
+```
+
+```text title="Output"
+t=1767225600,v1=8ee942…
+genuine: valid
+tampered: rejected: bad signature
+replayed an hour later: rejected: too old (possible replay)
+wrong secret: rejected: bad signature
+garbage header: rejected: malformed header
+```
+
+Signing the timestamp together with the body means an attacker who captured a real delivery can't
+replay it later. `hmac.compare_digest` takes the same time however many characters match, so
+measuring response times reveals nothing. Always verify the **exact bytes** received, before parsing:
+re-serialising the JSON can change spacing and break the signature.
+
+### Retries with exponential backoff
+
+```python
+import random
+
+random.seed(7)  # fixed only so this demo prints the same numbers every time
+
+
+def backoff_schedule(attempts=6, base=30, cap=3600):
+    delays = []
+    for n in range(attempts):
+        delay = min(cap, base * 2**n)
+        delays.append(round(delay * random.uniform(0.8, 1.2)))  # jitter: spread retries out
+    return delays
+
+
+schedule = backoff_schedule()
+print("retry after (seconds):", schedule)
+print("gives up after about", round(sum(schedule) / 60), "minutes")
+outcomes = ["timeout", "503", "timeout", "200"]
+for attempt, (wait, result) in enumerate(zip(schedule, outcomes), 1):
+    print(f"attempt {attempt}: waited {wait:>4}s -> {result}")
+    if result == "200":
+        break
+```
+
+```text title="Output"
+retry after (seconds): [28, 52, 127, 199, 487, 908]
+gives up after about 30 minutes
+attempt 1: waited   28s -> timeout
+attempt 2: waited   52s -> 503
+attempt 3: waited  127s -> timeout
+attempt 4: waited  199s -> 200
+```
+
+Doubling the wait after each failure gives a struggling receiver room to recover, and **jitter** stops
+thousands of deliveries from retrying in the same second. A sender keeps every attempt in a log so the
+receiver can ask for a replay; a receiver must expect duplicates and deduplicate by event id.
+
+## Putting it together
+
+ShopLite's real implementation: the idempotency decorator (with the race between two simultaneous
+retries handled by a unique constraint), the error handler, and the payment webhook with signature,
+tolerance, deduplication, amount check and a state-machine-safe transition:
+
+<ProjectFiles
+  project="shoplite"
+  paths="orders/idempotency.py core/exceptions.py payments/provider.py payments/api.py"
+/>
+
+Its tests cover each edge case: missing key, replay, key reuse, per-user keys, failures not being
+stored, every kind of bad signature, duplicates and wrong amounts. A runnable end-to-end version:
+checkout with an idempotency key, then the payment provider's signed webhook, delivered twice.
+
+```python title="checkout_and_webhook.py"
+import hashlib
+import hmac
+import json
+import time
+
+from playground import migrate, setup
+
+SECRET = "whsec_fake_0123456789abcdefghijklmnopqrstuv"
+setup(apps=["rest_framework"], REST_FRAMEWORK={
+    "DEFAULT_AUTHENTICATION_CLASSES": [], "UNAUTHENTICATED_USER": None,
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+})
+
+from django.db import IntegrityError, models, transaction
+from django.test import Client
+from django.urls import path
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+
+class Order(models.Model):
+    total = models.DecimalField(max_digits=8, decimal_places=2)
+    status = models.CharField(max_length=10, default="pending")
+    idempotency_key = models.CharField(max_length=100, unique=True)
+
+
+class WebhookEvent(models.Model):
+    event_id = models.CharField(max_length=50, unique=True)
+
+
+@api_view(["POST"])
+def checkout(request):
+    key = request.headers["Idempotency-Key"]
+    try:
+        with transaction.atomic():
+            order = Order.objects.create(total=request.data["total"], idempotency_key=key)
+        return Response({"order": order.pk, "status": order.status}, status=201)
+    except IntegrityError:  # this key was seen before: answer as the first time did
+        order = Order.objects.get(idempotency_key=key)
+        return Response({"order": order.pk, "status": order.status}, status=201,
+                        headers={"Idempotent-Replayed": "true"})
+
+
+@api_view(["POST"])
+def payment_webhook(request):
+    timestamp, received = (part.split("=", 1)[1] for part in request.headers["Signature"].split(","))
+    expected = hmac.new(SECRET.encode(), f"{timestamp}.".encode() + request.body, hashlib.sha256).hexdigest()
+    if abs(time.time() - int(timestamp)) > 300 or not hmac.compare_digest(expected, received):
+        return Response({"error": "bad signature"}, status=400)
+    event = json.loads(request.body)
+    try:
+        with transaction.atomic():
+            WebhookEvent.objects.create(event_id=event["id"])
+            order = Order.objects.select_for_update().get(pk=event["order"])
+            if str(order.total) != event["amount"]:
+                return Response({"status": "amount mismatch"})
+            order.status = "paid"
+            order.save(update_fields=["status"])
+    except IntegrityError:
+        return Response({"status": "duplicate"})
+    return Response({"status": "order paid"})
+
+
+urlpatterns = [path("checkout/", checkout), path("webhooks/payments/", payment_webhook)]
+migrate()
+c = Client()
+for attempt in range(2):  # the app retries after a timeout
+    r = c.post("/checkout/", {"total": "25.00"}, content_type="application/json",
+               headers={"Idempotency-Key": "checkout-7f3a"})
+    replayed = "replayed" if r.has_header("Idempotent-Replayed") else "first response"
+    print(f"checkout attempt {attempt + 1}:", r.status_code, r.json(), replayed)
+
+body = json.dumps({"id": "evt_91", "order": 1, "amount": "25.00"}).encode()
+ts = str(int(time.time()))
+sig = hmac.new(SECRET.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+deliver = lambda b, s: c.post("/webhooks/payments/", b, content_type="application/json",  # noqa: E731
+                              headers={"Signature": f"t={ts},v1={s}"}).json()
+print("webhook:", deliver(body, sig))
+print("delivered again:", deliver(body, sig))
+print("forged:", deliver(body.replace(b"25.00", b"0.01"), sig))
+print("orders:", Order.objects.count(), "| status:", Order.objects.get().status)
+```
+
+```text title="Output"
+checkout attempt 1: 201 {'order': 1, 'status': 'pending'} first response
+checkout attempt 2: 201 {'order': 1, 'status': 'pending'} replayed
+webhook: {'status': 'order paid'}
+delivered again: {'status': 'duplicate'}
+forged: {'error': 'bad signature'}
+orders: 1 | status: paid
+```
+
+The retried checkout produced one order; the duplicated webhook paid it once; the forged one was
+refused before any data was touched. Notice how little of this is framework magic: unique constraints,
+transactions and HMAC do the heavy lifting, which is why the same design works in FastAPI and Flask.
+
+## Common mistakes
+
+<Callout type="warning" title="Verifying a webhook after parsing and re-serialising">
+  `json.dumps(request.data)` rarely reproduces the exact bytes the provider signed (spacing, key
+  order, escaping), so genuine webhooks fail, and teams "fix" it by skipping verification. Verify
+  `request.body` as received.
+</Callout>
+
+- **Breaking changes without a new version.** Renaming a field breaks every installed app version
+  still in use.
+- **Idempotency stored outside the transaction**, or keyed globally instead of per user: retries
+  double-charge, or one user's key replays another's response.
+- **Doing slow work before answering a webhook.** Providers time out and retry, creating duplicates;
+  acknowledge fast, process in the background.
+- **Trusting webhook amounts and ids blindly.** Look up the payment on your side and compare.
+- **Different error shapes per endpoint.** One handler, one envelope, stable codes.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: a client retries POST /payments after a timeout. What makes this safe?"
+>
+  An `Idempotency-Key` header with the same value as the first attempt. The server stores the first
+  result under that key and replays it instead of charging again.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: which status code for 'you edited a stale version'?">
+  `412 Precondition Failed`, when the client's `If-Match` ETag no longer matches the current
+  representation. (Some APIs use `409 Conflict`.)
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why sign the timestamp along with the webhook body?">
+  So a captured, genuinely signed delivery can't be replayed later: the receiver rejects timestamps
+  outside a short tolerance window, and changing the timestamp breaks the signature.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: is adding a new optional field to a response a breaking change? Removing one?"
+>
+  Adding: no, clients ignore unknown fields. Removing (or renaming, or changing its type): yes, that
+  needs a new version or a long deprecation.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why add jitter to retry delays?">
+  Without it, every client that failed at the same moment retries at the same moment, hammering a
+  recovering server in waves (a thundering herd). Random spread smooths the load.
+</Reveal>
+
+<KeyTakeaways>
+
+- Version breaking changes (URL or header), deprecate loudly (`Deprecation`, `Sunset`), keep old
+  versions until clients move.
+- One error envelope with stable codes, from one exception handler.
+- Idempotency keys: client-chosen per attempt, stored per user with a fingerprint in the same
+  transaction, replayed on retry, 422 on misuse.
+- ETags give 304s for reads and 412s for stale writes (optimistic concurrency).
+- Webhooks: HMAC over timestamp + raw body, tolerance window, dedupe by event id, ack fast, retry with
+  exponential backoff and jitter.
+
+</KeyTakeaways>

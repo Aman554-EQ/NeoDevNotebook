@@ -1,0 +1,40 @@
+id: py-i-019
+question: When should you use `collections.deque` instead of a list?
+difficulty: simple
+tags:
+  - deque
+  - queues
+shortAnswer: |
+  Use a deque when you add or remove at **both** ends: queues, breadth-first search,
+  sliding windows. `append`, `appendleft`, `pop` and `popleft` are all O(1), while a list's
+  `pop(0)` and `insert(0, x)` are O(n). `deque(maxlen=n)` also keeps only the last n items
+  automatically.
+detailedAnswer: |
+  A deque is a doubly linked list of fixed-size blocks, so growing either end never shifts
+  existing items.
+
+  The trade-off is that indexing the middle (`d[i]`) is O(n) towards the centre, and there's
+  no slicing. Keep using a list for random access and sorting.
+
+  Note that `collections.deque` is for single-threaded data structures (its append and pop
+  are atomic, but it has no blocking). For producer/consumer between threads, use
+  `queue.Queue`, and `asyncio.Queue` for coroutines.
+code:
+  language: python
+  code: |
+    from collections import deque
+
+    window = deque(maxlen=3)
+    for x in [1, 2, 3, 4, 5]:
+        window.append(x)
+    print(list(window))
+
+    q = deque(["a", "b"])
+    q.appendleft("z")
+    print(q.popleft(), q.pop(), list(q))
+pitfalls:
+  - Indexing deques in a loop (O(n) per access towards the middle).
+followUps:
+  - How would you implement BFS?
+verify: |
+  assert list(window) == [3, 4, 5] and list(q) == ['a']

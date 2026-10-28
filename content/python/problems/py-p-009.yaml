@@ -1,0 +1,42 @@
+id: py-p-009
+title: Remove duplicates, keep order
+difficulty: easy
+tags:
+  - dicts
+  - deduplication
+statement: |
+  Write `unique_in_order(items)` that returns a list of the distinct items in the order of
+  their **first** appearance.
+constraints:
+  - Items are hashable.
+  - "`0 <= len(items) <= 10**6`"
+examples:
+  - input: unique_in_order(["b", "a", "b", "c", "a"])
+    output: "['b', 'a', 'c']"
+hints:
+  - A plain `set` loses the order.
+  - Dicts keep insertion order, and their keys are unique.
+solution:
+  language: python
+  code: |
+    def unique_in_order(items: list) -> list:
+        return list(dict.fromkeys(items))
+
+
+    print(unique_in_order(["b", "a", "b", "c", "a"]), unique_in_order([3, 3, 3]))
+  explanation: |
+    `dict.fromkeys(items)` builds a dict whose keys are the items, and each repeated key is
+    ignored after its first insertion. Since dicts preserve insertion order (Python 3.7+),
+    converting the keys back to a list gives each item once, in first-seen order.
+
+    This runs in O(n). The tempting `for x in items: if x not in result: result.append(x)`
+    is O(n²), because `in` on a list scans it every time.
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Keep the LAST occurrence of each item instead of the first.
+verify: |
+  assert unique_in_order(["b", "a", "b", "c", "a"]) == ["b", "a", "c"]
+  assert unique_in_order([]) == []
+  assert unique_in_order([1, 2, 1, 3, 2]) == [1, 2, 3]

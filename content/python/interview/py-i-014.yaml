@@ -1,0 +1,37 @@
+id: py-i-014
+question: Compare f-strings, `str.format` and `%` formatting.
+difficulty: easy
+tags:
+  - strings
+  - formatting
+shortAnswer: |
+  All three use the same format-spec mini-language. f-strings (`f"{x:.2f}"`) are the modern
+  default: the most readable and the fastest, with any expression inside the braces.
+  `.format()` is useful when the template is built separately from the values. `%` is the
+  legacy style, still used by `logging` for lazy formatting.
+detailedAnswer: |
+  - f-string: `f"{name!r} has {score:>5.1f} points"`. The expressions are evaluated where the
+    string is written. `f"{x=}"` prints `x=...`, which is handy for debugging.
+  - `str.format`: `"{name} has {score:.1f}".format(**data)`. Good for templates stored in
+    config or translated strings.
+  - `%`: `"%s has %.1f" % (name, score)`. Older, and awkward with tuples.
+
+  In `logging`, prefer `log.info("user %s logged in", user)` over f-strings, so formatting is
+  skipped when the level is disabled.
+
+  Never build SQL or shell commands with any of these. Use parameterised queries or argument
+  lists to avoid injection.
+code:
+  language: python
+  code: |
+    name, score = "ada", 9.456
+    print(f"{name!r} scored {score:.1f}")
+    print("{} scored {:.1f}".format(name, score))
+    print("%s scored %.1f" % (name, score))
+    print(f"{score=:.2f}")
+pitfalls:
+  - Formatting SQL with f-strings (SQL injection).
+followUps:
+  - Why should logging calls use %-style placeholders?
+verify: |
+  assert f'{score:.1f}' == '9.5'

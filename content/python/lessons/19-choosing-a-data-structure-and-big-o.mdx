@@ -1,0 +1,422 @@
+---
+title: Choosing a data structure and Big-O
+summary: Big-O describes how work grows with input size. Learn to read it, to measure it with counters and timeit, and to pick the right structure, the single decision that most often turns slow code fast.
+estimatedMinutes: 28
+difficulty: medium
+section: Data Structures
+objectives:
+  - Read and compare O(1), O(log n), O(n), O(n log n) and O(n²)
+  - Estimate an algorithm's complexity by counting nested loops and expensive calls
+  - Measure with `timeit` instead of guessing
+  - Choose between list, tuple, dict, set, deque and heap for a task
+prerequisites:
+  - Lists in depth
+  - Dictionaries
+  - Heaps and priority queues
+tags: [python, complexity, big-o, performance]
+practice: [py-p-035, py-p-041, py-p-053]
+interview: [py-i-017, py-i-018, py-i-046]
+---
+
+## Intuition: how does the work grow?
+
+Big-O ignores the exact time (which depends on your laptop) and answers one question: **if the input
+doubles, what happens to the work?** Constant work stays the same, linear work doubles, and
+quadratic work quadruples. For large inputs, the growth rate dominates everything else.
+
+## See it
+
+Step through the curves, hover the chart to read values at any n, or switch to the table.
+
+<BigOViz />
+
+## The precise rules
+
+$$
+f(n) = O(g(n)) \iff \exists\, c, n_0 > 0 : f(n) \le c \cdot g(n) \text{ for all } n \ge n_0
+$$
+
+In words: beyond some size, $f$ grows no faster than $g$, up to a constant factor. So we drop
+constants and smaller terms. $3n^2 + 10n + 7$ is $O(n^2)$.
+
+**Rules of thumb:** sequential steps add (keep the biggest), and nested loops multiply. A call like
+`x in some_list` inside a loop hides an extra factor of n.
+
+| Task                                 | Good choice              | Cost                         |
+| ------------------------------------ | ------------------------ | ---------------------------- |
+| Look up by key / test membership     | `dict` / `set`           | O(1) average                 |
+| Ordered sequence, access by position | `list`                   | O(1) index, O(1) append      |
+| Fixed record / dict key              | `tuple`                  | immutable, hashable          |
+| Queue, or work at both ends          | `deque`                  | O(1) ends                    |
+| Repeatedly take the smallest         | `heapq`                  | O(log n) push/pop            |
+| Keep sorted, binary search           | sorted `list` + `bisect` | O(log n) search, O(n) insert |
+| Counting                             | `Counter`                | O(1) per item                |
+
+## Worked example: count steps, then time it
+
+```python title="measure.py"
+import timeit
+
+
+def has_dup_quadratic(items: list) -> tuple[bool, int]:
+    steps = 0
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):  # nested loop: O(n²)
+            steps += 1
+            if items[i] == items[j]:
+                return True, steps
+    return False, steps
+
+
+def has_dup_linear(items: list) -> tuple[bool, int]:
+    steps, seen = 0, set()
+    for x in items:  # one pass, O(1) set lookups: O(n)
+        steps += 1
+        if x in seen:
+            return True, steps
+        seen.add(x)
+    return False, steps
+
+
+for n in (10, 100, 1000):
+    data = list(range(n))  # no duplicates: the worst case
+    print(n, has_dup_quadratic(data)[1], has_dup_linear(data)[1])
+
+data = list(range(100_000))
+as_set = set(data)
+t_list = timeit.timeit(lambda: 99_999 in data, number=200)
+t_set = timeit.timeit(lambda: 99_999 in as_set, number=200)
+print("set lookup over 100x faster:", t_list / t_set > 100)
+```
+
+```text title="Output"
+10 45 10
+100 4950 100
+1000 499500 1000
+set lookup over 100x faster: True
+```
+
+What to notice:
+
+- 10× more data gives about 100× more steps for the quadratic version ($n(n-1)/2$), and exactly 10×
+  for the linear one. That's O(n²) vs O(n) in plain numbers.
+- `timeit` runs a snippet many times and returns the total seconds. Compare **ratios**, not raw
+  times. On this machine the set lookup was over 10,000× faster for 100,000 items.
+- The fix wasn't clever code. It was choosing a set.
+
+## Variations
+
+### Recognise the complexity from the shape of the code
+
+Counting the basic steps for growing `n` shows each class's growth pattern. Watch what happens to
+the count when `n` **doubles**.
+
+```python title="shapes.py"
+def constant(n):          # O(1): no loop depends on n
+    return 1
+
+
+def logarithmic(n):       # O(log n): n halves each step
+    steps = 0
+    while n > 1:
+        n //= 2
+        steps += 1
+    return steps
+
+
+def linear(n):            # O(n): one pass
+    return sum(1 for _ in range(n))
+
+
+def n_log_n(n):           # O(n log n): a log n loop inside an n loop
+    return sum(logarithmic(n) for _ in range(n))
+
+
+def quadratic(n):         # O(n^2): every pair
+    return sum(1 for i in range(n) for j in range(n))
+
+
+def exponential(n):       # O(2^n): every subset
+    return 2**n
+
+
+print(f"{'n':>5} {'O(1)':>5} {'log n':>6} {'n':>6} {'n log n':>8} {'n^2':>9} {'2^n':>12}")
+for n in [8, 16, 32]:
+    print(f"{n:>5} {constant(n):>5} {logarithmic(n):>6} {linear(n):>6} {n_log_n(n):>8} "
+          f"{quadratic(n):>9} {exponential(n):>12}")
+```
+
+```text title="Output"
+    n  O(1)  log n      n  n log n       n^2          2^n
+    8     1      3      8       24        64          256
+   16     1      4     16       64       256        65536
+   32     1      5     32      160      1024   4294967296
+```
+
+Doubling `n` adds **one** step to O(log n), doubles O(n), roughly doubles O(n log n), quadruples
+O(n²), and **squares** O(2ⁿ). That last column is why exponential algorithms are only usable for
+tiny inputs.
+
+### Best, average and worst case
+
+```python title="cases.py"
+def linear_search(items, target):
+    for steps, x in enumerate(items, start=1):
+        if x == target:
+            return steps
+    return len(items)
+
+
+data = list(range(1, 1001))
+print("best (first item):", linear_search(data, 1))
+print("worst (missing):  ", linear_search(data, -5))
+average = sum(linear_search(data, t) for t in data) / len(data)
+print("average (present):", average)
+```
+
+```text title="Output"
+best (first item): 1
+worst (missing):   1000
+average (present): 500.5
+```
+
+The same algorithm can cost 1 step or 1,000. Big-O usually describes the **worst case**, because
+that's the guarantee; an average of about n/2 steps is still O(n).
+
+### Space complexity
+
+```python title="space.py"
+import sys
+
+
+def reverse_copy(xs):            # O(n) extra space: a new list
+    return xs[::-1]
+
+
+def reverse_in_place(xs):        # O(1) extra space: two indexes
+    i, j = 0, len(xs) - 1
+    while i < j:
+        xs[i], xs[j] = xs[j], xs[i]
+        i, j = i + 1, j - 1
+    return xs
+
+
+nums = list(range(10))
+print(reverse_copy(nums), nums is reverse_copy(nums))
+print(reverse_in_place(nums) is nums, nums)
+
+squares_list = [n * n for n in range(1_000_000)]
+squares_gen = (n * n for n in range(1_000_000))
+print(sys.getsizeof(squares_list) > 1_000_000, sys.getsizeof(squares_gen) < 1_000)
+print(sum(squares_gen) == sum(squares_list))
+```
+
+```text title="Output"
+[9, 8, 7, 6, 5, 4, 3, 2, 1, 0] False
+True [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+True True
+True
+```
+
+Memory is a resource too. An in-place algorithm or a generator often turns O(n) extra memory
+into O(1), which matters when the data is large.
+
+### Amortized cost: why `append` is O(1) "on average"
+
+```python title="amortized.py"
+import sys
+
+xs = []
+resizes = 0
+size = sys.getsizeof(xs)
+for i in range(10_000):
+    xs.append(i)
+    new_size = sys.getsizeof(xs)
+    if new_size != size:              # the slot array was reallocated
+        resizes += 1
+        size = new_size
+print("appends:", len(xs), "resizes:", resizes)
+```
+
+```text title="Output"
+appends: 10000 resizes: 47
+```
+
+A resize copies every item, which is O(n). But the list grows by a proportion of its size each
+time, so resizes are rare: here only a few dozen in 10,000 appends. Spread over all the appends,
+the cost per append is constant. That's what **amortized O(1)** means.
+
+### Three classic rewrites
+
+```python title="rewrites.py"
+import heapq
+
+
+# 1. Pair that sums to a target: O(n^2) pairs -> O(n) with a dict
+def two_sum_slow(nums, target):
+    for i in range(len(nums)):
+        for j in range(i + 1, len(nums)):
+            if nums[i] + nums[j] == target:
+                return i, j
+
+
+def two_sum(nums, target):
+    seen = {}                                  # value -> index
+    for i, n in enumerate(nums):
+        if target - n in seen:
+            return seen[target - n], i
+        seen[n] = i
+
+
+# 2. Items in both lists: O(n*m) -> O(n + m) with a set
+def common_slow(a, b):
+    return [x for x in a if x in b]
+
+
+def common(a, b):
+    b_set = set(b)
+    return [x for x in a if x in b_set]
+
+
+# 3. Repeatedly take the smallest: O(n) per min -> O(log n) with a heap
+def process_slow(jobs):
+    jobs = list(jobs)
+    order = []
+    while jobs:
+        smallest = min(jobs)                   # scans everything, every time
+        jobs.remove(smallest)
+        order.append(smallest)
+    return order
+
+
+def process(jobs):
+    heap = list(jobs)
+    heapq.heapify(heap)
+    return [heapq.heappop(heap) for _ in range(len(heap))]
+
+
+nums = [3, 9, 14, 2, 8, 11]
+print(two_sum_slow(nums, 10), two_sum(nums, 10))
+print(common_slow([1, 2, 3, 4], [2, 4, 6]), common([1, 2, 3, 4], [2, 4, 6]))
+print(process_slow([5, 1, 4, 2]), process([5, 1, 4, 2]))
+```
+
+```text title="Output"
+(3, 4) (3, 4)
+[2, 4] [2, 4]
+[1, 2, 4, 5] [1, 2, 4, 5]
+```
+
+Each pair gives the same answers; only the data structure changed. "Store what you've seen in a
+dict or set" and "keep the smallest at the top of a heap" fix a large share of slow code.
+
+## Putting it together: fixing a slow report
+
+The report joins orders to customers. The first version looks up each customer with a list scan
+inside the loop over orders.
+
+```python title="slow_report.py"
+import random
+import timeit
+
+random.seed(7)
+customers = [{"id": i, "name": f"cust{i}", "country": random.choice(["DE", "FR", "US"])}
+             for i in range(2_000)]
+orders = [{"customer_id": random.randrange(2_000), "amount": random.randint(5, 500)}
+          for _ in range(5_000)]
+
+
+def report_slow():
+    totals = {}
+    for order in orders:
+        customer = next(c for c in customers if c["id"] == order["customer_id"])  # O(m) scan
+        totals[customer["country"]] = totals.get(customer["country"], 0) + order["amount"]
+    return totals
+
+
+def report_fast():
+    by_id = {c["id"]: c for c in customers}             # build the index once: O(m)
+    totals = {}
+    for order in orders:
+        customer = by_id[order["customer_id"]]           # O(1) lookup
+        totals[customer["country"]] = totals.get(customer["country"], 0) + order["amount"]
+    return totals
+
+
+assert report_slow() == report_fast()
+print(dict(sorted(report_fast().items())))
+slow = timeit.timeit(report_slow, number=1)
+fast = timeit.timeit(report_fast, number=1)
+print("same result; fast version is more than 10x quicker:", slow / fast > 10)
+```
+
+```text title="Output"
+{'DE': 441916, 'FR': 420480, 'US': 397268}
+same result; fast version is more than 10x quicker: True
+```
+
+- The slow version does about 5,000 × 1,000 = 5 million comparisons (each scan stops halfway on
+  average); the fast one does 2,000 inserts plus 5,000 lookups.
+- `random.seed(7)` makes the "random" data identical on every run, so the result can be checked.
+- The `assert` proves the rewrite changed the speed, not the answer: always keep the slow, obvious
+  version around as a reference while optimising.
+
+## Common mistakes
+
+<Callout type="warning" title="Optimising the wrong thing">
+  Swapping `+=` for a fancy trick saves a few percent. Changing a list scan to a set lookup can save
+  1000×. Fix the complexity first, then micro-optimise only what a profiler shows matters.
+</Callout>
+
+- **Hidden O(n) inside loops:** `in list`, `list.index`, `list.remove`, `str +=` in long loops, and
+  `sorted()` called on every iteration.
+- **Timing once.** A single `time.time()` difference is noisy. Use `timeit` (or
+  `python -m timeit "…"`).
+- **Assuming "average" means "always".** Dict and set are O(1) on average, and lists' `append` is
+  amortized O(1). Rare operations can still be expensive.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: what's the complexity of: for x in a: if x in b: ... (b is a list)?"
+>
+  O(len(a) × len(b)): the membership test scans `b` on every iteration. Converting `b` to a set
+  first makes it O(len(a) + len(b)).
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what's the complexity of `for x in a: if x in b:` when b is a list? And a set?"
+>
+  O(n·m) with a list (each `in` scans `b`), O(n) with a set (each `in` is O(1) on average, after
+  O(m) to build the set).
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: a loop runs `while n > 0: n //= 3`. What's its complexity?">
+  O(log n), base 3. Dividing by any constant factor each step gives logarithmic time; the base only
+  changes a constant, so it's just O(log n).
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: sorting then binary-searching k times, versus k linear scans. When is sorting worth it?"
+>
+  Sorting costs O(n log n), then each search O(log n). k scans cost O(k·n). Sorting wins once k is
+  larger than about log n searches. For one or two lookups, just scan (or build a set).
+</Reveal>
+
+<KeyTakeaways>
+
+- Big-O describes growth: O(1) < O(log n) < O(n) < O(n log n) < O(n²).
+- Nested loops multiply, and hidden scans (`in list`) count as loops.
+- Measure with step counters and `timeit`, and compare ratios.
+- The biggest speed-ups come from choosing the right data structure.
+- Read complexity from code shape: halving is log n, one pass is n, nested passes multiply.
+- Big-O usually means the worst case; amortized O(1) means rare expensive steps averaged out.
+- Most speed-ups come from the data structure: index with a dict, test membership with a set, take
+  minimums from a heap.
+
+</KeyTakeaways>
+
+{/* enriched */}

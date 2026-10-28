@@ -5,6 +5,9 @@ import { ItemBrowser } from "@/components/problem/item-browser"
 import { getInterviewQuestions, getModule, getNavTree } from "@/lib/content"
 
 export const ensureStatic = "navigation"
+// Fully prerendered, so the complete page is in the first paint. Opting out of instant-navigation
+// validation avoids a Suspense skeleton that would flash (and shift the layout) on every page load.
+export const instant = false
 
 export async function generateStaticParams() {
   return (await getNavTree()).filter((m) => m.interviewCount > 0).map((m) => ({ module: m.slug }))

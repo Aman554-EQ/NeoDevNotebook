@@ -1,0 +1,56 @@
+id: py-p-026
+title: Totals per column from CSV text
+difficulty: simple
+tags:
+  - csv
+  - files
+  - dicts
+statement: |
+  Write `column_totals(csv_text)` that parses CSV text with a header row and returns a dict
+  of column name → sum for every column whose values are **all** numbers. Skip the other
+  columns.
+constraints:
+  - Numbers may be ints or decimals.
+examples:
+  - input: column_totals("item,qty,price\npen,2,1.5\nink,1,4\n")
+    output: "{'qty': 3.0, 'price': 5.5}"
+hints:
+  - "`csv.DictReader(io.StringIO(text))` gives one dict per row."
+  - Try `float(...)` on every value and drop a column at its first failure.
+solution:
+  language: python
+  code: |
+    import csv
+    import io
+
+
+    def column_totals(csv_text: str) -> dict[str, float]:
+        reader = csv.DictReader(io.StringIO(csv_text))
+        totals = {name: 0.0 for name in reader.fieldnames or []}
+        for row in reader:
+            for name in list(totals):  # copy: we may delete while iterating
+                try:
+                    totals[name] += float(row[name])
+                except ValueError:
+                    del totals[name]  # not a numeric column
+        return totals
+
+
+    print(column_totals("item,qty,price\npen,2,1.5\nink,1,4\n"))
+  explanation: |
+    `io.StringIO` makes a string behave like an open file, so the same code works with
+    `open(path, newline="")`. `DictReader` maps each row to `{column: value}` using the
+    header, and every value is a string.
+
+    We start by assuming every column is numeric. The first value that `float()` can't
+    parse removes that column for good. Looping over `list(totals)` (a copy of the keys)
+    is what makes deleting during the loop safe.
+complexity:
+  time: O(rows × cols)
+  space: O(cols)
+variations:
+  - Also return the average of each numeric column.
+verify: |
+  assert column_totals("item,qty,price\npen,2,1.5\nink,1,4\n") == {"qty": 3.0, "price": 5.5}
+  assert column_totals("") == {}
+  assert column_totals("a,b\n1,x\n2,3\n") == {"a": 3.0}

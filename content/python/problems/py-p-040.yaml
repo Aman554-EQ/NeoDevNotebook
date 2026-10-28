@@ -1,0 +1,77 @@
+id: py-p-040
+title: 🐞 Binary search that never ends
+difficulty: medium
+tags:
+  - debugging
+  - binary-search
+  - bisect
+statement: |
+  This binary search hangs forever for some inputs, such as `search([1, 3], 3)`. Find the bug,
+  fix it, and compare with the `bisect` module.
+
+  ```python
+  def search(sorted_items, target):
+      lo, hi = 0, len(sorted_items) - 1
+      while lo < hi:
+          mid = (lo + hi) // 2
+          if sorted_items[mid] < target:
+              lo = mid
+          else:
+              hi = mid
+      return lo if sorted_items and sorted_items[lo] == target else -1
+  ```
+constraints:
+  - Return the index of `target`, or -1.
+examples:
+  - input: search([1, 3], 3)
+    output: "1"
+  - input: search([1, 3, 5, 7], 4)
+    output: "-1"
+hints:
+  - "Trace `lo=0, hi=1`: what is `mid`, and does `lo` ever change?"
+  - Each step must make the range strictly smaller.
+solution:
+  language: python
+  code: |
+    from bisect import bisect_left
+
+
+    def search(sorted_items: list[int], target: int) -> int:
+        lo, hi = 0, len(sorted_items) - 1
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if sorted_items[mid] < target:
+                lo = mid + 1  # mid is too small: exclude it
+            else:
+                hi = mid
+        return lo if sorted_items and sorted_items[lo] == target else -1
+
+
+    def search_bisect(sorted_items: list[int], target: int) -> int:
+        i = bisect_left(sorted_items, target)
+        return i if i < len(sorted_items) and sorted_items[i] == target else -1
+
+
+    print(search([1, 3], 3), search([1, 3, 5, 7], 4), search_bisect([1, 3, 5, 7], 5))
+  explanation: |
+    With `lo = 0` and `hi = 1`, `mid` is `0`. If `items[0] < target`, the buggy code sets
+    `lo = mid = 0`, so nothing changes and the loop never ends. The invariant is that the
+    answer lies in `[lo, hi]`, and since `items[mid] < target` proves `mid` is not the
+    answer, `lo = mid + 1` is both correct and guarantees progress.
+
+    The safe habit is: every branch must shrink the range. Better still, use
+    `bisect.bisect_left`, the tested standard-library version that returns the insertion
+    point.
+complexity:
+  time: O(log n)
+  space: O(1)
+variations:
+  - Return the first index whose value is >= target (lower bound), like bisect_left.
+verify: |
+  import random
+  random.seed(3)
+  for _ in range(500):
+      items = sorted(random.sample(range(100), random.randint(0, 12)))
+      target = random.randint(-2, 101)
+      expected = items.index(target) if target in items else -1
+      assert search(items, target) == expected == search_bisect(items, target), (items, target)

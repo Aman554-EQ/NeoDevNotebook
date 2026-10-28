@@ -1,0 +1,53 @@
+id: py-p-021
+title: Two-sum with a dictionary
+difficulty: simple
+tags:
+  - dicts
+  - hashing
+statement: |
+  Given a list `nums` and a `target`, return the indexes `(i, j)` with `i < j` of the
+  **first** pair (by `j`) whose values add up to `target`, or `None`. Do it in one pass.
+constraints:
+  - "`2 <= len(nums) <= 10**5`"
+examples:
+  - input: two_sum([2, 7, 11, 15], 9)
+    output: (0, 1)
+  - input: two_sum([3, 3], 6)
+    output: (0, 1)
+  - input: two_sum([1, 2], 7)
+    output: None
+hints:
+  - For each number, the value you need is `target - num`.
+  - "Remember where you've seen each value: `{value: index}`."
+solution:
+  language: python
+  code: |
+    def two_sum(nums: list[int], target: int) -> tuple[int, int] | None:
+        seen: dict[int, int] = {}  # value -> index
+        for j, num in enumerate(nums):
+            need = target - num
+            if need in seen:
+                return seen[need], j
+            seen[num] = j
+        return None
+
+
+    print(two_sum([2, 7, 11, 15], 9), two_sum([3, 3], 6), two_sum([1, 2], 7))
+  explanation: |
+    The brute force checks every pair, which is O(n²). Instead, while walking the list, we
+    ask "have I already seen the number that would complete this one?" A dict lookup
+    answers that in O(1).
+
+    We check `need in seen` **before** storing the current number, so a value can't pair
+    with itself (`[3]` with target 6 has no answer), while `[3, 3]` correctly pairs the two
+    different 3s.
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Return ALL pairs of values (not indexes) that sum to target, without duplicates.
+verify: |
+  assert two_sum([2, 7, 11, 15], 9) == (0, 1)
+  assert two_sum([3, 3], 6) == (0, 1)
+  assert two_sum([1, 2], 7) is None
+  assert two_sum([3, 2, 4], 6) == (1, 2)

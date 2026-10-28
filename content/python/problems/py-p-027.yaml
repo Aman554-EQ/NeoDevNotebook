@@ -1,0 +1,97 @@
+id: py-p-027
+title: Bank account class with validation
+difficulty: simple
+tags:
+  - classes
+  - exceptions
+statement: |
+  Write a class `Account(owner, balance=0)` with `deposit(amount)` and `withdraw(amount)`.
+  Both reject non-positive amounts with `ValueError`. `withdraw` raises a custom
+  `InsufficientFunds` exception (with a `shortfall` attribute) when the balance is too low.
+  Expose `balance` as a read-only property.
+constraints:
+  - The balance can never go negative.
+examples:
+  - input: a = Account("ada", 50); a.withdraw(80)
+    output: "InsufficientFunds: need 30 more"
+hints:
+  - Store the balance in `self._balance` and add a `@property` without a setter.
+  - Subclass `Exception` and call `super().__init__(message)`.
+solution:
+  language: python
+  code: |
+    class InsufficientFunds(Exception):
+        def __init__(self, shortfall: float) -> None:
+            super().__init__(f"need {shortfall} more")
+            self.shortfall = shortfall
+
+
+    class Account:
+        def __init__(self, owner: str, balance: float = 0) -> None:
+            self.owner = owner
+            self._balance = balance
+
+        @property
+        def balance(self) -> float:
+            return self._balance
+
+        @staticmethod
+        def _check(amount: float) -> None:
+            if amount <= 0:
+                raise ValueError("amount must be positive")
+
+        def deposit(self, amount: float) -> None:
+            self._check(amount)
+            self._balance += amount
+
+        def withdraw(self, amount: float) -> None:
+            self._check(amount)
+            if amount > self._balance:
+                raise InsufficientFunds(amount - self._balance)
+            self._balance -= amount
+
+
+    acct = Account("ada", 50)
+    acct.deposit(25)
+    try:
+        acct.withdraw(100)
+    except InsufficientFunds as err:
+        print(type(err).__name__, err, err.shortfall, acct.balance)
+  explanation: |
+    The balance lives in `_balance` (the underscore says "internal"), and the `balance`
+    property only has a getter, so `acct.balance = 10**6` raises `AttributeError`. All
+    changes go through methods that validate.
+
+    The shared `_check` keeps the "positive amount" rule in one place. `InsufficientFunds`
+    carries the `shortfall`, so callers can react programmatically (e.g. "top up 25")
+    instead of parsing a message. The check happens **before** changing state, so a failed
+    withdrawal leaves the account unchanged.
+complexity:
+  time: O(1) per operation
+  space: O(1)
+variations:
+  - Keep a transaction history and add a `statement()` method.
+verify: |
+  a = Account("ada", 50)
+  a.deposit(25)
+  try:
+      a.withdraw(100)
+  except InsufficientFunds as e:
+      assert e.shortfall == 25 and a.balance == 75
+  else:
+      raise AssertionError
+  for bad in (0, -5):
+      try:
+          a.deposit(bad)
+      except ValueError:
+          pass
+      else:
+          raise AssertionError
+  try:
+      a.balance = 1
+  except AttributeError:
+      pass
+  else:
+      raise AssertionError("balance must be read-only")
+  a.withdraw(75)
+  assert a.balance == 0

@@ -1,0 +1,55 @@
+id: dj-i-005
+question: What's the difference between null=True and blank=True?
+difficulty: easy
+tags:
+  - models
+  - fields
+shortAnswer: |
+  null=True lets the database store NULL; blank=True lets validation (forms, serializers, full_clean) accept an empty value. Text fields usually use blank=True only, storing an empty string.
+detailedAnswer: |
+  `null` is a **database** option: the column allows `NULL`. `blank` is a **validation** option:
+  `full_clean()`, ModelForms and DRF serializers accept an empty value.
+
+  Typical combinations:
+
+  - Optional text (`CharField`, `TextField`): `blank=True` only. Empty means `""`; adding `null=True`
+    would give two different "empty" values.
+  - Optional number, date or foreign key: `null=True, blank=True`, because there's no natural "empty"
+    value besides `NULL`.
+  - Required: neither (the default).
+
+  Remember that `save()` doesn't run validation, so `blank=False` doesn't stop code from saving an empty
+  string; only a database constraint would.
+code:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.core.exceptions import ValidationError
+    from django.db import models
+
+
+    class Person(models.Model):
+        name = models.CharField(max_length=50)
+        nickname = models.CharField(max_length=50, blank=True)
+        birthday = models.DateField(null=True, blank=True)
+
+
+    migrate()
+    person = Person(name="Ada")
+    person.full_clean()  # valid: nickname may be "", birthday may be None
+    person.save()
+    print(repr(person.nickname), person.birthday)
+    try:
+        Person(name="").full_clean()
+    except ValidationError as exc:
+        print(exc.message_dict)
+pitfalls:
+  - null=True on CharField.
+  - Expecting blank=False to stop save().
+followUps:
+  - Why can't a BooleanField be empty in a form?
+  - How would you enforce non-empty text in the database?
+verify: assert Person.objects.get().birthday is None and Person.objects.get().nickname == ""

@@ -1,0 +1,68 @@
+id: dj-p-006
+title: 🐞 The 'not found' that says OK
+difficulty: easy
+tags:
+  - debugging
+  - views
+  - status-codes
+statement: |
+  This view is meant to return a book, or a 404 when the id doesn't exist. Clients report
+  that missing books look like successes. Find and fix the bug.
+
+  ```python
+  def book_detail(request, pk):
+      book = Book.objects.filter(pk=pk).first()
+      if book is None:
+          return JsonResponse({"error": "not found"})
+      return JsonResponse({"id": book.pk, "title": book.title})
+  ```
+examples:
+  - input: GET /books/99/
+    output: '404 {"error": "not found"}'
+hints:
+  - What status code does `JsonResponse` use by default?
+  - Monitoring and clients look at the status, not the body.
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+    from django.http import JsonResponse
+    from django.urls import path
+
+
+    class Book(models.Model):
+        title = models.CharField(max_length=100)
+
+
+    def book_detail(request, pk):
+        book = Book.objects.filter(pk=pk).first()
+        if book is None:
+            return JsonResponse({"error": "not found"}, status=404)  # the fix: a real 404
+        return JsonResponse({"id": book.pk, "title": book.title})
+
+
+    urlpatterns = [path("books/<int:pk>/", book_detail)]
+    migrate()
+  explanation: |
+    `JsonResponse` defaults to status **200**, so the error body was sent with "OK". Clients,
+    caches, monitoring and retry logic all branch on the status code, so a missing book looked like a
+    successful empty response. Passing `status=404` fixes it. An equally good fix is
+    `get_object_or_404(Book, pk=pk)`, which raises `Http404` and lets Django produce the 404 (DRF turns it
+    into `{"detail": "..."}`). The general rule: errors must use 4xx/5xx codes, never 200 with an error
+    message.
+complexity:
+  time: O(1)
+  space: O(1)
+verify: |
+  from django.test import Client
+
+  Book.objects.create(title="Dune")
+  c = Client()
+  assert c.get("/books/1/").json() == {"id": 1, "title": "Dune"}
+  r = c.get("/books/99/")
+  assert r.status_code == 404, r.status_code
+  assert r.json() == {"error": "not found"}

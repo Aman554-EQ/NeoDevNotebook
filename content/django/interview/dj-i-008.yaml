@@ -1,0 +1,47 @@
+id: dj-i-008
+question: What does it mean that QuerySets are lazy, and when are they evaluated?
+difficulty: simple
+tags:
+  - orm
+  - querysets
+  - performance
+shortAnswer: |
+  Building and chaining a QuerySet runs no SQL. It's evaluated when you need results: iteration, list(), len(), bool(), slicing with a step, repr, or methods like count()/exists()/first() (their own queries). Results are cached on the QuerySet.
+detailedAnswer: |
+  `Book.objects.filter(year__lt=1900).order_by("year")` only builds a query description. SQL runs
+  when results are needed: `for b in qs`, `list(qs)`, `len(qs)`, `bool(qs)`, `qs[::2]`, printing it, or
+  pickling. Some methods always query: `count()`, `exists()`, `first()`, `get()`, `aggregate()`.
+
+  After evaluation, the QuerySet caches its rows, so looping over the **same object** twice runs one query.
+  Chaining creates a **new** QuerySet without the cache. Laziness lets you build queries step by step
+  (optional filters from request parameters) and pass them around cheaply, but it also hides where queries
+  happen, which is why N+1 problems appear in templates and serializers.
+code:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import connection, models
+    from django.test.utils import CaptureQueriesContext
+
+
+    class Book(models.Model):
+        title = models.CharField(max_length=50)
+
+
+    migrate()
+    Book.objects.bulk_create([Book(title="Dune"), Book(title="Emma")])
+    with CaptureQueriesContext(connection) as ctx:
+        qs = Book.objects.order_by("title")
+        built = len(ctx)
+        titles = [b.title for b in qs] + [b.title for b in qs]
+    print(built, len(ctx), titles)
+pitfalls:
+  - len(qs) to count a large table.
+  - Re-creating the QuerySet inside a loop.
+followUps:
+  - How do you iterate over a million rows without loading them all?
+  - Why does qs.filter() after evaluation query again?
+verify: assert built == 0 and len(ctx) == 1

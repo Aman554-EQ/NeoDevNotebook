@@ -1,0 +1,267 @@
+---
+title: ShopLite, the capstone
+summary: A production-shaped e-commerce backend that uses the whole module. Write the PRD, design the data and API, then build a storefront with a session cart, a versioned JWT API, orders that can't oversell, idempotent checkout, payments confirmed by signed webhooks, middleware, caching, health checks, split settings and a 58-test suite including a PostgreSQL race test.
+kind: capstone
+difficulty: hard
+estimatedHours: 12
+code: shoplite
+skills:
+  - PRD and design
+  - services layer
+  - row locks and transactions
+  - idempotency keys
+  - HMAC webhooks
+  - JWT and permissions
+  - throttling
+  - middleware and CORS
+  - caching
+  - split settings
+  - health checks
+  - PostgreSQL and testing
+---
+
+## How this project works
+
+This is the project you'd show in an interview. It's bigger, so work through it over several sessions.
+Every milestone has hints, the real solution files, and a checkpoint that runs the matching tests.
+Download the **Postman collection** above to explore the API once it runs.
+
+```bash
+python -m pip install "Django>=5.2,<5.3" djangorestframework djangorestframework-simplejwt django-filter \
+    drf-spectacular django-environ django-cors-headers "psycopg[binary]" pytest pytest-django
+cp .env.example .env   # every value in it is a fake, safe for development
+```
+
+## The brief (PRD)
+
+**Problem.** A small shop sells books and games online. It needs a website for browsing and checkout,
+and an API for a mobile app, without ever selling stock it doesn't have or charging twice.
+
+**Users.** Guests (browse, fill a cart), customers (check out, see their orders, cancel pending ones),
+staff (manage the catalogue, see all orders, ship), and the payment provider (confirms payments).
+
+**User stories.**
+
+- Guests browse products by category and add them to a cart that survives page loads.
+- Customers check out on the website or through the API, and pay through the payment provider.
+- Customers see only their own orders; they can cancel an order that hasn't been paid.
+- Staff manage products and categories and ship paid orders.
+- The payment provider notifies the shop when a payment succeeds or fails.
+
+**Acceptance criteria.**
+
+- Stock can't go negative, even with many simultaneous checkouts.
+- A retried checkout with the same `Idempotency-Key` returns the first result and creates nothing new;
+  the same key with a different body is a 422.
+- Webhooks are accepted only with a valid HMAC signature and a fresh timestamp; duplicates are
+  acknowledged and ignored; a wrong amount doesn't mark an order paid.
+- Every API error has the shape `{"error": {"code", "message", "details", "request_id"}}`.
+- Every response carries `X-Request-ID`; logs include it.
+- Order lists cost a fixed number of queries; categories are cached and invalidated on change.
+- `/health/` never touches the database; `/ready/` reports database and cache and answers 503 when
+  either fails.
+- Production settings pass `check --deploy` with zero warnings.
+
+**Non-goals.** Real card processing, shipping rates, multi-currency, a front-end framework.
+
+## Design
+
+**Data model.**
+
+| Model                   | Key fields                                                                    | Rules                                                        |
+| ----------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `accounts.User`         | `email` (login), `is_staff` (staff role)                                      | custom user from day one                                     |
+| `catalog.Category`      | `name`, `slug`                                                                | unique                                                       |
+| `catalog.Product`       | `category` (PROTECT), `name`, `slug`, `price` (Decimal), `stock`, `is_active` | `price >= 0` check; index (category, is_active)              |
+| `orders.Order`          | `user` (PROTECT), `status`, `total`                                           | state machine: pending → paid → shipped, pending → cancelled |
+| `orders.OrderItem`      | `order` (CASCADE), `product` (PROTECT), `quantity`, `unit_price`              | one line per product; quantity ≥ 1; price copied at purchase |
+| `orders.IdempotencyKey` | `user`, `key`, `fingerprint`, `response_status`, `response_body`              | unique (user, key)                                           |
+| `payments.Payment`      | `order`, `provider_ref` (unique), `amount`, `status`                          |                                                              |
+| `payments.WebhookEvent` | `event_id` (unique), `type`                                                   | makes duplicate deliveries no-ops                            |
+
+**API (v1).** See the README table below; the full contract is the generated OpenAPI schema.
+
+**Architecture.** Apps by domain (`accounts`, `catalog`, `cart`, `orders`, `payments`, `core`); every
+business rule in `orders/services.py`; views (web and API) only translate HTTP; one module talks to the
+payment provider.
+
+<ProjectTree />
+
+**Configuration.** Split settings (`base`, `dev`, `test`, `prod`) read every value from the environment
+with django-environ:
+
+<ProjectFiles paths=".env.example config/settings/base.py config/settings/test.py config/settings/prod.py" />
+
+## Milestone 1: catalogue and storefront
+
+<Callout type="tip" title="Your turn">
+  Build `accounts.User`, `Category` and `Product` with the constraints from the design. Add a cached
+  `category_list()` with invalidation, a storefront list (filter by category) and a product page
+  that 404s for inactive products. Then a read-only-for-customers product API with filtering, search
+  and ordering, and a capped page size.
+</Callout>
+
+<Reveal kind="hint" label="Hint: customers never see inactive products">
+  In `ProductViewSet.get_queryset()`, return all products for staff and `.active()` for everyone
+  else. Set `lookup_field = "slug"`.
+</Reveal>
+
+<Reveal label="Solution: catalogue models, services, API, views and pagination">
+  <ProjectFiles paths="accounts/models.py catalog/models.py catalog/services.py catalog/api.py catalog/views.py core/pagination.py" />
+</Reveal>
+
+<Checkpoint id="catalog" command="python -m pytest tests/test_catalog.py">
+  Inactive products hidden, filters/search/ordering, page-size cap, query budget, staff-only writes
+  with the standard error shape, cache hit and invalidation, storefront pages.
+</Checkpoint>
+
+## Milestone 2: orders that can't oversell
+
+<Callout type="tip" title="Your turn">
+  Write `Order` (with its state machine), `OrderItem`, and `orders/services.py`: `place_order(user,
+  items)` merges duplicate lines, locks the products, checks stock, creates the order and lines with
+  copied prices and decrements stock, all in one transaction. Add `cancel_order` (returns stock),
+  `mark_paid` and `ship_order`, each refusing invalid transitions.
+</Callout>
+
+<Reveal kind="hint" label="Hint: locking without deadlocks">
+  `Product.objects.select_for_update().filter(pk__in=ids, is_active=True).order_by("pk")`: always
+  lock in the same order. Decrement with `update(stock=F("stock") - qty)`.
+</Reveal>
+
+<Reveal label="Solution: order models and services">
+  <ProjectFiles paths="orders/models.py orders/services.py" />
+</Reveal>
+
+<Checkpoint
+  id="services"
+  command='python -m pytest tests/test_orders.py -k "place_order or duplicate or out_of_stock or empty or inactive or cancel_returns or state_machine"'
+>
+  Stock reservation and price copies, merged lines, rollback on out-of-stock, refused empty orders
+  and inactive products, cancellation, the state machine.
+</Checkpoint>
+
+## Milestone 3: the orders API, idempotent
+
+<Callout type="tip" title="Your turn">
+  Expose orders through a ViewSet: customers see their own, staff see all, list in a fixed number of
+  queries. `create` requires an `Idempotency-Key` header: replay the stored response for a repeated
+  key and body, 422 for a reused key with a different body, and don't store failures. Add `cancel`
+  and a staff-only `ship` action, and throttle order creation.
+</Callout>
+
+<Reveal kind="hint" label="Hint: concurrent retries">
+  Create the `IdempotencyKey` row in the same transaction as the order. If two retries race, the
+  unique constraint makes the second one fail with `IntegrityError`: catch it and replay the first
+  one's response.
+</Reveal>
+
+<Reveal label="Solution: idempotency, the orders API and the error format">
+  <ProjectFiles paths="orders/idempotency.py orders/api.py core/exceptions.py core/permissions.py" />
+</Reveal>
+
+<Checkpoint id="api" command="python -m pytest tests/test_orders.py tests/test_idempotency.py">
+  The API contract, auth and validation errors, 409 for stock, privacy, query budget, cancel/ship
+  rules, throttling, the web checkout, and every idempotency case.
+</Checkpoint>
+
+## Milestone 4: cart and checkout on the website
+
+<Callout type="tip" title="Your turn">
+  Build a session `Cart` that stores only product ids and quantities, a context processor for the
+  cart count, add/remove views, and a login-required `checkout` that calls `place_order` and
+  redirects to the order page.
+</Callout>
+
+<Reveal kind="hint" label="Hint: never trust prices from the session">
+  Store `{product_id: quantity}` only, and read prices from the database every time the cart is shown.
+  Set `session.modified = True` after changing the nested dict.
+</Reveal>
+
+<Reveal label="Solution: cart, views and templates">
+  <ProjectFiles paths="cart/cart.py cart/views.py cart/context_processors.py templates/cart/detail.html orders/views.py" />
+</Reveal>
+
+<Checkpoint id="cart" command='python -m pytest tests/test_orders.py -k "cart or other_peoples"' />
+
+## Milestone 5: payments by signed webhook
+
+<Callout type="tip" title="Your turn">
+  Write `payments/provider.py` (sign and verify `t=<timestamp>,v1=<hmac>` over `timestamp.body`, with a
+  tolerance), a `StartPayment` endpoint, and the webhook view: verify the raw body first, record the
+  event id (duplicates are acknowledged), check the amount, and mark the order paid through the service.
+  Add a `simulate_payment` management command to play the provider locally.
+</Callout>
+
+<Reveal kind="hint" label="Hint: the webhook has no user">
+  `authentication_classes = []` and `permission_classes = [AllowAny]`: the signature is the
+  authentication. Compare signatures with `hmac.compare_digest`.
+</Reveal>
+
+<Reveal label="Solution: provider, payment API, models and the simulator">
+  <ProjectFiles paths="payments/provider.py payments/api.py payments/models.py payments/management/commands/simulate_payment.py" />
+</Reveal>
+
+<Checkpoint id="payments" command="python -m pytest tests/test_payments.py">
+  Own pending orders only, succeeded/failed events, duplicates, wrong amounts, unknown payments,
+  every kind of bad signature, tampered bodies, and the verify function.
+</Checkpoint>
+
+## Milestone 6: platform, health and production settings
+
+<Callout type="tip" title="Your turn">
+  Add request-ID + timing middleware (with a logging filter), security-headers middleware, CORS for
+  the API only, `/health/` and `/ready/`, and the production settings. Make the test suite run
+  `check --deploy` against `config.settings.prod`.
+</Callout>
+
+<Reveal label="Solution: middleware, logging, health views and URLs">
+  <ProjectFiles paths="core/middleware.py core/log.py core/views.py config/urls.py" />
+</Reveal>
+
+<Checkpoint id="platform" command="python -m pytest tests/test_platform.py">
+  Health without queries, readiness and its 503, request ids (generated, echoed, sanitised), log
+  records with the id, security headers, CORS only for the allowed origin and the API, JWT login and
+  refresh, the schema, and the deploy check.
+</Checkpoint>
+
+## Harden
+
+- **Money:** `DecimalField` everywhere; prices copied into order lines; webhook amounts compared with the
+  stored payment.
+- **Concurrency:** row locks in a consistent order, `F()` updates, unique constraints for idempotency keys
+  and webhook events, a CHECK constraint on price and quantity.
+- **Access:** customers only see their own orders (scoped querysets, object permission, 404 on the web);
+  staff-only shipping and catalogue edits.
+- **Abuse:** throttled order creation; capped page sizes; sanitised request ids.
+- **Secrets:** every secret from the environment; `.env.example` has fakes; tests never need real ones.
+- **Transport:** HTTPS redirect, HSTS, secure cookies, CSP for HTML, CORS limited to `/api/` and listed
+  origins.
+
+## Test
+
+The whole suite runs in about three seconds on SQLite; with `SHOPLITE_TEST_DATABASE_URL` it also runs the
+race test on PostgreSQL: 8 buyers, 3 items, exactly 3 orders.
+
+<ProjectFiles paths="tests/conftest.py tests/test_concurrency.py pytest.ini" />
+
+<Checkpoint id="all" command="python -m pytest">
+  58 tests (57 on SQLite, plus the PostgreSQL concurrency test when a PostgreSQL URL is set).
+</Checkpoint>
+
+## Ship
+
+<ProjectFile path="README.md" />
+
+```bash
+export DJANGO_SETTINGS_MODULE=config.settings.prod   # plus real secrets in the environment
+python manage.py check --deploy --fail-level WARNING
+python manage.py migrate --noinput
+python manage.py collectstatic --noinput
+gunicorn config.wsgi --bind 0.0.0.0:8000 --workers 3
+```
+
+You've now built what most backend interviews ask about: a domain model with real constraints, a
+services layer, a secure and documented API, idempotency, webhooks, concurrency control, observability
+and a test suite that proves it all. The practice problems and interview questions that follow drill the
+same ideas.

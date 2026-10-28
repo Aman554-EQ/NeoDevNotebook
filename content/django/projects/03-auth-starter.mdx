@@ -1,0 +1,181 @@
+---
+title: Auth starter
+summary: The authentication foundation for real projects. An email-based custom user model, signup, login, logout and password reset with sessions for the website, register, JWT login, refresh rotation, logout by blacklisting and a "me" endpoint for API clients, throttling, password validation and production security settings, all tested.
+kind: guided
+difficulty: medium
+estimatedHours: 4
+code: auth-starter
+skills:
+  [
+    custom user model,
+    sessions,
+    password reset,
+    simplejwt,
+    token rotation and blacklist,
+    throttling,
+    password validators,
+    security settings,
+    check --deploy,
+  ]
+---
+
+## How this project works
+
+Build it milestone by milestone; each solution is the real code, and each checkpoint runs its real
+tests. Keep this project as a template: most new Django projects start with exactly this.
+
+```bash
+python -m pip install "Django>=5.2,<5.3" djangorestframework djangorestframework-simplejwt drf-spectacular pytest pytest-django
+django-admin startproject config . && python manage.py startapp accounts
+```
+
+## The brief (PRD)
+
+**Problem.** Every product needs accounts, and getting them wrong (plain-text passwords, guessable
+reset links, endless tokens) is a security incident waiting to happen.
+
+**Users.** Website visitors (sessions) and mobile/API clients (tokens).
+
+**User stories.**
+
+- A visitor can sign up with email and password and is logged in immediately.
+- A user can log in and out, see a profile page, and reset a forgotten password by email.
+- An API client can register, exchange email + password for tokens, refresh them, log out, and read
+  or update its profile.
+
+**Acceptance criteria.**
+
+- Users sign in with **email**; there's no username.
+- Passwords are validated (length, common passwords, similarity) and stored hashed.
+- Wrong credentials give one generic message; unknown emails get the same password-reset response as
+  known ones (no account enumeration).
+- Access tokens expire in minutes; refresh tokens rotate and old ones are blacklisted; logout
+  blacklists the refresh token.
+- Registration is throttled (5 per hour per IP).
+- With `DEBUG=false`, HTTPS redirect, HSTS and secure cookies are on, and `check --deploy` passes.
+
+## Design
+
+| Model                                            | Notes                                                                                         |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `accounts.User(AbstractUser)`                    | `username = None`, `email` unique, `USERNAME_FIELD = "email"`, `display_name`, custom manager |
+| simplejwt `OutstandingToken`, `BlacklistedToken` | from `rest_framework_simplejwt.token_blacklist`                                               |
+
+| URL                                                    | Purpose                            |
+| ------------------------------------------------------ | ---------------------------------- |
+| `/signup/`, `/login/`, `/logout/` (POST), `/profile/`  | website, sessions                  |
+| `/password-reset/` → email → `/reset/<uid>/<token>/`   | Django's reset views               |
+| `POST /api/auth/register/`                             | create an account (throttled)      |
+| `POST /api/auth/token/`, `/token/refresh/`, `/logout/` | JWT pair, rotation, blacklist      |
+| `GET/PATCH /api/me/`                                   | the current user (email read-only) |
+
+<ProjectTree />
+
+## Milestone 1: a custom user model, before the first migration
+
+<Callout type="tip" title="Your turn">
+  Create `accounts.User` extending `AbstractUser` with email login, a `UserManager` with
+  `create_user` and `create_superuser`, set `AUTH_USER_MODEL = "accounts.User"`, register it in the
+  admin, then `makemigrations` and `migrate`.
+</Callout>
+
+<Reveal kind="hint" label="Hint: why a manager?">
+  The default manager's `create_user(username, ...)` expects a username. Yours takes the email,
+  normalises it and calls `set_password()`.
+</Reveal>
+
+<Reveal label="Solution: the user model, manager and admin">
+  <ProjectFiles paths="accounts/models.py accounts/admin.py" />
+</Reveal>
+
+## Milestone 2: signup, login, logout and profile (sessions)
+
+<Callout type="tip" title="Your turn">
+  Write a `SignupForm` based on `UserCreationForm`, a `signup` view that logs the user in, and a
+  `login_required` profile view. Use Django's `LoginView` and `LogoutView`, with templates.
+</Callout>
+
+<Reveal kind="hint" label="Hint: login right after signup">
+  `user = form.save(); login(request, user); return redirect("profile")`.
+</Reveal>
+
+<Reveal label="Solution: form, views, URLs and templates">
+  <ProjectFiles paths="accounts/forms.py accounts/views.py config/urls.py accounts/templates/registration/login.html accounts/templates/accounts/profile.html" />
+</Reveal>
+
+<Checkpoint
+  id="web"
+  command='python -m pytest accounts/tests/test_web.py -k "signup or login or profile"'
+>
+  Signup normalises the email and hashes the password, weak passwords fail, the profile requires
+  login (with `?next=`), login/logout work, and a wrong password gets the generic message.
+</Checkpoint>
+
+## Milestone 3: password reset
+
+<Callout type="tip" title="Your turn">
+  Wire Django's four password-reset views, use the console email backend in development, and check
+  the full round trip: request, email, link, new password, login.
+</Callout>
+
+<Reveal kind="hint" label="Hint: where the email goes">
+  `EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"` prints it in the terminal; in
+  tests it lands in `django.core.mail.outbox`.
+</Reveal>
+
+<Checkpoint id="reset" command="python -m pytest accounts/tests/test_web.py -k reset">
+  The reset link works end to end, and an unknown email gets the same response with no email sent.
+</Checkpoint>
+
+## Milestone 4: the JWT API
+
+<Callout type="tip" title="Your turn">
+  Add DRF and simplejwt (with the blacklist app). Write `RegisterSerializer` (validated password,
+  write-only), a throttled `RegisterView`, a `MeView` (email read-only), and the token, refresh and
+  logout URLs. Configure short access tokens, rotation and blacklisting, and a separate signing key
+  from the environment.
+</Callout>
+
+<Reveal kind="hint" label="Hint: password errors next to email errors">
+  Object-level `validate()` doesn't run when a field already failed, so validate the password in
+  `validate_password(self, value)`, reading the email from `self.initial_data`.
+</Reveal>
+
+<Reveal label="Solution: API code, URLs and settings">
+  <ProjectFiles paths="accounts/api.py accounts/api_urls.py config/settings.py" />
+</Reveal>
+
+<Checkpoint id="api" command="python -m pytest accounts/tests/test_api.py">
+  Register (validation, throttling at 5/hour), token pair, 401s for bad credentials and bad or
+  forged tokens, `me`, refresh rotation with blacklisting, logout.
+</Checkpoint>
+
+## Harden
+
+- The signing key for JWTs (`JWT_SIGNING_KEY`) is separate from `SECRET_KEY`, so all API tokens can be
+  revoked without logging out website sessions.
+- `.env.example` documents every variable with **fake** values; tests always load it, so they never
+  need real secrets.
+- When `DEBUG` is off: `SECURE_SSL_REDIRECT`, `SECURE_HSTS_*`, `SESSION_COOKIE_SECURE`,
+  `CSRF_COOKIE_SECURE`; a test reloads the settings with production values to prove it.
+
+<ProjectFile path=".env.example" />
+
+<Checkpoint id="security" command="python -m pytest accounts/tests/test_web.py -k security" />
+
+## Test
+
+<ProjectFiles paths="accounts/tests/test_web.py accounts/tests/test_api.py" />
+
+<Checkpoint id="all" command="python -m pytest" />
+
+## Ship
+
+```bash
+DJANGO_DEBUG=false DJANGO_SECRET_KEY=<long random> JWT_SIGNING_KEY=<another long random> \
+DJANGO_ALLOWED_HOSTS=example.com python manage.py check --deploy
+```
+
+<ProjectFile path="README.md" />
+
+**Next:** the ShopLite capstone combines everything from the module into one production-shaped backend.

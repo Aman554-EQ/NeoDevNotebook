@@ -1,0 +1,47 @@
+id: py-p-007
+title: Palindrome, ignoring case and punctuation
+difficulty: easy
+tags:
+  - strings
+  - slicing
+statement: |
+  Write `is_palindrome(text)` that returns `True` if `text` reads the same forwards and
+  backwards when you keep only letters and digits and ignore case.
+constraints:
+  - "`0 <= len(text) <= 10**5`"
+examples:
+  - input: 'is_palindrome("A man, a plan, a canal: Panama")'
+    output: "True"
+  - input: is_palindrome("race a car")
+    output: "False"
+hints:
+  - "`ch.isalnum()` keeps letters and digits."
+  - Compare the cleaned string with its reverse `[::-1]`.
+solution:
+  language: python
+  code: |
+    def is_palindrome(text: str) -> bool:
+        cleaned = "".join(ch.lower() for ch in text if ch.isalnum())
+        return cleaned == cleaned[::-1]
+
+
+    print(is_palindrome("A man, a plan, a canal: Panama"), is_palindrome("race a car"))
+  explanation: |
+    First build a normalised version: only `isalnum()` characters, all lower-case. Then a
+    palindrome is simply a string equal to its own reverse, and `[::-1]` reverses a
+    string.
+
+    An empty or fully punctuation string cleans to `''`, which equals its reverse, so it
+    counts as a palindrome. A two-pointer loop would avoid the extra string, but this
+    version is clearer.
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Solve it with two indexes moving inwards and O(1) extra space.
+verify: |
+  assert is_palindrome("A man, a plan, a canal: Panama")
+  assert not is_palindrome("race a car")
+  assert is_palindrome("")
+  assert is_palindrome("No 'x' in Nixon")
+  assert is_palindrome("12321") and not is_palindrome("123")

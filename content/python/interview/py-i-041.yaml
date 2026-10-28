@@ -1,0 +1,53 @@
+id: py-i-041
+question: When do you choose threads, multiprocessing or asyncio?
+difficulty: hard
+tags:
+  - concurrency
+  - asyncio
+  - multiprocessing
+shortAnswer: |
+  **asyncio** for many concurrent I/O tasks with libraries that support `await` (thousands of
+  sockets in one thread). **Threads** for I/O-bound work with blocking libraries, or a modest
+  number of tasks. **Processes** for CPU-bound work that needs real parallelism across cores.
+  Mixing them is common: `asyncio.to_thread` for blocking calls, and a process pool for heavy
+  computation.
+detailedAnswer: |
+  | | Threads | asyncio | Processes |
+  | --- | --- | --- | --- |
+  | Parallel CPU (GIL build) | no | no | yes |
+  | Overlapping I/O | yes | yes | yes |
+  | Switching | pre-emptive (any time) | cooperative (at `await`) | OS |
+  | Memory | shared, needs locks | shared, one thread | separate, data is pickled |
+  | Overhead | medium | lowest per task | highest |
+
+  Pitfalls: blocking calls inside coroutines freeze the event loop. Process pools need
+  picklable arguments and a `__main__` guard. Too many threads waste memory.
+  `concurrent.futures` gives one API (`submit`, `map`) for both thread and process pools.
+code:
+  language: python
+  code: |
+    import asyncio
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+
+    def blocking_io(n):
+        time.sleep(0.1)
+        return n
+
+
+    async def main():
+        start = time.perf_counter()
+        results = await asyncio.gather(*(asyncio.to_thread(blocking_io, n) for n in range(5)))
+        return results, time.perf_counter() - start < 0.4
+
+
+    print(asyncio.run(main()))
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        print(list(pool.map(blocking_io, range(5))))
+pitfalls:
+  - Calling `time.sleep` or `requests.get` inside async code.
+followUps:
+  - How do you run blocking code from asyncio?
+verify: |
+  assert asyncio.run(main())[0] == [0, 1, 2, 3, 4]

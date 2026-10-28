@@ -1,0 +1,53 @@
+id: dj-i-021
+question: How do you test a Django application, and what do you test?
+difficulty: medium
+tags:
+  - testing
+  - quality
+shortAnswer: |
+  Mostly fast tests of behaviour: services and models (unit), endpoints through the test client or APIClient (status codes, bodies, permissions per role, validation, query counts), plus a few end-to-end checks. Use pytest-django or TestCase, factories, mocks for external services, and CI on the production database.
+detailedAnswer: |
+  Follow the test pyramid: many fast unit/service tests, a solid layer of API/view tests, few
+  end-to-end tests.
+
+  What to cover:
+
+  - business rules in services/models, including every refusal;
+  - each endpoint's status codes and response shape, for each role (anonymous, owner, other user, staff);
+  - validation messages clients rely on;
+  - query budgets with `assertNumQueries` on list endpoints;
+  - health/readiness endpoints, including failure;
+  - migrations in sync (`makemigrations --check`) and `check --deploy`.
+
+  Tools: `TestCase` (transaction per test, `setUpTestData`) or pytest-django fixtures; `APIClient` with
+  `force_authenticate`; factories over JSON fixtures; `mock.patch` for payment/email/HTTP clients; fake
+  configuration values; `override_settings`; `TransactionTestCase` for `on_commit` or threads. Run on the
+  same database engine as production in CI, and use coverage to find untested logic.
+code:
+  language: python
+  code: |
+    from playground import run_tests, setup
+
+    setup()
+
+    from django.http import JsonResponse
+    from django.test import TestCase
+    from django.urls import path
+
+    urlpatterns = [path("health/", lambda r: JsonResponse({"status": "ok"}))]
+
+
+    class HealthTest(TestCase):
+        def test_health(self):
+            with self.assertNumQueries(0):
+                self.assertEqual(self.client.get("/health/").json(), {"status": "ok"})
+
+
+    ok = run_tests(HealthTest)
+pitfalls:
+  - Only happy-path tests.
+  - Tests that call real external services.
+followUps:
+  - setUp vs setUpTestData?
+  - How do you test code that uses transaction.on_commit?
+verify: assert ok is True

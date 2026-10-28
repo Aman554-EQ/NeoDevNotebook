@@ -1,0 +1,53 @@
+id: py-i-016
+question: Why must dict keys be hashable, and which objects are hashable?
+difficulty: medium
+tags:
+  - dict
+  - hashing
+  - immutability
+shortAnswer: |
+  A dict finds a key by its hash, so the hash must never change while the key is stored, and
+  equal keys must hash equally. Immutable built-ins (int, str, bytes, frozenset, and tuples
+  of hashables) are hashable. Lists, dicts and sets aren't. User classes are hashable by
+  identity unless they define `__eq__` without `__hash__`.
+detailedAnswer: |
+  If a key could change after insertion, its hash would change, and the dict would look in
+  the wrong slot. The entry would become unreachable. Python prevents this for built-in
+  mutable types by making them unhashable (`TypeError: unhashable type: 'list'`).
+
+  The contract: `a == b` implies `hash(a) == hash(b)`. The reverse isn't required, since
+  collisions are allowed. That's why `1`, `1.0` and `True` collapse into one key.
+
+  For your own classes:
+
+  - The default is hashing and equality by identity.
+  - Define `__eq__` and Python sets `__hash__ = None` (unhashable), because the default
+    identity hash would break the contract.
+  - For a value-hashable class, also define `__hash__` from immutable fields, or use
+    `@dataclass(frozen=True)`.
+code:
+  language: python
+  code: |
+    from dataclasses import dataclass
+
+
+    @dataclass(frozen=True)
+    class Point:
+        x: int
+        y: int
+
+
+    print({Point(1, 2): "a"}[Point(1, 2)])
+    print(len({1: "int", 1.0: "float", True: "bool"}))
+    try:
+        {[1, 2]: "list"}
+    except TypeError as err:
+        print("TypeError:", err)
+pitfalls:
+  - Saying 'keys must be immutable'. Hashable is the real requirement; identity-hashed mutable instances
+    are allowed.
+followUps:
+  - Is `(1, [2])` hashable?
+  - What does `@dataclass(frozen=True)` generate?
+verify: |
+  assert hash(Point(1, 2)) == hash(Point(1, 2))

@@ -1,0 +1,61 @@
+id: py-p-029
+title: 🐞 Every basket shares the same items
+difficulty: simple
+tags:
+  - debugging
+  - classes
+  - mutability
+statement: |
+  Adding an item to one basket makes it appear in **every** basket. Find the bug and fix it.
+
+  ```python
+  class Basket:
+      items = []
+
+      def add(self, item):
+          self.items.append(item)
+
+  a, b = Basket(), Basket()
+  a.add("apple")
+  print(b.items)   # ['apple'] ?!
+  ```
+constraints:
+  - Each basket must have its own list.
+examples:
+  - input: a, b = Basket(), Basket(); a.add("apple"); b.items
+    output: "[]"
+hints:
+  - "Where does `items` live: on each instance or on the class?"
+  - "`self.items.append` mutates; it doesn't create an instance attribute."
+solution:
+  language: python
+  code: |
+    class Basket:
+        def __init__(self) -> None:
+            self.items: list[str] = []  # created per instance
+
+        def add(self, item: str) -> None:
+            self.items.append(item)
+
+
+    a, b = Basket(), Basket()
+    a.add("apple")
+    print(a.items, b.items)
+  explanation: |
+    `items = []` in the class body creates **one** list, stored on the class. `self.items`
+    finds no instance attribute, falls back to the class attribute, and `.append` mutates
+    that single shared list. So every basket sees every item.
+
+    Creating the list in `__init__` gives each instance its own `self.items`. It's the
+    class version of the mutable-default-argument bug. With `@dataclass`, use
+    `items: list = field(default_factory=list)`.
+complexity:
+  time: O(1) per add
+  space: O(items)
+variations:
+  - Explain why a class attribute `count = 0` with `self.count += 1` does NOT have this problem.
+verify: |
+  a, b = Basket(), Basket()
+  a.add("apple")
+  assert a.items == ["apple"] and b.items == []
+  assert "items" in vars(a)

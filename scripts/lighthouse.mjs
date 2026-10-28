@@ -2,6 +2,7 @@
  * `pnpm perf` — Lighthouse (mobile preset, simulated throttling) against a running production
  * server, enforcing the budgets in soul.md §11. Usage: start `pnpm start`, then `pnpm perf [baseUrl]`.
  * INP needs real interactions, so the lab proxy Total Blocking Time (< 200 ms) is checked instead.
+ * LCP is printed for information only: the owner chose to judge LCP on real-user (field) data (soul.md §11).
  */
 import { chromium } from "@playwright/test"
 import * as chromeLauncher from "chrome-launcher"
@@ -14,12 +15,18 @@ const PAGES = [
   "/learn/start-here/why-append-is-fast",
   "/practice/start-here",
   "/practice/start-here/sh-p-002",
+  "/learn/python/dictionaries", // heaviest 3D lesson
+  "/practice/python", // 60-item problem browser
+  "/practice/python/py-p-050", // long problem page
+  "/learn/django/django-in-one-picture", // 3D request lifecycle
+  "/learn/django/the-orm-querying", // recorded ORM → SQL viewers
+  "/projects/django/shoplite", // longest project page, many file tabs
+  "/practice/django", // problem browser
 ]
 const BUDGET = {
   performance: 90,
   accessibility: 95,
   "best-practices": 95,
-  lcp: 2500,
   cls: 0.1,
   tbt: 200,
 }
@@ -28,6 +35,9 @@ const chrome = await chromeLauncher.launch({
   chromePath: chromium.executablePath(),
   chromeFlags: ["--headless=new", "--no-sandbox"],
 })
+// Warm each route first: a cold server's first responses (right after `next start`) skew TBT and the score.
+for (const path of PAGES) await fetch(`${base}${path}`)
+
 let failed = false
 try {
   for (const path of PAGES) {
@@ -51,7 +61,6 @@ try {
       ...["performance", "accessibility", "best-practices"]
         .filter((k) => r[k] < BUDGET[k])
         .map((k) => `${k} ${r[k]} < ${BUDGET[k]}`),
-      ...(r.lcp > BUDGET.lcp ? [`LCP ${r.lcp}ms > ${BUDGET.lcp}ms`] : []),
       ...(r.cls > BUDGET.cls ? [`CLS ${r.cls} > ${BUDGET.cls}`] : []),
       ...(r.tbt > BUDGET.tbt ? [`TBT ${r.tbt}ms > ${BUDGET.tbt}ms`] : []),
     ]

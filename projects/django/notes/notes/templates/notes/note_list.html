@@ -1,0 +1,29 @@
+{% extends "notes/base.html" %}
+
+{% block content %}
+  <form method="get" role="search">
+    <input type="search" name="q" value="{{ query }}" placeholder="Search notes" aria-label="Search notes" />
+    <button type="submit">Search</button>
+  </form>
+
+  {% for note in page %}
+    <article class="note{% if note.pinned %} pinned{% endif %}">
+      <h2><a href="{{ note.get_absolute_url }}">{{ note.title }}</a></h2>
+      <p>{{ note.body|truncatewords:30|linebreaksbr }}</p>
+      <form method="post" action="{% url 'notes:delete' note.pk %}">
+        {% csrf_token %}
+        <button type="submit">Delete</button>
+      </form>
+    </article>
+  {% empty %}
+    <p>{% if query %}No notes match “{{ query }}”.{% else %}No notes yet.{% endif %}</p>
+  {% endfor %}
+
+  {% if page.has_other_pages %}
+    <nav aria-label="Pages">
+      {% if page.has_previous %}<a href="?q={{ query|urlencode }}&page={{ page.previous_page_number }}">Previous</a>{% endif %}
+      Page {{ page.number }} of {{ page.paginator.num_pages }}
+      {% if page.has_next %}<a href="?q={{ query|urlencode }}&page={{ page.next_page_number }}">Next</a>{% endif %}
+    </nav>
+  {% endif %}
+{% endblock %}

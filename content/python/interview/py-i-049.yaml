@@ -1,0 +1,42 @@
+id: py-i-049
+question: What's the difference between `requirements.txt` and `pyproject.toml`?
+difficulty: medium
+tags:
+  - packaging
+  - dependencies
+shortAnswer: |
+  `pyproject.toml` is the standard project metadata file: name, version, **abstract**
+  dependencies (`requests>=2.32`), the build backend, and tool configuration. `requirements.txt`
+  is a plain list for pip, typically **pinned, exact** versions of the whole environment
+  (including transitive dependencies), used to reproduce a deployment.
+detailedAnswer: |
+  A common split:
+
+  - **Libraries** declare compatible ranges in `pyproject.toml`, so they don't over-constrain
+    users.
+  - **Applications** keep the ranges in `pyproject.toml` and generate a lock file (`uv lock`,
+    `poetry.lock`, `pip-compile` → `requirements.txt`) with exact pins and hashes for
+    repeatable installs.
+
+  `pyproject.toml` also hosts tool settings (`[tool.ruff]`, `[tool.pytest.ini_options]`,
+  `[tool.mypy]`), replacing `setup.py`, `setup.cfg` and many dot-files. Python 3.11+ can read
+  it with the built-in `tomllib`.
+code:
+  language: python
+  code: |
+    import tomllib
+
+    text = '''
+    [project]
+    name = "shop"
+    version = "0.1.0"
+    dependencies = ["requests>=2.32"]
+    '''
+    meta = tomllib.loads(text)["project"]
+    print(meta["name"], meta["dependencies"])
+pitfalls:
+  - Pinning exact versions in a library's dependencies.
+followUps:
+  - What is a lock file for?
+verify: |
+  assert meta['version'] == '0.1.0'

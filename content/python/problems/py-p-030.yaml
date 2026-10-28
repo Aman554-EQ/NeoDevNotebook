@@ -1,0 +1,62 @@
+id: py-p-030
+title: 🐞 Click counter raises UnboundLocalError
+difficulty: simple
+tags:
+  - debugging
+  - closures
+  - scope
+statement: |
+  `make_counter()` should return a function that counts how many times it has been called,
+  but the first call crashes with `UnboundLocalError`. Fix it without using globals.
+
+  ```python
+  def make_counter():
+      clicks = 0
+      def click():
+          clicks += 1
+          return clicks
+      return click
+  ```
+constraints:
+  - Each counter keeps its own count.
+examples:
+  - input: c = make_counter(); c(); c()
+    output: "2"
+hints:
+  - "`clicks += 1` is an assignment, so `clicks` is local to `click`."
+  - Which keyword rebinds a variable of the enclosing function?
+solution:
+  language: python
+  code: |
+    def make_counter():
+        clicks = 0
+
+        def click() -> int:
+            nonlocal clicks  # rebind the enclosing variable
+            clicks += 1
+            return clicks
+
+        return click
+
+
+    first, second = make_counter(), make_counter()
+    first()
+    first()
+    print(first(), second())
+  explanation: |
+    Because `click` assigns to `clicks` (`+=` is an assignment), Python treats `clicks` as
+    local to `click` for the **whole** function. Reading it before it's assigned raises
+    `UnboundLocalError: cannot access local variable 'clicks'...`.
+
+    `nonlocal clicks` tells Python to rebind the variable of the enclosing `make_counter`
+    call instead. Each `make_counter()` call creates a fresh `clicks`, so `first` reaches 3
+    while `second` starts at 1. That's a closure keeping private state.
+complexity:
+  time: O(1) per call
+  space: O(1)
+variations:
+  - Add a `reset()` by returning two functions, or rewrite it as a small class.
+verify: |
+  c1, c2 = make_counter(), make_counter()
+  assert [c1(), c1(), c1()] == [1, 2, 3]
+  assert c2() == 1

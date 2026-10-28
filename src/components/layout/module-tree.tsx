@@ -3,8 +3,9 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
-import { ChevronDown, CircleCheck, ListChecks, MessageSquareText } from "lucide-react"
-import type { NavModule } from "@/lib/content"
+import { ChevronDown, CircleCheck, Hammer, ListChecks, MessageSquareText } from "lucide-react"
+import type { NavLesson, NavModule } from "@/lib/content"
+import { groupBySection, sectionId } from "@/lib/content/sections"
 import { useProgress } from "@/lib/progress/store"
 import { cn } from "@/lib/utils"
 import { ModuleIcon } from "./module-icon"
@@ -62,6 +63,22 @@ function ModuleNode({
     )
   }
 
+  const lessonItem = (l: NavLesson) =>
+    item(
+      `/learn/${m.slug}/${l.slug}`,
+      <>
+        <span className="flex w-5 shrink-0 justify-end font-mono text-xs tabular-nums">
+          {isDone(`lesson:${m.slug}/${l.slug}`) ? (
+            <CircleCheck className="text-easy size-4" aria-label="completed" />
+          ) : (
+            String(l.order).padStart(2, "0")
+          )}
+        </span>
+        <span>{l.title}</span>
+      </>,
+      l.slug,
+    )
+
   return (
     <li>
       <div className="flex items-center">
@@ -90,22 +107,33 @@ function ModuleNode({
       </div>
       {open && (
         <ul id={listId} className="border-rule mt-1 ml-3 space-y-0.5 border-l pl-2">
-          {m.lessons.map((l) =>
-            item(
-              `/learn/${m.slug}/${l.slug}`,
-              <>
-                <span className="flex w-5 shrink-0 justify-end font-mono text-xs tabular-nums">
-                  {isDone(`lesson:${m.slug}/${l.slug}`) ? (
-                    <CircleCheck className="text-easy size-4" aria-label="completed" />
-                  ) : (
-                    String(l.order).padStart(2, "0")
-                  )}
-                </span>
-                <span>{l.title}</span>
-              </>,
-              l.slug,
+          {groupBySection(m.lessons).map((g, gi) =>
+            g.section === null ? (
+              g.items.map(lessonItem)
+            ) : (
+              <SectionNode
+                key={g.section}
+                id={sectionId(m.slug, g.section)}
+                title={g.section}
+                // The section holding the current lesson starts open; on other pages, the first one does.
+                defaultOpen={
+                  g.items.some((l) => pathname === `/learn/${m.slug}/${l.slug}`) ||
+                  (gi === 0 && !m.lessons.some((l) => pathname === `/learn/${m.slug}/${l.slug}`))
+                }
+              >
+                {g.items.map(lessonItem)}
+              </SectionNode>
             ),
           )}
+          {m.projects.length > 0 &&
+            item(
+              `/projects/${m.slug}`,
+              <>
+                <Hammer className="size-4 shrink-0" aria-hidden />
+                <span>Projects ({m.projects.length})</span>
+              </>,
+              "projects",
+            )}
           {m.problemCount > 0 &&
             item(
               `/practice/${m.slug}`,
@@ -124,6 +152,42 @@ function ModuleNode({
               </>,
               "interview",
             )}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+function SectionNode({
+  id,
+  title,
+  defaultOpen,
+  children,
+}: {
+  id: string
+  title: string
+  defaultOpen: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <li data-testid="tree-section">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={id}
+        className="text-muted hover:text-ink flex w-full items-center gap-1 px-2 pt-3 pb-1 text-left text-xs font-semibold tracking-wide uppercase"
+      >
+        <ChevronDown
+          className={cn("size-3.5 shrink-0 transition-transform", !open && "-rotate-90")}
+          aria-hidden
+        />
+        {title}
+      </button>
+      {open && (
+        <ul id={id} className="space-y-0.5">
+          {children}
         </ul>
       )}
     </li>

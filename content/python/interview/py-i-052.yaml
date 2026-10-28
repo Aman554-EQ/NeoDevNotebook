@@ -1,0 +1,32 @@
+id: py-i-052
+question: "Absolute vs relative imports: which should you use?"
+difficulty: simple
+tags:
+  - imports
+  - packages
+shortAnswer: |
+  Absolute imports (`from shop.pricing import tax`) spell out the full path from the top-level
+  package and work anywhere. They're the PEP 8 default. Relative imports (`from .pricing import
+  tax`, `from ..core import x`) are relative to the current package and only work **inside a
+  package**, not in a file run directly as a script.
+detailedAnswer: |
+  Relative imports are handy inside a package you might rename, and they keep long package
+  names short. Absolute imports are clearer to readers and tools.
+
+  The classic error: running `python shop/reports/daily.py` with a relative import gives
+  `ImportError: attempted relative import with no known parent package`. Run it as a module
+  instead (`python -m shop.reports.daily`), so Python knows the package context. Implicit
+  relative imports (Python 2) no longer exist.
+code:
+  language: python
+  code: |
+    import collections.abc as cabc
+    from collections import abc
+
+    print(cabc is abc, abc.__name__)
+pitfalls:
+  - Running package modules as scripts by path.
+followUps:
+  - What does `python -m` change?
+verify: |
+  assert cabc is abc

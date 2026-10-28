@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next"
 import { Fraunces, Inter, JetBrains_Mono } from "next/font/google"
+import { ExtensionAttrScript } from "@/components/layout/extension-attr-script"
 import { ThemeScript } from "@/components/layout/theme-script"
 import { TopBar } from "@/components/layout/top-bar"
 import { SITE_NAME } from "@/lib/utils"
@@ -46,6 +47,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <head>
         <ThemeScript />
+        <ExtensionAttrScript />
       </head>
       <body className="flex min-h-dvh flex-col">
         <a

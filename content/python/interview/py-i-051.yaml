@@ -1,0 +1,48 @@
+id: py-i-051
+question: What causes circular imports, and how do you fix them?
+difficulty: hard
+tags:
+  - imports
+  - design
+shortAnswer: |
+  Module A imports B while B (directly or indirectly) imports A. The second import finds A
+  only **partially executed** in `sys.modules`, so names defined later in A don't exist yet:
+  `ImportError: cannot import name ... (most likely due to a circular import)`. Fix it by
+  restructuring (move shared code into a third module), by importing the module instead of
+  names, or by importing inside the function that needs it.
+detailedAnswer: |
+  Fixes, from best to most tactical:
+
+  1. **Restructure:** extract the shared pieces into `common.py` that both import. Circular
+     imports usually point to tangled responsibilities.
+  2. **`import a` and use `a.name` at call time**, instead of `from a import name` at import
+     time. The attribute is looked up when it's needed, after both modules have finished
+     loading.
+  3. **Local import** inside the function that needs it.
+  4. For type hints only: `from __future__ import annotations` plus
+     `if TYPE_CHECKING: import ...`.
+code:
+  language: python
+  code: |
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "orders.py").write_text("from users import User\nclass Order: pass\n", encoding="utf-8")
+        Path(tmp, "users.py").write_text("from orders import Order\nclass User: pass\n", encoding="utf-8")
+        sys.path.insert(0, tmp)
+        try:
+            import orders  # noqa: F401
+        except ImportError as err:
+            print("ImportError:", "circular import" in str(err))
+        finally:
+            sys.path.remove(tmp)
+            for name in ("orders", "users"):
+                sys.modules.pop(name, None)
+pitfalls:
+  - Hiding the problem with ever more local imports instead of fixing the structure.
+followUps:
+  - How do `TYPE_CHECKING` imports help?
+verify: |
+  assert 'orders' not in sys.modules

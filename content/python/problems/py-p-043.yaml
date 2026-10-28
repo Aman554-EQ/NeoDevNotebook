@@ -1,0 +1,68 @@
+id: py-p-043
+title: Temporarily override dict values
+difficulty: medium
+tags:
+  - context-managers
+  - contextlib
+statement: |
+  Write a context manager `temporary(settings, **changes)` that applies `changes` to the dict
+  `settings` inside a `with` block and restores the original state afterwards, **even if
+  the block raises**. Keys that didn't exist before must be removed again.
+constraints:
+  - Use `contextlib.contextmanager`.
+examples:
+  - input: "with temporary(cfg, debug=True, new=1): ..."
+    output: cfg is unchanged afterwards
+hints:
+  - Remember the old values, and which keys were missing, before changing anything.
+  - Restore inside `finally`.
+solution:
+  language: python
+  code: |
+    from contextlib import contextmanager
+
+    _MISSING = object()  # a sentinel: "the key did not exist"
+
+
+    @contextmanager
+    def temporary(settings: dict, **changes):
+        saved = {key: settings.get(key, _MISSING) for key in changes}
+        settings.update(changes)
+        try:
+            yield settings
+        finally:
+            for key, old in saved.items():
+                if old is _MISSING:
+                    settings.pop(key, None)
+                else:
+                    settings[key] = old
+
+
+    cfg = {"debug": False, "level": 1}
+    with temporary(cfg, debug=True, new=1):
+        print("inside:", cfg)
+    print("after:", cfg)
+  explanation: |
+    We save each affected key's old value **before** changing anything. A unique sentinel
+    object marks keys that didn't exist, so we can tell "was `None`" apart from "was
+    missing".
+
+    The `try/finally` around `yield` is the important part: whether the `with` body
+    finishes normally or raises, the restore code runs. That's the same guarantee
+    `unittest.mock.patch.dict` gives in tests.
+complexity:
+  time: O(k) for k changed keys
+  space: O(k)
+variations:
+  - Write the same thing as a class with `__enter__` and `__exit__`.
+verify: |
+  cfg = {"debug": False, "level": 1, "none": None}
+  with temporary(cfg, debug=True, new=1, none=5):
+      assert cfg == {"debug": True, "level": 1, "none": 5, "new": 1}
+  assert cfg == {"debug": False, "level": 1, "none": None}
+  try:
+      with temporary(cfg, level=99):
+          raise RuntimeError("boom")
+  except RuntimeError:
+      pass
+  assert cfg["level"] == 1

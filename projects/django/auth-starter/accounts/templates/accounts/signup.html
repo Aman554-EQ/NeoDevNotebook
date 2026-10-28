@@ -1,0 +1,11 @@
+{% extends "accounts/base.html" %}
+{% block title %}Sign up{% endblock %}
+{% block content %}
+  <h1>Create an account</h1>
+  <form method="post" novalidate>
+    {% csrf_token %}
+    {{ form.as_div }}
+    <button type="submit">Sign up</button>
+  </form>
+  <p>Already registered? <a href="{% url 'login' %}">Log in</a></p>
+{% endblock %}

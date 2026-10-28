@@ -1,0 +1,520 @@
+---
+title: Backend fundamentals & REST
+summary: What a backend is responsible for, and how REST APIs organise it. Resources and URLs, methods and status codes, safe and idempotent operations, pagination, filtering, versioning, error formats, and when to use RPC, GraphQL, WebSockets or webhooks instead.
+estimatedMinutes: 28
+difficulty: easy
+section: Web & Backend Foundations
+objectives:
+  - "List what a backend owns: validation, auth, business rules, persistence, integrations"
+  - Design resource URLs and pick the right method and status code for each operation
+  - Explain safe vs idempotent, and why retries make idempotency matter
+  - Choose a pagination, filtering, versioning and error format for an API
+  - Compare REST with RPC, GraphQL, WebSockets and webhooks
+prerequisites:
+  - How the web works
+tags: [rest, api, http, backend, idempotency, pagination]
+practice: [dj-p-002, dj-p-014]
+interview: [dj-i-007, dj-i-023]
+---
+
+## Intuition: a librarian with house rules
+
+A **backend** is the librarian of an application. Clients (a website, a phone app, another service)
+never touch the shelves themselves. They ask, and the librarian checks who is asking, whether the
+request makes sense, applies the house rules, fetches or changes the data, and answers in an agreed
+format.
+
+**REST** is a popular agreement for those conversations: everything the API manages is a
+**resource** with its own **URL** (a noun, like `/books/7`), and the HTTP **method** is the verb
+(`GET` it, `PUT` a new version, `DELETE` it). Learn the pattern once and every REST API feels
+familiar.
+
+## See it
+
+Real requests to a small books resource built in Django. Step through them like an API tool:
+
+<HttpExchange
+  recording="rest-basics"
+  caption="One collection URL (/api/books/) and one item URL (/api/books/{id}/) carry every operation; the method chooses the action and the status code reports the outcome precisely. Note the Location header on 201 and the Allow header on 405."
+/>
+
+## The precise rules
+
+**What a backend owns** (the client can't be trusted with any of it):
+
+1. **Validation**: is the input well-formed and sensible?
+2. **Authentication** (who are you?) and **authorization** (may you do this?).
+3. **Business rules**: stock can't go negative, an order can't be shipped before it's paid.
+4. **Persistence**: storing and querying data, in transactions.
+5. **Integrations**: payments, email, other services, background jobs.
+
+**REST in practice:**
+
+- **Resources are nouns**, collections are plural: `/books`, `/books/7`, `/authors/3/books`.
+- **Methods are the verbs**: no `/getBooks` or `/deleteBook?id=7`.
+- **Stateless**: every request carries everything needed (including credentials); the server
+  keeps no per-client conversation state between requests.
+- **Representations**: the same resource can be sent as JSON, HTML or CSV (negotiated with
+  `Accept`).
+
+| Operation     | Request           | Success            | Typical failures    |
+| ------------- | ----------------- | ------------------ | ------------------- |
+| List          | `GET /books`      | `200` + list       | `400` bad filter    |
+| Create        | `POST /books`     | `201` + `Location` | `400`/`422`, `409`  |
+| Read one      | `GET /books/7`    | `200`              | `404`               |
+| Replace       | `PUT /books/7`    | `200` (or `204`)   | `400`, `404`        |
+| Change part   | `PATCH /books/7`  | `200`              | `400`, `404`, `409` |
+| Delete        | `DELETE /books/7` | `204`              | `404`               |
+| Not logged in | any               |                    | `401`               |
+| Not allowed   | any               |                    | `403`               |
+
+**Safe** methods (`GET`, `HEAD`, `OPTIONS`) change nothing. **Idempotent** methods (`GET`, `PUT`,
+`DELETE`) can be repeated with the same effect as doing them once. `POST` is neither, so a retried
+`POST` can create duplicates unless the API supports **idempotency keys** (lesson 21).
+
+**Lists need limits.** Return pages (`?page=2&page_size=20`, or `?cursor=...`), allow filtering and
+sorting through query parameters (`?status=paid&ordering=-created`), and always cap the page size.
+
+**Errors need one shape**, so clients can handle every failure with one code path, for example
+`{"error": {"code": "validation_error", "message": "...", "details": {...}}}`.
+
+**Versioning** protects old clients: put the version in the path (`/api/v1/`) or a header, and only
+make breaking changes in a new version.
+
+**REST isn't the only style:**
+
+| Style      | Shape                                           | Good for                                     |
+| ---------- | ----------------------------------------------- | -------------------------------------------- |
+| REST       | resources + HTTP methods                        | most CRUD-style public and internal APIs     |
+| RPC        | `POST /rpc` with `{"method": "...", ...}`       | actions that aren't resources; gRPC services |
+| GraphQL    | one endpoint, client chooses fields             | many client types needing different shapes   |
+| WebSockets | long-lived two-way connection                   | chat, live dashboards, multiplayer           |
+| Webhooks   | the server calls **you** when something happens | payments, Git pushes, integrations           |
+
+## Worked example
+
+The core of any REST framework is a dispatcher: (method, path) in, (status, body) out. Here's one in
+plain Python, with an in-memory "database", so you can see the moving parts before Django hides them.
+
+```python title="rest_core.py"
+import re
+
+BOOKS = {1: {"id": 1, "title": "Dune", "year": 1965}}
+ITEM = re.compile(r"^/books/(\d+)$")
+
+
+def handle(method, path, body=None):
+    if path == "/books":
+        if method == "GET":
+            return 200, list(BOOKS.values())
+        if method == "POST":
+            if not body or "title" not in body:
+                return 400, {"error": "title is required"}
+            new_id = max(BOOKS, default=0) + 1
+            BOOKS[new_id] = {"id": new_id, "title": body["title"], "year": body.get("year")}
+            return 201, BOOKS[new_id]
+        return 405, {"error": f"{method} not allowed on /books"}
+
+    match = ITEM.match(path)
+    if not match:
+        return 404, {"error": "no such route"}
+    book_id = int(match.group(1))
+    if book_id not in BOOKS:
+        return 404, {"error": f"book {book_id} not found"}
+    if method == "GET":
+        return 200, BOOKS[book_id]
+    if method == "PUT":
+        BOOKS[book_id] = {"id": book_id, "title": body["title"], "year": body["year"]}
+        return 200, BOOKS[book_id]
+    if method == "DELETE":
+        del BOOKS[book_id]
+        return 204, None
+    return 405, {"error": f"{method} not allowed on {path}"}
+
+
+for request in [
+    ("GET", "/books", None),
+    ("POST", "/books", {"title": "Emma", "year": 1815}),
+    ("PUT", "/books/2", {"title": "Emma", "year": 1816}),
+    ("GET", "/books/2", None),
+    ("DELETE", "/books/2", None),
+    ("DELETE", "/books/2", None),
+    ("POST", "/books", {"year": 2000}),
+    ("PATCH", "/books", None),
+]:
+    status, data = handle(*request)
+    print(f"{request[0]:<6} {request[1]:<9} {status} {data}")
+```
+
+```text title="Output"
+GET    /books    200 [{'id': 1, 'title': 'Dune', 'year': 1965}]
+POST   /books    201 {'id': 2, 'title': 'Emma', 'year': 1815}
+PUT    /books/2  200 {'id': 2, 'title': 'Emma', 'year': 1816}
+GET    /books/2  200 {'id': 2, 'title': 'Emma', 'year': 1816}
+DELETE /books/2  204 None
+DELETE /books/2  404 {'error': 'book 2 not found'}
+POST   /books    400 {'error': 'title is required'}
+PATCH  /books    405 {'error': 'PATCH not allowed on /books'}
+```
+
+- Two URL shapes cover the whole resource: the **collection** (`/books`) and an **item**
+  (`/books/<id>`). The method picks the action.
+- Every branch returns the most specific status: `201` for a creation, `204` (no body) for a
+  deletion, `404` for an unknown id, `405` for a method the URL doesn't support, `400` for bad input.
+- The second `DELETE` gets `404`, but the outcome is the same as after the first one (book 2 is
+  gone). That's what idempotent means.
+- Django's URL routing and views (lessons 8 and 19) do exactly this job, with far less code.
+
+## Variations
+
+### Good and bad resource URLs
+
+```python
+import re
+
+VERB = re.compile(r"/(get|create|update|delete|fetch|make)[A-Z_-]", re.IGNORECASE)
+
+
+def review(route):
+    problems = []
+    if VERB.search(route):
+        problems.append("verb in the path: let the HTTP method be the verb")
+    if re.search(r"[A-Z]", route.split("?")[0]):
+        problems.append("use lowercase-with-hyphens")
+    if "?id=" in route:
+        problems.append("put the id in the path: /books/7")
+    return problems or ["ok"]
+
+
+for route in ["GET /books", "GET /getBooks", "POST /books/create_book", "GET /books?id=7",
+              "GET /authors/3/books", "POST /orders/41/cancel"]:
+    print(f"{route:<26} {'; '.join(review(route.split(' ', 1)[1]))}")
+```
+
+```text title="Output"
+GET /books                 ok
+GET /getBooks              verb in the path: let the HTTP method be the verb; use lowercase-with-hyphens
+POST /books/create_book    verb in the path: let the HTTP method be the verb
+GET /books?id=7            put the id in the path: /books/7
+GET /authors/3/books       ok
+POST /orders/41/cancel     ok
+```
+
+Actions that aren't plain create/update/delete, like cancelling an order, are commonly modelled as a
+sub-resource `POST /orders/41/cancel`. DRF calls these **extra actions**.
+
+### Offset pagination vs cursor pagination
+
+```python
+items = [f"post-{n}" for n in range(1, 8)]
+
+
+def offset_page(data, page, size=3):
+    start = (page - 1) * size
+    return data[start : start + size]
+
+
+def cursor_page(data, after=None, size=3):
+    start = data.index(after) + 1 if after else 0
+    chunk = data[start : start + size]
+    return chunk, (chunk[-1] if len(chunk) == size else None)
+
+
+print("page 1:", offset_page(items, 1))
+items.insert(0, "post-0")  # someone publishes while we're reading
+print("page 2:", offset_page(items, 2), "<- post-3 again")
+
+items = [f"post-{n}" for n in range(1, 8)]
+first, cursor = cursor_page(items)
+items.insert(0, "post-0")
+second, cursor = cursor_page(items, after=cursor)
+print("cursor:", first, "then", second)
+```
+
+```text title="Output"
+page 1: ['post-1', 'post-2', 'post-3']
+page 2: ['post-3', 'post-4', 'post-5'] <- post-3 again
+cursor: ['post-1', 'post-2', 'post-3'] then ['post-4', 'post-5', 'post-6']
+```
+
+Offset pages (`?page=2`) are simple and let users jump to page 10, but insertions shift items between
+pages. Cursor pages (`?cursor=...`) continue "after this item", so feeds stay consistent and deep
+pages stay fast. Django REST Framework offers both.
+
+### Safe, idempotent, neither
+
+```python
+orders = []
+profile = {"name": "Ada"}
+
+
+def post_order(item):  # neither safe nor idempotent
+    orders.append(item)
+
+
+def put_profile(data):  # idempotent: replaces the whole thing
+    profile.clear()
+    profile.update(data)
+
+
+for attempt in range(2):  # a client retries after a timeout
+    post_order("Dune")
+    put_profile({"name": "Ada Lovelace"})
+
+print("orders:", orders)
+print("profile:", profile)
+```
+
+```text title="Output"
+orders: ['Dune', 'Dune']
+profile: {'name': 'Ada Lovelace'}
+```
+
+A timeout doesn't tell the client whether the server processed the request, so clients retry.
+Retrying the `PUT` is harmless; retrying the `POST` bought the book twice. Idempotency keys
+(lesson 21) fix exactly this.
+
+### One error shape for everything
+
+```python
+import json
+
+
+def error(code, message, details=None, status=400):
+    return status, {"error": {"code": code, "message": message, "details": details or {}}}
+
+
+print(json.dumps(error("validation_error", "Some fields are invalid.", {"year": ["Must be a number."]})[1]))
+print(json.dumps(error("not_found", "Book 99 does not exist.", status=404)[1]))
+print(json.dumps(error("rate_limited", "Slow down.", {"retry_after": 30}, status=429)[1]))
+```
+
+```text title="Output"
+{"error": {"code": "validation_error", "message": "Some fields are invalid.", "details": {"year": ["Must be a number."]}}}
+{"error": {"code": "not_found", "message": "Book 99 does not exist.", "details": {}}}
+{"error": {"code": "rate_limited", "message": "Slow down.", "details": {"retry_after": 30}}}
+```
+
+Clients branch on the machine-readable `code`, show the human `message`, and use `details` for
+per-field messages. RFC 9457 ("problem details", `application/problem+json`) standardises a similar
+shape with `type`, `title`, `status` and `detail`.
+
+### Filtering and sorting from the query string
+
+```python
+from urllib.parse import parse_qs
+
+BOOKS = [
+    {"title": "Dune", "author": "Herbert", "year": 1965},
+    {"title": "Emma", "author": "Austen", "year": 1815},
+    {"title": "Persuasion", "author": "Austen", "year": 1817},
+]
+FILTERS = {"author"}
+SORTS = {"year", "title"}
+
+
+def list_books(query):
+    params = {k: v[0] for k, v in parse_qs(query).items()}
+    rows = BOOKS
+    for field in FILTERS & params.keys():
+        rows = [b for b in rows if b[field] == params[field]]
+    ordering = params.get("ordering", "title")
+    key = ordering.lstrip("-")
+    if key not in SORTS:  # never sort by arbitrary client input
+        return 400, f"can't order by {key}"
+    rows = sorted(rows, key=lambda b: b[key], reverse=ordering.startswith("-"))
+    return 200, [b["title"] for b in rows]
+
+
+print(list_books("author=Austen&ordering=-year"))
+print(list_books("ordering=year"))
+print(list_books("ordering=password"))
+```
+
+```text title="Output"
+(200, ['Persuasion', 'Emma'])
+(200, ['Emma', 'Persuasion', 'Dune'])
+(400, "can't order by password")
+```
+
+Whitelisting filter and sort fields matters: sorting by any column the client names can leak data or
+hit unindexed columns. DRF's `filterset_fields` and `ordering_fields` work exactly like this.
+
+### Versions keep old clients working
+
+```python
+def represent(book, version):
+    if version == "v1":
+        return {"id": book["id"], "title": book["title"], "price": book["price"]}
+    if version == "v2":  # price became a nested money object: a breaking change
+        return {"id": book["id"], "title": book["title"],
+                "price": {"amount": book["price"], "currency": "EUR"}}
+    raise ValueError(f"unknown version {version}")
+
+
+book = {"id": 1, "title": "Dune", "price": "12.50"}
+print(represent(book, "v1"))
+print(represent(book, "v2"))
+```
+
+```text title="Output"
+{'id': 1, 'title': 'Dune', 'price': '12.50'}
+{'id': 1, 'title': 'Dune', 'price': {'amount': '12.50', 'currency': 'EUR'}}
+```
+
+Adding a new field is not breaking; renaming, removing or changing the type of one is. Breaking
+changes go into a new version, and the old one stays until its clients have moved.
+
+## Putting it together
+
+A small resource layer with everything an API list endpoint needs: validation, pagination with a
+capped page size, filtering, and consistent errors. The "client" at the bottom calls it like a
+mobile app would.
+
+```python title="tasks_api.py"
+from itertools import count
+
+ids = count(1)
+TASKS = {}
+MAX_PAGE_SIZE = 50
+
+
+def error(status, code, message, **details):
+    return status, {"error": {"code": code, "message": message, "details": details}}
+
+
+def create(body):
+    title = str(body.get("title", "")).strip()
+    priority = body.get("priority", "normal")
+    problems = {}
+    if not title:
+        problems["title"] = "required"
+    if priority not in {"low", "normal", "high"}:
+        problems["priority"] = "low, normal or high"
+    if problems:
+        return error(400, "validation_error", "Some fields are invalid.", **problems)
+    task = {"id": next(ids), "title": title, "priority": priority, "done": False}
+    TASKS[task["id"]] = task
+    return 201, task
+
+
+def list_tasks(page=1, page_size=2, priority=None):
+    page_size = min(int(page_size), MAX_PAGE_SIZE)  # never trust the client's page size
+    rows = [t for t in TASKS.values() if priority in (None, t["priority"])]
+    start = (int(page) - 1) * page_size
+    results = rows[start : start + page_size]
+    has_next = start + page_size < len(rows)
+    return 200, {"count": len(rows), "page": int(page), "next": has_next,
+                 "results": [t["title"] for t in results]}
+
+
+def update(task_id, body):
+    task = TASKS.get(task_id)
+    if task is None:
+        return error(404, "not_found", f"Task {task_id} does not exist.")
+    if "done" in body and not isinstance(body["done"], bool):
+        return error(400, "validation_error", "Some fields are invalid.", done="true or false")
+    task.update({k: v for k, v in body.items() if k in {"title", "priority", "done"}})
+    return 200, task
+
+
+calls = [
+    ("POST", lambda: create({"title": "Write tests", "priority": "high"})),
+    ("POST", lambda: create({"title": "Fix login"})),
+    ("POST", lambda: create({"title": "Deploy", "priority": "high"})),
+    ("POST", lambda: create({"title": "", "priority": "urgent"})),
+    ("GET p1", lambda: list_tasks()),
+    ("GET p2", lambda: list_tasks(page=2)),
+    ("GET high", lambda: list_tasks(priority="high", page_size=1000)),
+    ("PATCH", lambda: update(2, {"done": True})),
+    ("PATCH", lambda: update(2, {"done": "yes"})),
+    ("PATCH", lambda: update(99, {"done": True})),
+]
+for name, call in calls:
+    status, body = call()
+    print(f"{name:<8} {status} {body}")
+```
+
+```text title="Output"
+POST     201 {'id': 1, 'title': 'Write tests', 'priority': 'high', 'done': False}
+POST     201 {'id': 2, 'title': 'Fix login', 'priority': 'normal', 'done': False}
+POST     201 {'id': 3, 'title': 'Deploy', 'priority': 'high', 'done': False}
+POST     400 {'error': {'code': 'validation_error', 'message': 'Some fields are invalid.', 'details': {'title': 'required', 'priority': 'low, normal or high'}}}
+GET p1   200 {'count': 3, 'page': 1, 'next': True, 'results': ['Write tests', 'Fix login']}
+GET p2   200 {'count': 3, 'page': 2, 'next': False, 'results': ['Deploy']}
+GET high 200 {'count': 2, 'page': 1, 'next': False, 'results': ['Write tests', 'Deploy']}
+PATCH    200 {'id': 2, 'title': 'Fix login', 'priority': 'normal', 'done': True}
+PATCH    400 {'error': {'code': 'validation_error', 'message': 'Some fields are invalid.', 'details': {'done': 'true or false'}}}
+PATCH    404 {'error': {'code': 'not_found', 'message': 'Task 99 does not exist.', 'details': {}}}
+```
+
+Every rule a client could break is checked on the server: required fields, allowed values, types,
+page-size caps, unknown ids. Every failure has the same shape. In the coming lessons Django and DRF
+take over the plumbing, but these decisions stay yours.
+
+## Common mistakes
+
+<Callout type="warning" title="Trusting the client">
+  Hiding a button in the UI is not security. Anyone can send any request with curl or Postman. Every
+  rule (validation, permissions, prices, stock) must be enforced on the server.
+</Callout>
+
+- **Verbs in URLs** (`/createOrder`, `/getUser?id=3`). Use nouns and methods: `POST /orders`,
+  `GET /users/3`.
+- **Unbounded lists.** `GET /orders` returning a million rows will take your API down. Paginate and
+  cap the page size.
+- **Breaking changes in place.** Renaming a field breaks every app that hasn't updated yet. Add new
+  fields, or ship a new version.
+- **Inconsistent errors.** One endpoint returns `{"detail": ...}`, another `{"msg": ...}`, a third
+  a plain string: every client then needs special cases.
+- **Retrying non-idempotent requests blindly.** A client that retries `POST /payments` without an
+  idempotency key can charge twice.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: design URLs and methods for 'list a user's orders', 'cancel order 41' and 'add an item to cart 9'."
+>
+  `GET /users/7/orders` (or `GET /orders?user=7`), `POST /orders/41/cancel`, and `POST
+  /carts/9/items` with the item in the body.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why is offset pagination a problem for a fast-moving feed?">
+  New items shift everything down, so the next page repeats items (or skips them after deletions),
+  and `OFFSET 100000` gets slow. A cursor ("after item X") stays consistent and fast.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: is adding a new field to a JSON response a breaking change?"
+>
+  No: well-behaved clients ignore fields they don't know. Removing, renaming or changing a field's
+  type is breaking.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: a payment provider must tell your shop 'payment succeeded'. REST call, WebSocket or webhook?"
+>
+  A **webhook**: the provider sends an HTTP `POST` to a URL you registered, when the event happens.
+  You verify its signature (lesson 21) and answer `2xx` quickly.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: what status should 'title is required' return, and what should the body contain?">
+  `400 Bad Request` (or `422`), with a body that names the field: for example
+  `{"error": {"code": "validation_error", "details": {"title": ["required"]}}}`.
+</Reveal>
+
+<KeyTakeaways>
+
+- The backend owns validation, auth, business rules, persistence and integrations; the client is
+  never trusted.
+- REST: resources are nouns with URLs, HTTP methods are the verbs, status codes report outcomes.
+- GET/PUT/DELETE are idempotent, POST isn't, so retried POSTs need idempotency keys.
+- Paginate and cap every list; whitelist filters and sort fields.
+- One error shape everywhere; version your API before making breaking changes.
+- Pick the style for the job: REST for CRUD, RPC for actions, GraphQL for flexible reads,
+  WebSockets for live two-way data, webhooks for event notifications.
+
+</KeyTakeaways>

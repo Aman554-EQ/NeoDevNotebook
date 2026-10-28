@@ -1,0 +1,446 @@
+---
+title: Stacks and queues
+summary: Two of the most useful access patterns. A list makes a perfect stack (last in, first out), but a poor queue. collections.deque gives O(1) at both ends, plus a bounded maxlen for "keep the last N".
+estimatedMinutes: 28
+difficulty: simple
+section: Data Structures
+objectives:
+  - Implement a stack (LIFO) with a list
+  - Implement a queue (FIFO) with collections.deque, and explain why not a list
+  - Keep only the most recent N items with `deque(maxlen=N)`
+  - Recognise problems that need a stack or a queue
+prerequisites:
+  - Lists in depth
+tags: [python, stack, queue, deque]
+practice: [py-p-031, py-p-037, py-p-049]
+interview: [py-i-019]
+---
+
+## Intuition: plates and a ticket line
+
+A **stack** is a pile of plates: you add and take from the top. The last plate in is the first out
+(LIFO). Undo history, the call stack and bracket matching all work like this.
+
+A **queue** is a ticket line: people join at the back and are served from the front. First in is
+first out (FIFO). Print jobs, breadth-first search and task schedulers work like this.
+
+## See it
+
+<DequeViz />
+
+## The precise rules
+
+| Need                      | Use                 | Add                          | Remove      | Cost     |
+| ------------------------- | ------------------- | ---------------------------- | ----------- | -------- |
+| Stack (LIFO)              | `list`              | `append(x)`                  | `pop()`     | O(1)     |
+| Queue (FIFO)              | `collections.deque` | `append(x)`                  | `popleft()` | O(1)     |
+| Queue with a list (avoid) | `list`              | `append(x)`                  | `pop(0)`    | **O(n)** |
+| Last N items              | `deque(maxlen=N)`   | `append(x)` drops the oldest |             | O(1)     |
+
+Removing from an empty list or deque raises `IndexError`, so check emptiness first (`if stack:`).
+
+## Worked example
+
+```python title="stack_queue.py"
+from collections import deque
+
+stack = []
+stack.append("a")
+stack.append("b")
+print(stack.pop(), stack)  # last in, first out
+
+queue = deque()
+queue.append("first")
+queue.append("second")
+print(queue.popleft(), queue)  # first in, first out
+
+recent = deque(maxlen=3)
+for page in ["home", "about", "blog", "contact"]:
+    recent.append(page)  # the oldest falls off automatically
+print(list(recent))
+
+try:
+    deque().popleft()
+except IndexError as err:
+    print("IndexError:", err)
+
+
+def balanced(text: str) -> bool:
+    """Brackets match if every closer pairs with the most recent opener: a stack."""
+    pairs = {")": "(", "]": "[", "}": "{"}
+    stack = []
+    for ch in text:
+        if ch in "([{":
+            stack.append(ch)
+        elif ch in pairs:
+            if not stack or stack.pop() != pairs[ch]:
+                return False
+    return not stack
+
+
+print(balanced("f(a[1], {b: 2})"), balanced("(]"), balanced("(("))
+```
+
+```text title="Output"
+b ['a']
+first deque(['second'])
+['about', 'blog', 'contact']
+IndexError: pop from an empty deque
+True False False
+```
+
+What to notice:
+
+- `balanced` is the classic stack problem: the most recent unmatched opener must match the next
+  closer. If anything is left on the stack at the end, some opener was never closed.
+- `deque(maxlen=3)` is a ready-made "recent items" buffer. No manual trimming needed.
+
+## Variations
+
+### A stack's full toolkit: push, pop, peek, empty
+
+```python title="stack_ops.py"
+history = []
+for page in ["home", "docs", "api"]:
+    history.append(page)                 # push
+
+print(history[-1])                       # peek: look at the top without removing
+print(len(history), bool(history))       # size, "is it non-empty?"
+print(history.pop(), history.pop(), history)
+print(history[-1] if history else None)  # safe peek on a possibly empty stack
+```
+
+```text title="Output"
+api
+3 True
+api docs ['home']
+home
+```
+
+A Python list **is** a stack: the end of the list is the top. `stack[-1]` peeks, and truthiness
+tells you whether it's empty.
+
+### Undo and redo with two stacks
+
+```python title="undo_redo.py"
+class TextBox:
+    def __init__(self):
+        self.text = ""
+        self.undo_stack: list[str] = []
+        self.redo_stack: list[str] = []
+
+    def type(self, s: str):
+        self.undo_stack.append(self.text)    # remember the state BEFORE the change
+        self.redo_stack.clear()              # a new edit invalidates redo
+        self.text += s
+
+    def undo(self):
+        if self.undo_stack:
+            self.redo_stack.append(self.text)
+            self.text = self.undo_stack.pop()
+
+    def redo(self):
+        if self.redo_stack:
+            self.undo_stack.append(self.text)
+            self.text = self.redo_stack.pop()
+
+
+box = TextBox()
+for chunk in ["Hello", ", world", "!"]:
+    box.type(chunk)
+for action in [box.undo, box.undo, box.redo]:
+    action()
+    print(f"{action.__name__}: {box.text!r}")
+box.type("?")
+box.redo()                       # nothing to redo after a new edit
+print(f"type + redo: {box.text!r}")
+```
+
+```text title="Output"
+undo: 'Hello, world'
+undo: 'Hello'
+redo: 'Hello, world'
+type + redo: 'Hello, world?'
+```
+
+Undo moves the current state onto the redo stack and restores the previous one; redo does the
+reverse. Typing something new clears the redo stack, exactly like a text editor.
+
+### A monotonic stack: "next greater element"
+
+```python title="next_greater.py"
+def next_greater(nums: list[int]) -> list[int]:
+    """For each item, the next item to its right that is bigger (-1 if none)."""
+    result = [-1] * len(nums)
+    stack: list[int] = []                    # indexes whose answer is still unknown
+    for i, n in enumerate(nums):
+        while stack and nums[stack[-1]] < n:  # n answers every smaller item waiting
+            result[stack.pop()] = n
+        stack.append(i)
+    return result
+
+
+print(next_greater([2, 1, 2, 4, 3]))
+temps = [73, 74, 75, 71, 69, 72, 76, 73]
+print(next_greater(temps))
+```
+
+```text title="Output"
+[4, 2, 4, -1, -1]
+[74, 75, 76, 72, 72, 76, -1, -1]
+```
+
+The stack holds items still waiting for a bigger value, and they're always in decreasing order
+(hence "monotonic"). Each index is pushed and popped at most once, so the whole thing is O(n)
+instead of the O(n²) "check everything to the right" approach. It's a favourite interview
+pattern.
+
+### Everything a deque can do
+
+```python title="deque_ops.py"
+from collections import deque
+
+d = deque([3, 4])
+d.appendleft(2)
+d.append(5)
+d.extend([6, 7])
+d.extendleft([1, 0])          # each item is added to the LEFT in turn: order reverses
+print(d)
+print(d[0], d[-1], d.pop(), d.popleft(), d)
+
+d.rotate(2)                   # move the last 2 items to the front
+print(d)
+d.rotate(-2)                  # and back
+print(d)
+
+last3 = deque([1, 2, 3], maxlen=3)
+last3.appendleft(0)           # full: the item at the OTHER end (3) falls off
+print(last3)
+```
+
+```text title="Output"
+deque([0, 1, 2, 3, 4, 5, 6, 7])
+0 7 7 0 deque([1, 2, 3, 4, 5, 6])
+deque([5, 6, 1, 2, 3, 4])
+deque([1, 2, 3, 4, 5, 6])
+deque([0, 1, 2], maxlen=3)
+```
+
+- `extendleft([1, 0])` adds `1`, then `0` at the front, so they end up reversed.
+- `rotate(k)` shifts everything `k` places to the right, wrapping around; negative `k` shifts
+  left.
+- With `maxlen`, adding at one end silently drops an item from the other.
+
+### Sliding window maximum with a deque
+
+```python title="window_max.py"
+from collections import deque
+
+
+def window_max(nums: list[int], k: int) -> list[int]:
+    window: deque[int] = deque()          # indexes, values decreasing from the left
+    out = []
+    for i, n in enumerate(nums):
+        while window and nums[window[-1]] <= n:
+            window.pop()                  # smaller values can never be the max again
+        window.append(i)
+        if window[0] <= i - k:
+            window.popleft()              # the front slid out of the window
+        if i >= k - 1:
+            out.append(nums[window[0]])   # the front is the window's maximum
+    return out
+
+
+print(window_max([1, 3, -1, -3, 5, 3, 6, 7], 3))
+```
+
+```text title="Output"
+[3, 3, 5, 5, 6, 7]
+```
+
+The deque is used at **both** ends: new items enter on the right after evicting smaller ones, and
+expired items leave on the left. Every index enters and leaves once, so it's O(n) for any window
+size.
+
+## Putting it together
+
+### A calculator for postfix (RPN) expressions
+
+```python title="rpn.py"
+import operator
+
+OPS = {"+": operator.add, "-": operator.sub, "*": operator.mul, "/": operator.truediv}
+
+
+def rpn(expression: str) -> float:
+    stack: list[float] = []
+    for token in expression.split():
+        if token in OPS:
+            if len(stack) < 2:
+                raise ValueError(f"not enough operands for {token!r}")
+            right, left = stack.pop(), stack.pop()     # order matters for - and /
+            stack.append(OPS[token](left, right))
+        else:
+            stack.append(float(token))
+    if len(stack) != 1:
+        raise ValueError(f"leftover values: {stack}")
+    return stack[0]
+
+
+for expr in ["3 4 +", "5 1 2 + 4 * + 3 -", "2 3 4 * +", "10 2 /", "1 +"]:
+    try:
+        print(f"{expr:20} = {rpn(expr)}")
+    except ValueError as err:
+        print(f"{expr:20} ! {err}")
+```
+
+```text title="Output"
+3 4 +                = 7.0
+5 1 2 + 4 * + 3 -    = 14.0
+2 3 4 * +            = 14.0
+10 2 /               = 5.0
+1 +                  ! not enough operands for '+'
+```
+
+In postfix notation an operator applies to the two values most recently pushed, so the stack does
+all the work and no parentheses are needed. `5 1 2 + 4 * + 3 -` means `5 + (1 + 2) * 4 - 3`.
+
+### Shortest path through a maze (breadth-first search)
+
+```python title="maze_bfs.py"
+from collections import deque
+
+MAZE = """\
+S.#.....
+.##.###.
+....#...
+.##...#E"""
+
+grid = MAZE.splitlines()
+start = next((r, c) for r, row in enumerate(grid) for c, ch in enumerate(row) if ch == "S")
+
+
+def shortest_path(start):
+    queue = deque([start])
+    came_from = {start: None}
+    while queue:
+        r, c = queue.popleft()                   # FIFO: closest cells first
+        if grid[r][c] == "E":
+            path, cell = [], (r, c)
+            while cell:
+                path.append(cell)
+                cell = came_from[cell]
+            return path[::-1]
+        for dr, dc in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+            nr, nc = r + dr, c + dc
+            if (0 <= nr < len(grid) and 0 <= nc < len(grid[0])
+                    and grid[nr][nc] != "#" and (nr, nc) not in came_from):
+                came_from[(nr, nc)] = (r, c)
+                queue.append((nr, nc))
+    return None
+
+
+path = shortest_path(start)
+print("steps:", len(path) - 1)
+on_path = set(path)
+for r, row in enumerate(grid):
+    print("".join("*" if (r, c) in on_path and ch == "." else ch for c, ch in enumerate(row)))
+```
+
+```text title="Output"
+steps: 12
+S.#.....
+*##.###.
+****#***
+.##***#E
+```
+
+Because a queue hands out cells in the order they were discovered, BFS explores everything one
+step away, then two steps, and so on. The first time it reaches `E` is therefore along a shortest
+path. Swapping the deque for a stack would give depth-first search, which finds **a** path but
+not necessarily the shortest.
+
+### A round-robin scheduler
+
+```python title="round_robin.py"
+from collections import deque
+
+tasks = deque([("backup", 5), ("email", 2), ("report", 4)])   # (name, time units needed)
+SLICE = 2
+clock = 0
+while tasks:
+    name, left = tasks.popleft()
+    ran = min(SLICE, left)
+    clock += ran
+    if left > ran:
+        tasks.append((name, left - ran))      # not finished: back of the line
+        print(f"t={clock:2}: {name} ran {ran}, {left - ran} left")
+    else:
+        print(f"t={clock:2}: {name} finished")
+```
+
+```text title="Output"
+t= 2: backup ran 2, 3 left
+t= 4: email finished
+t= 6: report ran 2, 2 left
+t= 8: backup ran 2, 1 left
+t=10: report finished
+t=11: backup finished
+```
+
+Each task gets at most `SLICE` units, then goes to the back of the queue. That's how operating
+systems share a CPU fairly between programs: short jobs (`email`) finish early instead of waiting
+behind long ones.
+
+## Common mistakes
+
+<Callout type="warning" title="queue.pop(0) on a list">
+  It works, and it's fine for 10 items, but with 100,000 items every call moves the whole list.
+  `deque.popleft()` is O(1) regardless of size.
+</Callout>
+
+- **Popping an empty stack.** Guard with `if stack:` or catch `IndexError`.
+- **Indexing the middle of a deque in a loop.** `d[i]` is O(n) towards the middle. Deques are for
+  their ends.
+- **Confusing `queue.Queue` with deque.** `queue.Queue` is a thread-safe queue for passing work
+  between threads (lesson 27). For single-threaded code, use `deque`.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: which structure for 'undo the last 50 edits'?">
+  `deque(maxlen=50)` used as a stack: `append` each edit and `pop` to undo. The `maxlen` silently
+  discards edits older than 50.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: after `s = [1, 2, 3]`, what do `s.pop()` and `s[-1]` return?"
+>
+  `3`, then `2`. `pop()` removes and returns the top; `s[-1]` peeks at the new top without removing
+  it.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why does BFS use a queue but depth-first search a stack?">
+  A queue (FIFO) processes cells in discovery order, so near cells come before far ones: level by
+  level. A stack (LIFO) always continues from the newest cell, diving deep down one path first.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: check whether a word is a palindrome with a deque.">
+  `d = deque(word)`, then `while len(d) > 1: if d.popleft() != d.pop(): return False`, and return
+  `True` at the end. Both ends are O(1) to remove.
+</Reveal>
+
+<KeyTakeaways>
+
+- Stack = LIFO: use a list with `append` and `pop`.
+- Queue = FIFO: use `deque` with `append` and `popleft`, never `list.pop(0)` for large data.
+- `deque(maxlen=N)` keeps the most recent N items automatically.
+- Matching, undo and depth-first search use stacks. Scheduling and breadth-first search use queues.
+- Stack = list (`append`, `pop`, `[-1]` to peek); queue = `deque` (`append`, `popleft`).
+- Two stacks give undo/redo; a monotonic stack answers "next greater" in O(n).
+- Queues drive breadth-first search and fair scheduling; a deque with evictions gives sliding-window
+  maxima.
+
+</KeyTakeaways>
+
+{/* enriched */}

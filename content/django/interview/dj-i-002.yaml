@@ -1,0 +1,25 @@
+id: dj-i-002
+question: What's the difference between a Django project and an app?
+difficulty: easy
+tags:
+  - architecture
+  - project-structure
+shortAnswer: |
+  A project is the whole site: settings, root URLs and the WSGI/ASGI entry points. An app is one area of the domain (orders, payments) with its own models, views, URLs, templates and tests, listed in INSTALLED_APPS.
+detailedAnswer: |
+  `django-admin startproject config .` creates the **project**: `settings.py`, the root `urls.py`,
+  `wsgi.py`/`asgi.py` and `manage.py`. It holds configuration, not features.
+
+  `python manage.py startapp orders` creates an **app**: a Python package with `models.py`, `views.py`,
+  `admin.py`, `apps.py`, `migrations/` and `tests.py`. Apps hold the code for one part of the domain and
+  are activated by adding them to `INSTALLED_APPS`.
+
+  Good apps are split by **domain** (accounts, catalog, orders, payments) rather than by technical layer,
+  have one-way dependencies, and could in principle be reused in another project. The capstone in this
+  module uses exactly that layout.
+pitfalls:
+  - One huge app for everything.
+  - Apps named by layer (`models_app`, `api_app`).
+followUps:
+  - How do you avoid circular imports between apps?
+  - When would you split an app in two?

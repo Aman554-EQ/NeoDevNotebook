@@ -1,0 +1,72 @@
+id: py-p-052
+title: Lazily merge k sorted iterators
+difficulty: hard
+tags:
+  - generators
+  - heapq
+  - streaming
+statement: |
+  Write a generator `merge_sorted(*iterables)` that yields all values from several **sorted**
+  iterables in sorted order. It must work with infinite iterators and hold at most one value
+  per input in memory. Don't use `heapq.merge` itself.
+constraints:
+  - Values are comparable.
+  - Equal values keep input order (stable).
+examples:
+  - input: list(merge_sorted([1, 4, 9], [2, 3, 10], []))
+    output: "[1, 2, 3, 4, 9, 10]"
+hints:
+  - A heap holds the current front value of each iterator.
+  - Store (value, input_index, iterator) so ties compare the index, never the iterators.
+solution:
+  language: python
+  code: |
+    import heapq
+    from itertools import count, islice
+
+
+    def merge_sorted(*iterables):
+        heap = []
+        for index, iterable in enumerate(iterables):
+            it = iter(iterable)
+            for first in it:  # take one value, if there is one
+                heap.append((first, index, it))
+                break
+        heapq.heapify(heap)
+        while heap:
+            value, index, it = heap[0]
+            yield value
+            nxt = next(it, _DONE)
+            if nxt is _DONE:
+                heapq.heappop(heap)  # this input is exhausted
+            else:
+                heapq.heapreplace(heap, (nxt, index, it))
+
+
+    _DONE = object()
+
+    print(list(merge_sorted([1, 4, 9], [2, 3, 10], [])))
+    evens, odds = count(0, 2), count(1, 2)
+    print(list(islice(merge_sorted(evens, odds), 7)))
+  explanation: |
+    The heap always contains exactly one "front" value per non-empty input, so the
+    smallest one overall is at `heap[0]`. After yielding it, we fetch the next value from
+    the **same** iterator and use `heapreplace` (pop + push in one O(log k) step).
+
+    The `index` in each tuple breaks ties, so equal values come out in input order
+    (stable) and Python never tries to compare two iterators (which raises `TypeError`).
+    Because we pull one value at a time, it works on infinite streams like `count()`.
+    That's how merging sorted log files or external sorting works.
+complexity:
+  time: O(N log k) for N values from k inputs
+  space: O(k)
+variations:
+  - Add a `key=` function, like `sorted` has.
+verify: |
+  import heapq as hq, random
+  random.seed(9)
+  for _ in range(100):
+      lists = [sorted(random.randint(0, 20) for _ in range(random.randint(0, 6))) for _ in range(random.randint(1, 5))]
+      assert list(merge_sorted(*lists)) == list(hq.merge(*lists))
+  assert list(islice(merge_sorted(count(0, 2), count(1, 2)), 7)) == list(range(7))
+  assert list(merge_sorted()) == []

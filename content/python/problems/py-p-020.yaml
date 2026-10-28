@@ -1,0 +1,55 @@
+id: py-p-020
+title: Caesar cipher
+difficulty: simple
+tags:
+  - strings
+  - ord-chr
+  - modulo
+statement: |
+  Write `caesar(text, shift)` that shifts every ASCII letter by `shift` places in the
+  alphabet, wrapping around and keeping its case. Leave every other character unchanged.
+  `caesar(caesar(t, s), -s)` must return `t`.
+constraints:
+  - "`shift` can be any integer."
+examples:
+  - input: caesar("Hello, World!", 3)
+    output: "'Khoor, Zruog!'"
+  - input: caesar("xyz", 2)
+    output: "'zab'"
+hints:
+  - "`ord(ch) - ord('a')` maps a..z to 0..25."
+  - "`(position + shift) % 26` wraps around."
+solution:
+  language: python
+  code: |
+    def caesar(text: str, shift: int) -> str:
+        out = []
+        for ch in text:
+            if "a" <= ch <= "z" or "A" <= ch <= "Z":
+                base = ord("a") if ch.islower() else ord("A")
+                out.append(chr((ord(ch) - base + shift) % 26 + base))
+            else:
+                out.append(ch)
+        return "".join(out)
+
+
+    secret = caesar("Hello, World!", 3)
+    print(secret, caesar(secret, -3))
+  explanation: |
+    For a letter, we convert it to a number 0–25 (`ord(ch) - base`), add the shift, wrap
+    with `% 26`, and convert back with `chr(... + base)`. Using `ord('a')` or `ord('A')` as
+    the base keeps the case.
+
+    Python's `%` returns a value in `0..25` even for negative shifts, so decoding with
+    `-shift` just works. Everything that isn't an ASCII letter (spaces, punctuation, `é`)
+    passes through unchanged.
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Build a translation table once with `str.maketrans` and use `text.translate`.
+verify: |
+  assert caesar("Hello, World!", 3) == "Khoor, Zruog!"
+  assert caesar("xyz", 2) == "zab"
+  for s in range(-60, 61, 7):
+      assert caesar(caesar("Mixed Case, ok? é", s), -s) == "Mixed Case, ok? é"

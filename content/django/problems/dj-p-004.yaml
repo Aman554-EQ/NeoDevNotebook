@@ -1,0 +1,53 @@
+id: dj-p-004
+title: A money template filter
+difficulty: easy
+tags:
+  - templates
+  - filters
+statement: |
+  Write a template filter `money` so that `{{ amount|money }}` renders `€1,234.50` and
+  `{{ amount|money:"USD" }}` renders `$1,234.50`. Unknown currencies print their code and a space
+  (`CHF 1,234.50`). Use `setup(script_tags=True)` so templates can use the script's filters.
+examples:
+  - input: "{{ 1234.5|money }}"
+    output: €1,234.50
+  - input: "{{ 2|money:'CHF' }}"
+    output: CHF 2.00
+hints:
+  - "`register = template.Library()` then `@register.filter`."
+  - Format with `f"{value:,.2f}"`.
+solution:
+  language: python
+  code: |
+    from playground import setup
+
+    setup(script_tags=True)
+
+    from django import template
+
+    register = template.Library()
+    SYMBOLS = {"EUR": "€", "USD": "$", "GBP": "£"}
+
+
+    @register.filter
+    def money(value, currency="EUR"):
+        prefix = SYMBOLS.get(currency, f"{currency} ")
+        return f"{prefix}{float(value):,.2f}"
+  explanation: |
+    A filter is a plain function registered on a `template.Library`. The first argument is
+    the value before the `|`, the optional second one is what follows the colon. In a project this lives
+    in `<app>/templatetags/<name>.py` and templates `{% load %}` it; the playground's `script_tags=True`
+    registers the script itself as a library so you can try it in one file. `f"{value:,.2f}"` adds
+    thousands separators and exactly two decimals. Keeping formatting in a filter keeps it out of views and
+    makes it reusable across every template.
+complexity:
+  time: O(1)
+  space: O(1)
+verify: |
+  from django.template import Context, Template
+
+  render = lambda src, **ctx: Template(src).render(Context(ctx))
+  assert render("{{ a|money }}", a=1234.5) == "€1,234.50"
+  assert render("{{ a|money:'USD' }}", a=1234.5) == "$1,234.50"
+  assert render("{{ a|money:'CHF' }}", a=2) == "CHF 2.00"
+  assert render("{{ a|money }}", a="9.999") == "€10.00"

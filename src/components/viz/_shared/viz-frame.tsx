@@ -36,6 +36,8 @@ type Props = {
   fallback?: React.ReactNode
   kind?: "2d" | "3d"
   intervalMs?: number
+  /** Replaces the default "Interactive" / "3D · drag to rotate" chip. */
+  badge?: string
 }
 
 export function VizFrame({
@@ -46,6 +48,7 @@ export function VizFrame({
   fallback,
   kind = "2d",
   intervalMs = 1800,
+  badge,
 }: Props) {
   const [step, setStep] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -81,7 +84,7 @@ export function VizFrame({
       <div className="border-rule flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
         <p className="font-display font-semibold">{title}</p>
         <span className="bg-surface-2 text-muted rounded-full px-2 py-0.5 font-mono text-xs">
-          {kind === "3d" ? "3D · drag to rotate" : "Interactive"}
+          {badge ?? (kind === "3d" ? "3D · drag to rotate" : "Interactive")}
         </span>
       </div>
 
@@ -170,14 +173,24 @@ export function VizFrame({
           >
             <RotateCcw className="size-4" aria-hidden />
           </ControlButton>
-          <ol className="ml-auto flex gap-1" aria-hidden>
-            {steps.map((s, i) => (
-              <li
-                key={s.label}
-                className={cn("bg-rule h-1.5 w-5 rounded-full", i <= step && "bg-accent")}
+          {total <= 12 ? (
+            <ol className="ml-auto flex gap-1" aria-hidden>
+              {steps.map((_, i) => (
+                <li
+                  key={i}
+                  className={cn("bg-rule h-1.5 w-5 rounded-full", i <= step && "bg-accent")}
+                />
+              ))}
+            </ol>
+          ) : (
+            // Long sequences (e.g. execution traces) get a bar instead of one dot per step.
+            <div className="bg-rule ml-auto h-1.5 w-32 overflow-hidden rounded-full" aria-hidden>
+              <div
+                className="bg-accent h-full rounded-full"
+                style={{ width: `${((step + 1) / total) * 100}%` }}
               />
-            ))}
-          </ol>
+            </div>
+          )}
         </div>
       </div>
 

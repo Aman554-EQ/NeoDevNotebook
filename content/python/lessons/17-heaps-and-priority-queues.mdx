@@ -1,0 +1,429 @@
+---
+title: Heaps and priority queues
+summary: When you repeatedly need the smallest (or largest) item, a heap gives it to you in O(log n) per operation. See how heapq keeps a plain list in heap order, and use it for priority queues and top-k problems.
+estimatedMinutes: 28
+difficulty: medium
+section: Data Structures
+objectives:
+  - Explain the heap property and why h[0] is always the minimum
+  - Use heappush, heappop, heapify, nsmallest and nlargest
+  - Build a priority queue with (priority, item) tuples and handle ties
+  - Simulate a max-heap and solve top-k problems efficiently
+prerequisites:
+  - Stacks and queues
+tags: [python, heapq, priority-queue, complexity]
+practice: [py-p-033, py-p-046, py-p-048, py-p-052]
+interview: [py-i-020]
+---
+
+## Intuition: an emergency room
+
+An emergency room doesn't treat patients in arrival order. It always treats the **most urgent**
+next. When a new patient arrives, they don't need the whole waiting list re-sorted. They just need
+to be placed correctly relative to a few others. A heap is that partial ordering: always ready to
+hand over the top item, and never more ordered than necessary.
+
+## See it
+
+<HeapViz />
+
+## The precise rules
+
+- **Heap property:** for every index `i`, `h[i] <= h[2*i + 1]` and `h[i] <= h[2*i + 2]` (its
+  children). So `h[0]` is the minimum. Siblings are **not** ordered, so a heap is not a sorted list.
+- `heapq.heappush(h, x)`: O(log n). `heapq.heappop(h)`: O(log n). `heapq.heapify(list)`: O(n).
+  Peeking at `h[0]`: O(1).
+- Python's `heapq` is a **min-heap**. For a max-heap, push negated numbers.
+- Tuples compare item by item, so `(priority, name)` orders by priority, then name. If the second
+  items can't be compared, add a counter as a tie-breaker: `(priority, count, task)`.
+
+## Worked example
+
+```python title="heaps.py"
+import heapq
+from itertools import count
+
+h = [5, 3, 8, 1, 4]
+heapq.heapify(h)  # O(n), in place
+print(h, h[0])
+heapq.heappush(h, 2)
+print(heapq.heappop(h), heapq.heappop(h), h)
+
+print(heapq.nsmallest(3, [7, 2, 9, 4]), heapq.nlargest(2, ["bb", "a", "ccc"], key=len))
+
+tasks = []
+for priority, name in [(2, "write"), (1, "plan"), (2, "test")]:
+    heapq.heappush(tasks, (priority, name))
+print([heapq.heappop(tasks) for _ in range(3)])  # ties broken by name
+
+max_heap = []
+for x in [3, 9, 4]:
+    heapq.heappush(max_heap, -x)  # negate for a max-heap
+print(-heapq.heappop(max_heap))
+
+order = count()  # tie-breaker for items that can't be compared
+jobs = []
+heapq.heappush(jobs, (1, next(order), {"id": "a"}))
+heapq.heappush(jobs, (1, next(order), {"id": "b"}))
+print(heapq.heappop(jobs)[2])
+```
+
+```text title="Output"
+[1, 3, 8, 5, 4] 1
+1 2 [3, 4, 8, 5]
+[2, 4, 7] ['ccc', 'bb']
+[(1, 'plan'), (2, 'test'), (2, 'write')]
+9
+{'id': 'a'}
+```
+
+What to notice:
+
+- After `heapify`, the list `[1, 3, 8, 5, 4]` isn't sorted, but `h[0]` is the minimum. That's all a
+  heap promises.
+- Without the counter, two jobs with equal priority would compare their dicts and raise
+  `TypeError: '<' not supported between instances of 'dict' and 'dict'`. The counter also keeps
+  equal priorities in first-in order.
+- For **top-k** of a large stream, `nsmallest` and `nlargest` keep only k items: O(n log k) instead of
+  sorting everything in O(n log n).
+
+## Variations
+
+### Combined operations: `heappushpop`, `heapreplace` and `merge`
+
+```python title="heap_combined.py"
+import heapq
+
+h = [2, 5, 9]
+heapq.heapify(h)
+print(heapq.heappushpop(h, 1), h)   # push 1, then pop the smallest: 1 never enters
+print(heapq.heapreplace(h, 1), h)   # pop the smallest FIRST, then push 1
+
+a, b, c = [1, 4, 9], [2, 3, 10], [0, 8]
+print(list(heapq.merge(a, b, c)))                     # lazily merge sorted inputs
+print(list(heapq.merge(["fig", "kiwi"], ["date", "banana"], key=len)))  # sorted by len
+```
+
+```text title="Output"
+1 [2, 5, 9]
+2 [1, 5, 9]
+[0, 1, 2, 3, 4, 8, 9, 10]
+['fig', 'kiwi', 'date', 'banana']
+```
+
+- `heappushpop(h, x)` is faster than a push followed by a pop, and returns `x` itself if it's
+  smaller than everything in the heap.
+- `heapreplace(h, x)` pops first, so it always returns the old minimum even if `x` is smaller.
+- `heapq.merge` combines **already sorted** inputs in one pass without loading them all, which is
+  how large sorted files are merged. With `key=`, each input must already be sorted by that key.
+
+### Heap sort, and keeping only the top k
+
+```python title="heap_sort_topk.py"
+import heapq
+
+
+def heap_sort(items):
+    h = list(items)
+    heapq.heapify(h)                                     # O(n)
+    return [heapq.heappop(h) for _ in range(len(h))]     # n pops, O(log n) each
+
+
+def top_k(stream, k):
+    """Keep the k largest values seen so far in a min-heap of size k."""
+    h = []
+    for x in stream:
+        if len(h) < k:
+            heapq.heappush(h, x)
+        elif x > h[0]:                    # beats the smallest of the current top k
+            heapq.heapreplace(h, x)
+    return sorted(h, reverse=True)
+
+
+print(heap_sort([9, 4, 7, 1, 8, 2]))
+print(top_k([5, 1, 9, 3, 7, 10, 2, 8], 3), heapq.nlargest(3, [5, 1, 9, 3, 7, 10, 2, 8]))
+```
+
+```text title="Output"
+[1, 2, 4, 7, 8, 9]
+[10, 9, 8] [10, 9, 8]
+```
+
+To keep the **largest** k values, use a **min**-heap of size k: its root is the weakest member of
+the current top k, so each new value only needs to beat `h[0]`. Memory stays at k items even for
+an endless stream.
+
+### Priorities from your own objects
+
+```python title="custom_priority.py"
+import heapq
+from dataclasses import dataclass, field
+
+
+@dataclass(order=True)
+class Ticket:
+    priority: int
+    created: int
+    title: str = field(compare=False)       # not used for ordering
+
+
+queue = []
+for t in [Ticket(2, 1, "typo on homepage"), Ticket(0, 2, "site down"),
+          Ticket(2, 3, "slow search"), Ticket(1, 4, "login bug")]:
+    heapq.heappush(queue, t)
+
+while queue:
+    t = heapq.heappop(queue)
+    print(t.priority, t.created, t.title)
+```
+
+```text title="Output"
+0 2 site down
+1 4 login bug
+2 1 typo on homepage
+2 3 slow search
+```
+
+`@dataclass(order=True)` generates comparison methods from the fields in order: priority first,
+then creation time as the tie-breaker. `field(compare=False)` leaves the title out of comparisons,
+so the heap never has to compare strings.
+
+### Cancelling items: lazy deletion
+
+```python title="lazy_delete.py"
+import heapq
+from itertools import count
+
+heap, entries, ids = [], {}, count()
+REMOVED = "<removed>"
+
+
+def add(task, priority):
+    entry = [priority, next(ids), task]
+    entries[task] = entry
+    heapq.heappush(heap, entry)
+
+
+def cancel(task):
+    entry = entries.pop(task)
+    entry[2] = REMOVED                  # mark it; don't search the heap
+
+
+def pop():
+    while heap:
+        priority, _, task = heapq.heappop(heap)
+        if task is not REMOVED:
+            del entries[task]
+            return task, priority
+    raise KeyError("pop from an empty queue")
+
+
+for task, p in [("deploy", 3), ("review", 1), ("lunch", 2), ("email", 1)]:
+    add(task, p)
+cancel("review")
+print([pop() for _ in range(3)])
+```
+
+```text title="Output"
+[('email', 1), ('lunch', 2), ('deploy', 3)]
+```
+
+Removing an arbitrary item from a heap would need an O(n) search. Instead, the entry is **marked**
+as removed and skipped when it eventually reaches the top. This is the approach the `heapq`
+documentation recommends for priority queues with cancellation.
+
+### A running median with two heaps
+
+```python title="running_median.py"
+import heapq
+
+
+class RunningMedian:
+    def __init__(self):
+        self.low = []    # max-heap (negated) for the smaller half
+        self.high = []   # min-heap for the larger half
+
+    def add(self, x: float) -> None:
+        heapq.heappush(self.low, -x)
+        heapq.heappush(self.high, -heapq.heappop(self.low))   # move the largest of low up
+        if len(self.high) > len(self.low):                    # keep low the same size or 1 bigger
+            heapq.heappush(self.low, -heapq.heappop(self.high))
+
+    def median(self) -> float:
+        if len(self.low) > len(self.high):
+            return -self.low[0]
+        return (-self.low[0] + self.high[0]) / 2
+
+
+rm = RunningMedian()
+for x in [5, 15, 1, 3, 8, 7, 9, 10]:
+    rm.add(x)
+    print(x, "->", rm.median())
+```
+
+```text title="Output"
+5 -> 5
+15 -> 10.0
+1 -> 5
+3 -> 4.0
+8 -> 5
+7 -> 6.0
+9 -> 7
+10 -> 7.5
+```
+
+The smaller half lives in a max-heap and the larger half in a min-heap, so the middle values are
+always at the two roots. Each new number costs O(log n), versus re-sorting the whole list every
+time.
+
+## Putting it together
+
+### Shortest routes with Dijkstra's algorithm
+
+```python title="dijkstra.py"
+import heapq
+
+ROADS = {
+    "A": {"B": 4, "C": 2},
+    "B": {"C": 5, "D": 10},
+    "C": {"E": 3},
+    "D": {"F": 11},
+    "E": {"D": 4},
+    "F": {},
+}
+
+
+def dijkstra(graph, start):
+    dist = {start: 0}
+    previous = {}
+    heap = [(0, start)]
+    while heap:
+        d, node = heapq.heappop(heap)          # the closest unsettled node
+        if d > dist[node]:
+            continue                           # a stale, longer entry: skip it
+        for neighbour, weight in graph[node].items():
+            new = d + weight
+            if new < dist.get(neighbour, float("inf")):
+                dist[neighbour] = new
+                previous[neighbour] = node
+                heapq.heappush(heap, (new, neighbour))
+    return dist, previous
+
+
+def route(previous, target):
+    path = [target]
+    while path[-1] in previous:
+        path.append(previous[path[-1]])
+    return path[::-1]
+
+
+dist, previous = dijkstra(ROADS, "A")
+for node in sorted(dist):
+    print(f"{node}: {dist[node]:>2} via {' -> '.join(route(previous, node))}")
+```
+
+```text title="Output"
+A:  0 via A
+B:  4 via A -> B
+C:  2 via A -> C
+D:  9 via A -> C -> E -> D
+E:  5 via A -> C -> E
+F: 20 via A -> C -> E -> D -> F
+```
+
+- The heap always yields the closest node not yet settled; once popped with its current best
+  distance, that distance is final (all weights are positive).
+- Instead of updating entries inside the heap, the code pushes a new entry and **skips stale ones**
+  when they surface: the same lazy idea as above.
+- `D` is cheaper via `A → C → E → D` (9) than directly from `B` (14).
+
+### Simulating events in time order
+
+```python title="events_sim.py"
+import heapq
+
+events = []
+for t, what in [(0, "open"), (3, "customer 1 arrives"), (1, "coffee machine warm")]:
+    heapq.heappush(events, (t, what))
+
+served = 0
+while events:
+    t, what = heapq.heappop(events)
+    print(f"t={t:2} {what}")
+    if what.endswith("arrives"):
+        served += 1
+        heapq.heappush(events, (t + 4, f"customer {served} leaves"))   # schedule the future
+        if served < 3:
+            heapq.heappush(events, (t + 2, f"customer {served + 1} arrives"))
+```
+
+```text title="Output"
+t= 0 open
+t= 1 coffee machine warm
+t= 3 customer 1 arrives
+t= 5 customer 2 arrives
+t= 7 customer 1 leaves
+t= 7 customer 3 arrives
+t= 9 customer 2 leaves
+t=11 customer 3 leaves
+```
+
+A discrete-event simulation keeps future events in a heap keyed by time. Handling one event can
+schedule new ones, and the heap always hands back whatever happens next, no matter in which order
+the events were added.
+
+## Common mistakes
+
+<Callout type="warning" title="Treating the heap list as sorted">
+  `h[1]` is not the second smallest item in general. Only `h[0]` is meaningful. Pop repeatedly, or
+  use `sorted(h)`, when you need order.
+</Callout>
+
+- **Mixing `heapq` calls with `list.append` / `list.sort`.** That breaks the heap property. Use
+  heapq functions only, or call `heapify` again.
+- **Expecting a max-heap.** Negate the values (or use `nlargest`).
+- **Re-sorting a list after every insert** to find the minimum: O(n log n) each time, versus
+  O(log n) with a heap.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: what is the cheapest way to get the 3 largest of a million numbers?"
+>
+  `heapq.nlargest(3, numbers)`. It keeps a heap of only 3 items while scanning once, so it's about
+  O(n log 3) ≈ O(n). Sorting the whole list would be O(n log n).
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: is `[1, 5, 2, 6, 7, 3]` a valid min-heap?">
+  Yes. Each parent is ≤ its children: `1 ≤ 5, 2`; `5 ≤ 6, 7`; `2 ≤ 3`. It isn't sorted, and it
+  doesn't need to be.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: how would you get the 3 smallest items of 10 million numbers?"
+>
+  `heapq.nsmallest(3, numbers)`: one pass keeping a 3-item heap, O(n log 3). Sorting would be O(n
+  log n) and need all the data in memory at once.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why does Dijkstra skip entries where `d > dist[node]`?">
+  The node was pushed again later with a shorter distance, so this older entry is out of date.
+  Skipping stale entries replaces a slow "decrease key" operation that `heapq` doesn't have.
+</Reveal>
+
+<KeyTakeaways>
+
+- A heap keeps the smallest item at `h[0]`. Push and pop are O(log n), and heapify is O(n).
+- `heapq` is a min-heap on a plain list. Negate values for a max-heap.
+- Priority queues use `(priority, counter, item)` tuples to avoid comparing items.
+- Use `nsmallest` / `nlargest` for top-k without sorting everything.
+- `heappushpop`, `heapreplace` and `merge` cover combined operations and merging sorted streams.
+- A min-heap of size k keeps the k **largest** values; two heaps keep a running median.
+- Heaps power Dijkstra, event simulations and schedulers; cancel entries lazily instead of
+  searching for them.
+
+</KeyTakeaways>
+
+{/* enriched */}

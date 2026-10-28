@@ -1,0 +1,49 @@
+id: py-i-045
+question: Explain `async` and `await`. Does async code run in parallel?
+difficulty: medium
+tags:
+  - asyncio
+  - coroutines
+  - concurrency
+shortAnswer: |
+  `async def` defines a coroutine function, and calling it returns a coroutine object that
+  doesn't run yet. `await` suspends the current coroutine until the awaited operation finishes,
+  letting the event loop run other coroutines meanwhile. It's **concurrency** in one thread
+  (overlapping waits), not parallel CPU execution.
+detailedAnswer: |
+  - `asyncio.run(main())` starts the event loop.
+  - `asyncio.gather(*coros)` or `TaskGroup` (3.11+) run coroutines concurrently and collect
+    their results in order.
+  - `asyncio.create_task` schedules work in the background.
+  - Switching happens **only at `await`**, so code between awaits runs without interruption.
+    That's simpler to reason about than threads, but it means CPU-heavy or blocking code
+    freezes everything.
+
+  Use async-native libraries (`aiohttp`, `httpx`, `asyncpg`), and wrap blocking calls with
+  `asyncio.to_thread`.
+code:
+  language: python
+  code: |
+    import asyncio
+    import time
+
+
+    async def fetch(name: str, delay: float) -> str:
+        await asyncio.sleep(delay)  # yields to the event loop
+        return name
+
+
+    async def main() -> tuple[list[str], bool]:
+        start = time.perf_counter()
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(fetch(n, 0.1)) for n in "abc"]
+        return [t.result() for t in tasks], time.perf_counter() - start < 0.25
+
+
+    print(asyncio.run(main()))
+pitfalls:
+  - Forgetting to `await` a coroutine (it never runs; you get a RuntimeWarning).
+followUps:
+  - What happens if one task in a TaskGroup fails?
+verify: |
+  assert asyncio.run(main())[0] == ['a', 'b', 'c']

@@ -1,0 +1,54 @@
+id: py-p-031
+title: Valid brackets
+difficulty: medium
+tags:
+  - stack
+  - strings
+statement: |
+  Write `is_balanced(text)` that returns `True` if every `(`, `[` and `{` in `text` is
+  closed by the matching bracket in the correct order. Other characters are ignored.
+constraints:
+  - "`0 <= len(text) <= 10**6`"
+examples:
+  - input: 'is_balanced("f(a[1], {b: 2})")'
+    output: "True"
+  - input: is_balanced("(]")
+    output: "False"
+  - input: is_balanced("((")
+    output: "False"
+hints:
+  - "The most recently opened bracket must be closed first: last in, first out."
+  - "Map each closer to its opener: `{')': '('}`."
+solution:
+  language: python
+  code: |
+    PAIRS = {")": "(", "]": "[", "}": "{"}
+
+
+    def is_balanced(text: str) -> bool:
+        stack: list[str] = []
+        for ch in text:
+            if ch in "([{":
+                stack.append(ch)
+            elif ch in PAIRS:
+                if not stack or stack.pop() != PAIRS[ch]:
+                    return False
+        return not stack  # leftovers were never closed
+
+
+    print(is_balanced("f(a[1], {b: 2})"), is_balanced("(]"), is_balanced("(("))
+  explanation: |
+    A stack records the openers we still owe a closer for. Each closer must match the
+    **top** of the stack, the most recent unmatched opener. If the stack is empty or the
+    top doesn't match, the text is invalid.
+
+    At the end, any remaining openers were never closed, so `return not stack`. Each
+    character is pushed and popped at most once, so the whole check is O(n).
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Return the index of the first unmatched bracket instead of a boolean.
+verify: |
+  for s, ok in [("", True), ("()[]{}", True), ("([{}])", True), ("(]", False), ("((", False), ("))", False), ("a(b)c", True)]:
+      assert is_balanced(s) == ok, s

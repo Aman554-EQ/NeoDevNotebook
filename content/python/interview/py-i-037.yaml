@@ -1,0 +1,54 @@
+id: py-i-037
+question: What does `__slots__` do, and what are the trade-offs?
+difficulty: hard
+tags:
+  - oop
+  - memory
+  - slots
+shortAnswer: |
+  `__slots__ = ("x", "y")` stops instances from getting a per-instance `__dict__` and stores
+  attributes in fixed slots instead. That saves memory and gives slightly faster attribute
+  access, and assigning an undeclared attribute raises `AttributeError`. The trade-offs are
+  no dynamic attributes, care needed with inheritance (each subclass must declare slots), and
+  no `__weakref__` unless declared.
+detailedAnswer: |
+  It's useful when you create millions of small objects (points, nodes, records). The saving
+  per instance is the dict, often 100+ bytes.
+
+  Details interviewers like:
+
+  - A subclass without `__slots__` gets a `__dict__` again, which loses the benefit.
+  - Slots are implemented as descriptors on the class.
+  - `@dataclass(slots=True)` (3.10+) generates them for you.
+  - It's not a security feature. It just restricts attribute creation.
+code:
+  language: python
+  code: |
+    import sys
+
+
+    class PointDict:
+        def __init__(self, x, y):
+            self.x, self.y = x, y
+
+
+    class PointSlots:
+        __slots__ = ("x", "y")
+
+        def __init__(self, x, y):
+            self.x, self.y = x, y
+
+
+    a, b = PointDict(1, 2), PointSlots(1, 2)
+    print(hasattr(a, "__dict__"), hasattr(b, "__dict__"))
+    print(sys.getsizeof(a) + sys.getsizeof(a.__dict__) > sys.getsizeof(b))
+    try:
+        b.z = 3
+    except AttributeError as err:
+        print("AttributeError:", err)
+pitfalls:
+  - Adding slots to a class whose subclasses don't declare them, which silently loses the benefit.
+followUps:
+  - How does `@dataclass(slots=True)` work?
+verify: |
+  assert not hasattr(b, '__dict__')

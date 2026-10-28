@@ -1,0 +1,36 @@
+id: py-i-048
+question: Why use a virtual environment?
+difficulty: easy
+tags:
+  - venv
+  - dependencies
+  - tooling
+shortAnswer: |
+  A virtual environment gives each project its own isolated set of installed packages (and
+  its own `python` and `pip`). Projects can then depend on different versions without
+  conflicts, the system Python stays untouched, and the environment can be reproduced from
+  a requirements file.
+detailedAnswer: |
+  Create it with `python -m venv .venv`, activate it, and install with
+  `python -m pip install -r requirements.txt`.
+
+  Benefits: reproducibility (pinned versions), no `sudo pip`, easy clean-up (delete the
+  folder), and clarity about what a project needs. CI and Docker images follow the same
+  idea.
+
+  Diagnosis tip: "installed but `ModuleNotFoundError`" usually means pip installed into
+  another environment. Compare `sys.executable` with `python -m pip --version`.
+code:
+  language: python
+  code: |
+    import sys
+
+    in_venv = sys.prefix != sys.base_prefix
+    print("running inside a virtual environment:", type(in_venv).__name__)
+pitfalls:
+  - Committing the .venv folder.
+  - Using bare `pip` that belongs to a different Python.
+followUps:
+  - requirements.txt vs pyproject.toml?
+verify: |
+  assert isinstance(in_venv, bool)

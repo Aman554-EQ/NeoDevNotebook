@@ -1,0 +1,28 @@
+id: dj-i-015
+question: What's the difference between authentication and permissions in DRF?
+difficulty: simple
+tags:
+  - drf
+  - authentication
+  - permissions
+shortAnswer: |
+  Authentication identifies the caller (request.user, request.auth) and never rejects by itself; permissions decide whether that caller may perform the action (has_permission per request, has_object_permission per object). Throttles run after both.
+detailedAnswer: |
+  DRF processes each request in order:
+
+  1. **Authentication classes** try to identify the caller (session, token, JWT). Success sets
+     `request.user`/`request.auth`; otherwise the user is anonymous. Bad credentials raise
+     `AuthenticationFailed` (401).
+  2. **Permission classes** decide: `has_permission(request, view)` for every request (e.g.
+     `IsAuthenticated`, `IsAdminUser`), and `has_object_permission(request, view, obj)` when the view calls
+     `get_object()` (ownership). Failure is 401 for anonymous users if a challenge is possible, else 403.
+  3. **Throttles** limit request rates (429).
+
+  Key trap: object permissions don't run for list endpoints, so scope `get_queryset()` by user as well.
+  Combine permissions with `&`, `|` and `~`.
+pitfalls:
+  - Relying on has_object_permission for list privacy.
+  - Treating 401 and 403 as the same.
+followUps:
+  - Write a permission for 'owner or staff'.
+  - Why can session auth produce 403 instead of 401?

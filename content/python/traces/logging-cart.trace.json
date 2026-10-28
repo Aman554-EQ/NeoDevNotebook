@@ -1,0 +1,433 @@
+{
+ "version": 1,
+ "python": "3.13",
+ "source": "import logging\nimport sys\n\nlogging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format=\"%(levelname)s %(name)s: %(message)s\")\nlog = logging.getLogger(\"cart\")\n\n\ndef total(prices):\n    log.debug(\"got %d prices\", len(prices))\n    result = sum(prices)\n    if result > 100:\n        log.warning(\"large order: %s\", result)\n    return result\n\n\nprint(total([40, 70]))\n",
+ "steps": [
+  {
+   "line": 1,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": []
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 2,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 4,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ],
+      [
+       "sys",
+       "module sys"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 5,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ],
+      [
+       "sys",
+       "module sys"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 8,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ],
+      [
+       "sys",
+       "module sys"
+      ],
+      [
+       "log",
+       "<Logger cart (DEBUG)>"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 16,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ],
+      [
+       "sys",
+       "module sys"
+      ],
+      [
+       "log",
+       "<Logger cart (DEBUG)>"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 8,
+   "event": "call",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ],
+      [
+       "sys",
+       "module sys"
+      ],
+      [
+       "log",
+       "<Logger cart (DEBUG)>"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "prices",
+       "[40, 70]"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 9,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ],
+      [
+       "sys",
+       "module sys"
+      ],
+      [
+       "log",
+       "<Logger cart (DEBUG)>"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "prices",
+       "[40, 70]"
+      ]
+     ]
+    }
+   ],
+   "stdout": ""
+  },
+  {
+   "line": 10,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ],
+      [
+       "sys",
+       "module sys"
+      ],
+      [
+       "log",
+       "<Logger cart (DEBUG)>"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "prices",
+       "[40, 70]"
+      ]
+     ]
+    }
+   ],
+   "stdout": "DEBUG cart: got 2 prices\n"
+  },
+  {
+   "line": 11,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ],
+      [
+       "sys",
+       "module sys"
+      ],
+      [
+       "log",
+       "<Logger cart (DEBUG)>"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "prices",
+       "[40, 70]"
+      ],
+      [
+       "result",
+       "110"
+      ]
+     ]
+    }
+   ],
+   "stdout": "DEBUG cart: got 2 prices\n"
+  },
+  {
+   "line": 12,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ],
+      [
+       "sys",
+       "module sys"
+      ],
+      [
+       "log",
+       "<Logger cart (DEBUG)>"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "prices",
+       "[40, 70]"
+      ],
+      [
+       "result",
+       "110"
+      ]
+     ]
+    }
+   ],
+   "stdout": "DEBUG cart: got 2 prices\n"
+  },
+  {
+   "line": 13,
+   "event": "line",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ],
+      [
+       "sys",
+       "module sys"
+      ],
+      [
+       "log",
+       "<Logger cart (DEBUG)>"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "prices",
+       "[40, 70]"
+      ],
+      [
+       "result",
+       "110"
+      ]
+     ]
+    }
+   ],
+   "stdout": "DEBUG cart: got 2 prices\nWARNING cart: large order: 110\n"
+  },
+  {
+   "line": 13,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ],
+      [
+       "sys",
+       "module sys"
+      ],
+      [
+       "log",
+       "<Logger cart (DEBUG)>"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    },
+    {
+     "name": "total",
+     "locals": [
+      [
+       "prices",
+       "[40, 70]"
+      ],
+      [
+       "result",
+       "110"
+      ]
+     ]
+    }
+   ],
+   "stdout": "DEBUG cart: got 2 prices\nWARNING cart: large order: 110\n",
+   "returnValue": "110"
+  },
+  {
+   "line": 16,
+   "event": "return",
+   "frames": [
+    {
+     "name": "<module>",
+     "locals": [
+      [
+       "logging",
+       "module logging"
+      ],
+      [
+       "sys",
+       "module sys"
+      ],
+      [
+       "log",
+       "<Logger cart (DEBUG)>"
+      ],
+      [
+       "total",
+       "function total"
+      ]
+     ]
+    }
+   ],
+   "stdout": "DEBUG cart: got 2 prices\nWARNING cart: large order: 110\n110\n",
+   "returnValue": "None"
+  }
+ ],
+ "stdout": "DEBUG cart: got 2 prices\nWARNING cart: large order: 110\n110\n",
+ "truncated": false
+}

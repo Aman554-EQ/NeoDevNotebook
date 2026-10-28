@@ -1,0 +1,64 @@
+id: py-p-053
+title: Longest increasing subsequence in O(n log n)
+difficulty: hard
+tags:
+  - dynamic-programming
+  - bisect
+  - patience-sorting
+statement: |
+  Write `lis_length(nums)` that returns the length of the longest **strictly** increasing
+  subsequence (not necessarily contiguous) in O(n log n).
+constraints:
+  - "`0 <= len(nums) <= 10**5`"
+examples:
+  - input: lis_length([10, 9, 2, 5, 3, 7, 101, 18])
+    output: "4"
+    explanation: e.g. 2, 3, 7, 18
+hints:
+  - Keep `tails[k]` = the smallest possible tail of an increasing subsequence of length k+1.
+  - For each number, `bisect_left(tails, x)` finds where it goes.
+solution:
+  language: python
+  code: |
+    from bisect import bisect_left
+
+
+    def lis_length(nums: list[int]) -> int:
+        tails: list[int] = []
+        for x in nums:
+            i = bisect_left(tails, x)
+            if i == len(tails):
+                tails.append(x)  # extends the longest subsequence so far
+            else:
+                tails[i] = x  # a smaller tail for length i + 1
+        return len(tails)
+
+
+    print(lis_length([10, 9, 2, 5, 3, 7, 101, 18]), lis_length([]), lis_length([3, 3, 3]))
+  explanation: |
+    The insight: for each length, only the **smallest** tail matters, because a smaller
+    tail leaves more room to extend. `tails` stays sorted, so we can binary-search it.
+
+    For each `x`, `bisect_left` finds the first tail `>= x`. If there's none, `x` extends
+    the longest subsequence. Otherwise `x` replaces that tail, giving an equally long
+    subsequence with a smaller ending. Using `bisect_left` (not `bisect_right`) keeps it
+    **strictly** increasing, so `[3, 3, 3]` gives 1. `tails` is not itself a valid
+    subsequence, but its length is the answer.
+complexity:
+  time: O(n log n)
+  space: O(n)
+variations:
+  - Reconstruct one actual longest subsequence (store predecessors).
+verify: |
+  import random
+  random.seed(6)
+  def slow(a):
+      best = [1] * len(a)
+      for i in range(len(a)):
+          for j in range(i):
+              if a[j] < a[i]:
+                  best[i] = max(best[i], best[j] + 1)
+      return max(best, default=0)
+  for _ in range(300):
+      a = [random.randint(0, 15) for _ in range(random.randint(0, 12))]
+      assert lis_length(a) == slow(a), a

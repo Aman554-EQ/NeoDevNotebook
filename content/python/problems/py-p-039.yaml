@@ -1,0 +1,73 @@
+id: py-p-039
+title: LRU cache
+difficulty: medium
+tags:
+  - ordereddict
+  - caching
+  - classes
+statement: |
+  Implement `LRUCache(capacity)` with `get(key)` (returns the value or `None`) and
+  `put(key, value)`. When it's full, `put` evicts the **least recently used** key. Both reads
+  and writes count as "use". Both operations must be O(1).
+constraints:
+  - "`1 <= capacity`"
+examples:
+  - input: c = LRUCache(2); c.put('a', 1); c.put('b', 2); c.get('a'); c.put('c', 3); c.get('b')
+    output: None
+    explanation: "'a' was used after 'b', so 'b' is evicted."
+hints:
+  - "`OrderedDict.move_to_end(key)` marks a key as most recent."
+  - "`popitem(last=False)` removes the oldest."
+solution:
+  language: python
+  code: |
+    from collections import OrderedDict
+
+
+    class LRUCache:
+        def __init__(self, capacity: int) -> None:
+            self.capacity = capacity
+            self._data: OrderedDict = OrderedDict()
+
+        def get(self, key):
+            if key not in self._data:
+                return None
+            self._data.move_to_end(key)  # now the most recently used
+            return self._data[key]
+
+        def put(self, key, value) -> None:
+            if key in self._data:
+                self._data.move_to_end(key)
+            self._data[key] = value
+            if len(self._data) > self.capacity:
+                self._data.popitem(last=False)  # evict the least recently used
+
+
+    cache = LRUCache(2)
+    cache.put("a", 1)
+    cache.put("b", 2)
+    cache.get("a")
+    cache.put("c", 3)
+    print(cache.get("b"), cache.get("a"), cache.get("c"))
+  explanation: |
+    An `OrderedDict` keeps keys in order, and we keep that order as "least recent → most
+    recent". Every access moves the key to the end. When the cache overflows, the first key
+    is the least recently used one, and `popitem(last=False)` removes it. All of these are
+    O(1).
+
+    Updating an existing key also counts as a use, hence the `move_to_end` in `put`. For
+    caching function results, `functools.lru_cache` already implements this policy.
+complexity:
+  time: O(1) per operation
+  space: O(capacity)
+variations:
+  - Add a hit/miss counter and a `stats()` method.
+verify: |
+  c = LRUCache(2)
+  c.put("a", 1); c.put("b", 2)
+  assert c.get("a") == 1
+  c.put("c", 3)
+  assert c.get("b") is None and c.get("a") == 1 and c.get("c") == 3
+  c.put("a", 10)
+  c.put("d", 4)
+  assert c.get("c") is None and c.get("a") == 10

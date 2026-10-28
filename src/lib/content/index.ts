@@ -1,4 +1,4 @@
-import { loadAllContent, type ContentBundle, type LessonSummary } from "./load"
+import { loadAllContent, type ContentBundle, type LessonSummary, type Project } from "./load"
 import type { InterviewQuestion, Problem } from "./schema"
 
 /**
@@ -17,17 +17,20 @@ const strip = <T extends { body?: string; file?: string }>(l: T) => {
 }
 
 export type NavLesson = Omit<LessonSummary, "file">
+export type ProjectSummary = Omit<Project, "file" | "body">
 export type NavModule = ContentBundle["module"] & {
   lessons: NavLesson[]
+  projects: ProjectSummary[]
   problemCount: number
   interviewCount: number
 }
 
 export async function getNavTree(): Promise<NavModule[]> {
   const content = await getContent()
-  return content.map(({ module, lessons, problems, interview }) => ({
+  return content.map(({ module, lessons, problems, interview, projects }) => ({
     ...module,
     lessons: lessons.map(strip),
+    projects: projects.map(strip),
     problemCount: problems.length,
     interviewCount: interview.length,
   }))
@@ -99,8 +102,24 @@ export async function getInterviewQuestion(moduleSlug: string, id: string) {
   if (index === -1) return undefined
   const { verify: _verify, ...question } = list[index]!
   const link = (q: InterviewQuestion | undefined) =>
-    q && { href: `/interview/${moduleSlug}/${q.id}`, title: q.question }
+    q && { href: `/interview/${moduleSlug}/${q.id}`, title: q.question.replace(/`([^`]+)`/g, "$1") }
   return { question, prev: link(list[index - 1]), next: link(list[index + 1]) }
+}
+
+export async function getProject(moduleSlug: string, slug: string) {
+  const bundle = (await getContent()).find((b) => b.module.slug === moduleSlug)
+  const list = bundle?.projects ?? []
+  const index = list.findIndex((p) => p.slug === slug)
+  if (index === -1) return undefined
+  const link = (p: Project | undefined) =>
+    p && { href: `/projects/${moduleSlug}/${p.slug}`, title: p.title }
+  const { file: _file, ...project } = list[index]!
+  return {
+    project,
+    moduleTitle: bundle!.module.title,
+    prev: link(list[index - 1]),
+    next: link(list[index + 1]),
+  }
 }
 
 /** Static params helpers for generateStaticParams. */
@@ -117,5 +136,10 @@ export async function allProblemParams() {
 export async function allInterviewParams() {
   return (await getContent()).flatMap((b) =>
     b.interview.map((q) => ({ module: b.module.slug, id: q.id })),
+  )
+}
+export async function allProjectParams() {
+  return (await getContent()).flatMap((b) =>
+    b.projects.map((p) => ({ module: b.module.slug, project: p.slug })),
   )
 }

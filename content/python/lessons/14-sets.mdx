@@ -1,0 +1,395 @@
+---
+title: Sets
+summary: A set is a dict with keys only, an unordered bag of unique, hashable items. Use it for instant membership tests, removing duplicates, and set algebra (union, intersection, difference).
+estimatedMinutes: 24
+difficulty: easy
+section: Data Structures
+objectives:
+  - Use sets to remove duplicates and test membership in O(1) on average
+  - Apply union, intersection, difference and symmetric difference
+  - Know that sets are unordered and hold only hashable items
+  - Use frozenset when you need a hashable set
+prerequisites:
+  - Dictionaries
+tags: [python, sets, hashing]
+practice: [py-p-006, py-p-009, py-p-023]
+interview: [py-i-017]
+---
+
+## Intuition: a guest list at the door
+
+A bouncer with a guest list doesn't care about order or duplicates. They only ask "is this name on
+the list?", and the answer comes instantly. Sets are built on the same hash table as dicts, without
+the values.
+
+## See it
+
+<VennViz />
+
+## The precise rules
+
+- `{1, 2, 3}` or `set(iterable)` creates a set. `{}` is an **empty dict**, so use `set()` for an
+  empty set.
+- Items must be hashable, just like dict keys. Duplicates collapse into one.
+- **No order.** Don't rely on the order a set prints in. String hashes change between runs.
+- Operators: `|` union, `&` intersection, `-` difference, `^` symmetric difference, plus `<=`
+  (subset) and `>=` (superset).
+- `x in s` is O(1) on average, compared with O(n) for a list.
+
+## Worked example
+
+```python title="sets.py"
+A = {1, 2, 3, 4}
+B = {3, 4, 5}
+print(A | B, A & B, A - B, B - A, A ^ B)
+print({1, 2} <= A, A >= {9})
+
+s = {3, 1, 2, 1}
+print(s, len(s), 2 in s)
+s.add(4)
+s.discard(10)  # no error if missing
+print(s)
+try:
+    s.remove(10)  # raises if missing
+except KeyError as err:
+    print("KeyError:", err)
+
+print(sorted(set("mississippi")))  # sort to print strings in a stable order
+print(type({}).__name__, type(set()).__name__)
+
+print(list(dict.fromkeys([3, 1, 3, 2, 1])))  # dedupe, keep first-seen order
+print({frozenset({1, 2}): "a frozenset can be a key"})
+
+seen = set()
+for word in ["red", "blue", "red", "green"]:
+    if word in seen:
+        print("duplicate:", word)
+    seen.add(word)
+```
+
+```text title="Output"
+{1, 2, 3, 4, 5} {3, 4} {1, 2} {5} {1, 2, 5}
+True False
+{1, 2, 3} 3 True
+{1, 2, 3, 4}
+KeyError: 10
+['i', 'm', 'p', 's']
+dict set
+[3, 1, 2]
+{frozenset({1, 2}): 'a frozenset can be a key'}
+duplicate: red
+```
+
+What to notice:
+
+- `set(...)` removes duplicates but **loses order**. `list(dict.fromkeys(items))` removes duplicates
+  and keeps first-seen order.
+- `discard` is the forgiving remove. `remove` raises `KeyError` for a missing item.
+- The "seen set" pattern (check, then add) finds duplicates in a single O(n) pass. With a list it
+  would be O(n²).
+- A `frozenset` is an immutable, hashable set, so it can be a dict key or a member of another set.
+
+## Variations
+
+### Operators vs methods, and in-place updates
+
+```python title="set_methods.py"
+tags = {"python", "web"}
+print(sorted(tags.union(["api", "web"])), sorted(tags | {"api"}))  # methods take any iterable
+
+try:
+    tags | ["api"]                                             # operators need sets
+except TypeError as err:
+    print("TypeError:", err)
+
+skills = {"python", "sql", "docker"}
+skills |= {"git"}                     # same as skills.update({"git"})
+skills -= {"docker"}                  # same as skills.difference_update({"docker"})
+skills &= {"python", "git", "rust"}   # same as skills.intersection_update(...)
+print(sorted(skills))
+
+print({x % 3 for x in range(10)}, {len(w) for w in ["a", "bb", "cc", "d"]})
+```
+
+```text title="Output"
+['api', 'python', 'web'] ['api', 'python', 'web']
+TypeError: unsupported operand type(s) for |: 'set' and 'list'
+['git', 'python']
+{0, 1, 2} {1, 2}
+```
+
+- The method forms (`union`, `intersection`, …) accept **any iterable**; the operators need both
+  sides to be sets. This prevents mistakes like `set | list` when you meant something else.
+- `|=`, `&=`, `-=`, `^=` modify the set in place instead of building a new one.
+- A **set comprehension** `{expr for x in it}` collects unique results.
+
+### Comparing sets
+
+```python title="compare_sets.py"
+required = {"read", "write"}
+granted = {"read", "write", "delete"}
+print(required <= granted, required < granted, granted <= granted, granted < granted)
+print(required.issubset(granted), granted.issuperset(required))
+print({"a", "b"}.isdisjoint({"c"}), {"a", "b"}.isdisjoint({"b"}))
+print({1, 2, 3} == {3, 2, 1})
+```
+
+```text title="Output"
+True True True False
+True True
+True False
+True
+```
+
+- `<=` is "subset" (every item of the left is in the right); `<` is a **proper** subset (and the
+  sets differ).
+- `isdisjoint` asks "do they share nothing?", faster than building the intersection and checking
+  whether it's empty.
+
+### Everyday set tasks
+
+```python title="set_tasks.py"
+orders = [101, 102, 104, 107, 105, 102, 101]
+print("unique customers:", len(set(orders)))
+print("missing ids:", sorted(set(range(101, 108)) - set(orders)))
+
+dupes = {x for x in orders if orders.count(x) > 1}             # simple but O(n^2)
+seen, dupes_fast = set(), set()
+for x in orders:                                                # one pass: O(n)
+    if x in seen:
+        dupes_fast.add(x)
+    else:
+        seen.add(x)
+print(sorted(dupes), sorted(dupes_fast))
+
+sentence = "The quick brown fox jumps over the lazy dog"
+print("pangram:", set("abcdefghijklmnopqrstuvwxyz") <= set(sentence.lower()))
+
+
+def jaccard(a: set, b: set) -> float:
+    return len(a & b) / len(a | b) if a | b else 1.0
+
+
+print(round(jaccard({"py", "sql", "git"}, {"py", "git", "go", "rust"}), 2))
+```
+
+```text title="Output"
+unique customers: 5
+missing ids: [103, 106]
+[101, 102] [101, 102]
+pangram: True
+0.4
+```
+
+- `set(range(...)) - set(data)` finds what's **missing** from an expected range in one line.
+- `list.count` inside a comprehension rescans the list for every item; the seen-set loop does
+  the same job in a single pass.
+- **Jaccard similarity** (shared ÷ combined) is a common measure of how alike two sets are, used
+  for tag recommendations and duplicate detection.
+
+### `frozenset`: sets that can be keys or members
+
+```python title="frozensets.py"
+pairings = {
+    frozenset({"ann", "bob"}): 3,
+    frozenset({"bob", "cy"}): 1,
+}
+print(pairings[frozenset({"bob", "ann"})])            # order inside doesn't matter
+
+families = {frozenset({"ann", "bob"}), frozenset({"cy"})}
+print(frozenset({"bob", "ann"}) in families, len(families))
+
+fs = frozenset([1, 2])
+try:
+    fs.add(3)
+except AttributeError as err:
+    print("AttributeError:", err)
+print(fs | {3}, type(fs | {3}).__name__)               # operations return new frozensets
+```
+
+```text title="Output"
+3
+True 2
+AttributeError: 'frozenset' object has no attribute 'add'
+frozenset({1, 2, 3}) frozenset
+```
+
+A normal set can't contain other sets (they're unhashable). Freezing them makes "a set of
+groups" or "a dict keyed by a group of people" possible.
+
+### Taking items out
+
+```python title="set_pop.py"
+pending = {3, 1, 2}
+while pending:
+    job = min(pending)          # pick deterministically...
+    pending.remove(job)         # ...then remove it
+    print("run", job)
+
+bag = {"x"}
+print(bag.pop(), bag)           # pop() removes an ARBITRARY item
+try:
+    bag.pop()
+except KeyError as err:
+    print("KeyError:", err)
+```
+
+```text title="Output"
+run 1
+run 2
+run 3
+x set()
+KeyError: 'pop from an empty set'
+```
+
+`set.pop()` removes **some** item; which one isn't defined. When the order matters, choose the
+item yourself (`min`, `sorted`) or use a different structure (a heap, lesson 17).
+
+## Putting it together
+
+### Role-based permissions
+
+```python title="permissions.py"
+ROLES = {
+    "viewer": {"read"},
+    "editor": {"read", "write", "comment"},
+    "admin": {"read", "write", "comment", "delete", "invite"},
+}
+USERS = {"ada": {"editor"}, "bob": {"viewer"}, "cy": {"viewer", "admin"}}
+ACTIONS = {"publish": {"write"}, "purge": {"delete", "write"}, "browse": {"read"}}
+
+
+def permissions(user: str) -> set[str]:
+    return set().union(*(ROLES[r] for r in USERS.get(user, set())))
+
+
+for user in ["ada", "bob", "cy", "eve"]:
+    allowed = sorted(a for a, needs in ACTIONS.items() if needs <= permissions(user))
+    print(f"{user:4} {sorted(permissions(user))} -> {allowed}")
+```
+
+```text title="Output"
+ada  ['comment', 'read', 'write'] -> ['browse', 'publish']
+bob  ['read'] -> ['browse']
+cy   ['comment', 'delete', 'invite', 'read', 'write'] -> ['browse', 'publish', 'purge']
+eve  [] -> []
+```
+
+- A user's permissions are the **union** of their roles' permissions; `set().union(*sets)`
+  combines any number of sets (and gives an empty set for no roles).
+- An action is allowed when its required set is a **subset** of what the user holds: one `<=`
+  replaces a loop over every permission.
+
+### Course overlaps
+
+```python title="courses.py"
+enrolled = {
+    "python": {"ada", "bob", "cy", "dee"},
+    "sql": {"bob", "dee", "eve"},
+    "ml": {"ada", "dee", "fay"},
+}
+
+everyone = set().union(*enrolled.values())
+in_all = set.intersection(*enrolled.values())
+python_only = enrolled["python"] - enrolled["sql"] - enrolled["ml"]
+print("students:", len(everyone), sorted(everyone))
+print("in every course:", sorted(in_all))
+print("python only:", sorted(python_only))
+print("python xor sql:", sorted(enrolled["python"] ^ enrolled["sql"]))
+
+counts = {s: sum(s in group for group in enrolled.values()) for s in sorted(everyone)}
+print("courses per student:", counts)
+```
+
+```text title="Output"
+students: 6 ['ada', 'bob', 'cy', 'dee', 'eve', 'fay']
+in every course: ['dee']
+python only: ['cy']
+python xor sql: ['ada', 'cy', 'eve']
+courses per student: {'ada': 2, 'bob': 2, 'cy': 1, 'dee': 3, 'eve': 1, 'fay': 1}
+```
+
+Each question about "who is in which group" maps to one operator: union for "anyone",
+intersection for "everyone", difference for "only here", symmetric difference for "exactly one of
+the two".
+
+### Friend suggestions
+
+```python title="friends.py"
+friends = {
+    "ann": {"bob", "cy"},
+    "bob": {"ann", "dan", "eve"},
+    "cy": {"ann", "eve"},
+    "dan": {"bob"},
+    "eve": {"bob", "cy"},
+}
+
+
+def suggestions(person: str) -> list[tuple[str, int]]:
+    mine = friends[person]
+    candidates = set().union(*(friends[f] for f in mine)) - mine - {person}
+    scored = [(c, len(friends[c] & mine)) for c in candidates]   # mutual friends
+    return sorted(scored, key=lambda pair: (-pair[1], pair[0]))
+
+
+for person in ["ann", "dan"]:
+    print(person, "->", suggestions(person))
+```
+
+```text title="Output"
+ann -> [('eve', 2), ('dan', 1)]
+dan -> [('ann', 1), ('eve', 1)]
+```
+
+Friends-of-friends, minus existing friends, minus yourself: three set operations. Ranking by the
+size of the intersection (mutual friends) is how real "people you may know" features start.
+
+## Common mistakes
+
+<Callout type="warning" title="Expecting sets of strings to print in a fixed order">
+  Small ints happen to print sorted, but string order changes from run to run (hash randomization).
+  Use `sorted(s)` whenever order matters, including in tests.
+</Callout>
+
+- **`{}` is not an empty set.** It's a dict.
+- **Putting lists in a set.** `TypeError: unhashable type: 'list'`. Use tuples.
+- **Indexing a set.** `s[0]` is a `TypeError`. Sets have no positions.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: which users are in team_a but not team_b, given two lists?">
+  `set(team_a) - set(team_b)`. Building each set is O(n), and the difference is then O(len(a)). That
+  beats a nested loop.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: what's the difference between `a.update(b)` and `a | b`?">
+  `a.update(b)` changes `a` in place and returns `None`, and `b` can be any iterable. `a | b`
+  returns a **new** set and needs `b` to be a set.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: how do you check that two lists contain the same items, ignoring order and duplicates?"
+>
+  `set(a) == set(b)`. If duplicates count (same items **and** the same number of each), compare
+  `collections.Counter(a) == Counter(b)` or `sorted(a) == sorted(b)`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why can `{frozenset({1})}` exist but `{{1}}` can't?">
+  Set members must be hashable. A `set` is mutable and unhashable; a `frozenset` is immutable and
+  hashable.
+</Reveal>
+
+<KeyTakeaways>
+
+- Sets store unique, hashable items with O(1) average membership tests.
+- Use `|`, `&`, `-` and `^` for set algebra.
+- Sets are unordered, so sort before printing or comparing output.
+- `set()` is empty (`{}` is a dict). `frozenset` is a hashable set.
+- Methods accept any iterable, operators need sets; `|=`, `&=`, `-=` update in place.
+- `<=` / `<` test subsets, `isdisjoint` tests for no overlap, `set(range) - set(data)` finds gaps.
+- Use `frozenset` for sets that must be dict keys or members of other sets.
+
+</KeyTakeaways>
+
+{/* enriched */}

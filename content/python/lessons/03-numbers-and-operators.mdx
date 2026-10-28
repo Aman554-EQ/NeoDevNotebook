@@ -1,0 +1,375 @@
+---
+title: Numbers and operators
+summary: Python's int never overflows, its float is a binary approximation, and its division and modulo operators follow precise rules. Know these and you avoid a whole class of bugs.
+estimatedMinutes: 22
+difficulty: easy
+section: Basics
+objectives:
+  - Choose between int, float, Decimal and Fraction for a task
+  - Predict the results of `/`, `//`, `%`, `**` and `divmod`, including negative numbers
+  - Explain why `0.1 + 0.2 != 0.3` and compare floats safely
+  - Read operator precedence and use bitwise operators
+prerequisites:
+  - Variables, objects and types
+tags: [python, numbers, operators]
+practice: [py-p-003, py-p-004, py-p-010]
+interview: [py-i-010]
+---
+
+## Intuition: exact counters and rulers with marks
+
+- An **int** is an exact counter that grows as large as memory allows. `2 ** 100` is exact.
+- A **float** is a ruler with a fixed number of marks. Between two marks there's nothing, so most
+  decimals like `0.1` are rounded to the nearest mark. That makes floats fast and fine for
+  measurements, but wrong for exact amounts like money.
+
+## See it
+
+<FloatBitsViz />
+
+## The precise rules
+
+| Operator       | Meaning                                     | Example             | Result    |
+| -------------- | ------------------------------------------- | ------------------- | --------- |
+| `/`            | true division, always a float               | `7 / 2`             | `3.5`     |
+| `//`           | floor division, rounds **down** (toward −∞) | `7 // 2`, `-7 // 2` | `3`, `-4` |
+| `%`            | remainder with the **sign of the divisor**  | `7 % 3`, `-7 % 3`   | `1`, `2`  |
+| `**`           | power                                       | `2 ** 10`           | `1024`    |
+| `divmod(a, b)` | `(a // b, a % b)`                           | `divmod(17, 5)`     | `(3, 2)`  |
+
+The identity that ties them together is always:
+
+$$
+a = b \cdot (a \,/\!/\, b) + (a \bmod b)
+$$
+
+For $a = -7$, $b = 3$: `-7 // 3` is $\lfloor -2.33 \rfloor = -3$, so the remainder
+must be $2$, because $3 \cdot (-3) + 2 = -7$. That's why `-7 % 3` is `2`. In the same way,
+`-7 // 2` is `-4` (the floor of $-3.5$), while `int(-3.5)` **truncates** toward zero and gives `-3`.
+
+**Precedence**, highest first: `**` → unary `-` → `* / // %` → `+ -` → comparisons → `not` →
+`and` → `or`. Watch out: `**` binds tighter than unary minus, so `-2 ** 2` is `-4`.
+
+## Worked example
+
+```python title="numbers.py"
+import math
+from decimal import Decimal
+from fractions import Fraction
+
+print(2**100)  # ints never overflow
+print(7 / 2, 7 // 2, -7 // 2, int(-3.5))
+print(7 % 3, -7 % 3, divmod(17, 5))
+
+print(0.1 + 0.2, 0.1 + 0.2 == 0.3)
+print(math.isclose(0.1 + 0.2, 0.3))
+print(Decimal("0.1") + Decimal("0.2"))  # build Decimals from STRINGS
+print(Fraction(1, 3) + Fraction(1, 6))
+
+print(round(2.5), round(3.5))  # banker's rounding: ties go to the even number
+print(-2**2, (-2) ** 2)  # ** binds tighter than unary minus
+
+print(0b1010, 0xFF, bin(10))  # literals in other bases
+print(5 & 3, 5 | 3, 5 ^ 3, 1 << 4)
+
+print(f"{1234567.891:,.2f}", f"{0.256:.1%}")
+```
+
+```text title="Output"
+1267650600228229401496703205376
+3.5 3 -4 -3
+1 2 (3, 2)
+0.30000000000000004 False
+True
+0.3
+1/2
+2 4
+-4 4
+10 255 0b1010
+1 7 6 16
+1,234,567.89 25.6%
+```
+
+Notes on the trickier lines:
+
+- `Decimal("0.1")` is exact, but `Decimal(0.1)` would copy the float's rounding error. Always
+  pass a string.
+- `round()` uses **round half to even** ("banker's rounding"), so `2.5` becomes `2`. This avoids
+  bias when many values are rounded.
+- Bitwise: `5 & 3` is `0b101 & 0b011 = 0b001`, `1 << 4` shifts left 4 places, which multiplies by 16.
+- Format specs: `,` adds thousands separators, `.2f` gives 2 decimals, `%` multiplies by 100 and
+  adds a percent sign.
+
+## Variations
+
+### Mixing types: what type comes out?
+
+```python title="result_types.py"
+print(type(3 + 4).__name__, type(3 + 4.0).__name__, type(6 / 3).__name__)
+print(True + True, True * 10, sum([True, False, True]))   # bools count as 1 and 0
+print(3 * "ab", [0] * 4)                                  # * also repeats sequences
+print(10 == 10.0, 1 == True, 0.5 == 1 / 2)
+```
+
+```text title="Output"
+int float float
+2 10 2
+ababab [0, 0, 0, 0]
+True True True
+```
+
+- `int` with `int` stays `int` (except `/`). Any `float` in the mix makes the result a `float`.
+- `sum([True, False, True])` is a common trick to **count** how many conditions are true.
+- `==` compares values across numeric types, so `10 == 10.0` is `True` even though the types differ.
+
+### Augmented assignment and chained comparisons
+
+```python title="augmented.py"
+score = 10
+score += 5     # score = score + 5
+score *= 2
+score //= 4
+score **= 2
+score %= 10
+print(score)
+
+x = 7
+print(0 < x < 10, 0 < x < 5, 1 < 2 < 3 > 2)   # a < b < c means a < b and b < c
+lo, hi = 0, 100
+value = 140
+print(min(max(value, lo), hi))                 # clamp into [lo, hi]
+```
+
+```text title="Output"
+9
+True False True
+100
+```
+
+- Walk through it: `10 → 15 → 30 → 7 → 49 → 9`.
+- `0 < x < 10` is evaluated as `0 < x and x < 10`, with `x` evaluated once. It reads like maths and
+  avoids a common bug (`0 < x and x < 10` written with the wrong variable).
+- `min(max(v, lo), hi)` clamps a value into a range without any `if`.
+
+### The `math` toolbox
+
+```python title="math_tools.py"
+import math
+
+print(math.floor(-2.5), math.ceil(-2.5), math.trunc(-2.5))
+print(math.sqrt(2), math.isqrt(17), math.hypot(3, 4))
+print(math.gcd(12, 18), math.lcm(4, 6), math.factorial(5), math.comb(5, 2))
+print(math.pi, math.e)
+print(math.inf > 10**100, math.isnan(float("nan")), float("nan") == float("nan"))
+print(math.log(100, 10), math.log2(1024), round(math.sin(math.pi / 2)))
+```
+
+```text title="Output"
+-3 -2 -2
+1.4142135623730951 4 5.0
+6 12 120 10
+3.141592653589793 2.718281828459045
+True True False
+2.0 10.0 1
+```
+
+- `floor` rounds toward −∞, `ceil` toward +∞, `trunc` toward 0. For negatives they all differ.
+- `math.isqrt(n)` is the **exact** integer square root, safe for huge ints where `int(sqrt(n))`
+  could be off by one because of float rounding.
+- `nan` ("not a number") is not equal to anything, **even itself**. Test it with `math.isnan`.
+
+### Built-ins that work on numbers
+
+```python title="builtins_numbers.py"
+nums = [4, -9, 2.5, 10, -1]
+print(abs(-9), min(nums), max(nums), sum(nums))
+print(max(nums, key=abs), sorted(nums, key=abs))
+print(pow(2, 10), pow(2, 10, 1000), 2**10 % 1000)   # 3-arg pow is fast modular power
+print(divmod(-17, 5), round(1234.5678, 2), round(1234.5678, -2))
+```
+
+```text title="Output"
+9 -9 10 6.5
+10 [-1, 2.5, 4, -9, 10]
+1024 24 24
+(-4, 3) 1234.57 1200.0
+```
+
+- `key=abs` compares by size regardless of sign: the largest **magnitude** is `10`.
+- `pow(a, b, m)` computes `a**b % m` without building the huge power first. It's how cryptography
+  code works with giant exponents.
+- `round(x, -2)` rounds to the nearest hundred.
+
+### Modulo patterns you'll use constantly
+
+```python title="modulo_patterns.py"
+n = 1234
+print(n % 2 == 0, n % 10, n // 10)       # even?  last digit, drop last digit
+
+days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+today = 5                                  # Sat
+print(days[(today + 3) % 7])               # wraps around the week
+
+digits = []
+while n > 0:
+    n, d = divmod(n, 10)                   # peel digits off the right
+    digits.append(d)
+print(digits[::-1], sum(digits))
+
+print((-1) % 7, 23 % 12 or 12)             # % with a positive divisor is never negative
+```
+
+```text title="Output"
+True 4 123
+Tue
+[1, 2, 3, 4] 10
+6 11
+```
+
+- `% n` keeps an index inside `0 … n-1`, which is how circular buffers, clocks and "every k-th
+  item" checks work.
+- Because Python's `%` takes the sign of the divisor, `(-1) % 7` is `6`, which is exactly the
+  "one step back, wrapping around" index.
+- `23 % 12 or 12` turns a 24-hour hour into a 12-hour clock (`0` becomes `12`).
+
+### Where floats run out of precision
+
+```python title="float_limits.py"
+import sys
+
+print(sys.float_info.max, sys.float_info.max * 10)
+print(2.0**53, 2.0**53 + 1, 2**53 + 1)          # ints stay exact; floats don't
+total = 0.0
+for _ in range(10):
+    total += 0.1                                  # each += rounds, errors pile up
+print(total, sum([0.1] * 10), total == 1.0)
+print(f"{0.1:.20f}")
+```
+
+```text title="Output"
+1.7976931348623157e+308 inf
+9007199254740992.0 9007199254740992.0 9007199254740993
+0.9999999999999999 1.0 False
+0.10000000000000000555
+```
+
+- Past about `1.8e308` a float becomes `inf`. Integers have no such limit.
+- A float has 53 bits of precision, so above `2**53` it can't represent every whole number:
+  `2.0**53 + 1` is still `2.0**53`.
+- Adding `0.1` ten times in a loop drifts to `0.9999999999999999`. Since Python 3.12 the
+  built-in `sum()` compensates for rounding errors, so it returns exactly `1.0`. Prefer `sum()`
+  (or `math.fsum`) over manual float accumulation.
+- Printing with 20 decimals reveals the binary approximation stored for `0.1`.
+
+## Putting it together
+
+### A receipt that adds up to the cent
+
+```python title="receipt.py"
+from decimal import Decimal, ROUND_HALF_UP
+
+items = [("notebook", "3.49", 3), ("pen", "1.10", 4), ("bag", "24.99", 1)]
+TAX_RATE = Decimal("0.0825")
+CENT = Decimal("0.01")
+
+subtotal = Decimal("0")
+for name, price, qty in items:
+    line = Decimal(price) * qty
+    subtotal += line
+    print(f"{name:10} {qty} x {price:>6} = {line:>7}")
+
+tax = (subtotal * TAX_RATE).quantize(CENT, rounding=ROUND_HALF_UP)
+print(f"{'subtotal':10} {subtotal:>18}")
+print(f"{'tax 8.25%':10} {tax:>18}")
+print(f"{'total':10} {subtotal + tax:>18}")
+```
+
+```text title="Output"
+notebook   3 x   3.49 =   10.47
+pen        4 x   1.10 =    4.40
+bag        1 x  24.99 =   24.99
+subtotal                39.86
+tax 8.25%                3.29
+total                   43.15
+```
+
+- Prices arrive as **strings** and become `Decimal`s, so `3.49 * 3` is exactly `10.47`.
+- `quantize(CENT, rounding=ROUND_HALF_UP)` rounds the tax to cents the way shops do (halves go
+  up), instead of banker's rounding.
+
+### Seconds to a readable duration
+
+```python title="duration.py"
+def human(seconds: int) -> str:
+    minutes, s = divmod(seconds, 60)
+    hours, m = divmod(minutes, 60)
+    days, h = divmod(hours, 24)
+    parts = [(days, "d"), (h, "h"), (m, "m"), (s, "s")]
+    return " ".join(f"{value}{unit}" for value, unit in parts if value) or "0s"
+
+
+for t in [0, 59, 3600, 3725, 90061, 1_000_000]:
+    print(f"{t:>9,} -> {human(t)}")
+```
+
+```text title="Output"
+        0 -> 0s
+       59 -> 59s
+    3,600 -> 1h
+    3,725 -> 1h 2m 5s
+   90,061 -> 1d 1h 1m 1s
+1,000,000 -> 11d 13h 46m 40s
+```
+
+Each `divmod` splits off one unit: the remainder is that unit's value, the quotient carries on to
+the next bigger unit. `1_000_000` uses underscores as digit separators, which Python ignores.
+
+## Common mistakes
+
+<Callout type="warning" title="Money in floats">
+  `0.1 + 0.2` already drifts. For prices, use `Decimal` (built from strings) or store whole cents as
+  `int`.
+</Callout>
+
+- **`==` on floats.** Use `math.isclose(a, b)`, or compare with a tolerance.
+- **Expecting `/` to give an int.** In Python 3, `6 / 3` is `2.0`. Use `//` when you need an int.
+- **`int()` vs `//` on negatives.** `int(-3.5)` is `-3` (truncate) but `-7 // 2` is `-4`
+  (floor).
+- **`ZeroDivisionError`.** `x / 0`, `x // 0` and `x % 0` all raise it, so guard divisors that
+  come from data.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: what are -9 // 4 and -9 % 4?">
+  `-9 // 4` is `-3` (floor of −2.25), and `-9 % 4` is `3`. Check with the identity: $4 \cdot (-3) +
+  3 = -9$.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: what are `-7 // 2`, `-7 % 2` and `math.trunc(-7 / 2)`?">
+  `-4`, `1` and `-3`. Floor division goes down to −4, so the remainder must be `1` to satisfy `2 *
+  -4 + 1 == -7`. `trunc` cuts toward zero.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: how do you test whether a number is a whole number?">
+  For an `int`, it always is. For a `float`, use `x.is_integer()` (`3.0.is_integer()` is `True`) or
+  `x % 1 == 0`. Beware of floats that only look whole: `0.1 * 30` is `3.0000000000000004`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why does `max([-10, 3], key=abs)` return -10?">
+  `key=abs` compares `abs(-10) = 10` with `abs(3) = 3`, so `-10` wins, but `max` returns the
+  original item, not its key.
+</Reveal>
+
+<KeyTakeaways>
+
+- **int** is exact and unbounded. **float** is a fast binary approximation.
+- `/` always returns a float. `//` floors toward −∞. `%` takes the divisor's sign.
+- Never compare floats with `==`. Use `math.isclose`, `Decimal` or `Fraction`.
+- `**` binds tighter than unary minus, and `round` rounds ties to even.
+- Use `divmod` to split a quantity into units (time, digits, pages) and `%` to wrap indexes.
+- Exact tools exist for exact needs: `math.isqrt`, `Decimal` with `quantize`, `Fraction`.
+- `nan` never equals itself; check it with `math.isnan`.
+
+</KeyTakeaways>
+
+{/* enriched */}

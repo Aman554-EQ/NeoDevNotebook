@@ -11,6 +11,13 @@ export const CODE_LANGUAGES = [
   "dockerfile",
   "yaml",
   "json",
+  "html",
+  "jinja",
+  "http",
+  "dotenv",
+  "ini",
+  "toml",
+  "nginx",
   "text",
 ] as const
 export type CodeLanguage = (typeof CODE_LANGUAGES)[number]
@@ -30,6 +37,15 @@ export const LANGUAGE_LABEL: Record<string, string> = {
   dockerfile: "Dockerfile",
   yaml: "YAML",
   json: "JSON",
+  html: "HTML",
+  jinja: "Template",
+  django: "Template",
+  http: "HTTP",
+  dotenv: ".env",
+  env: ".env",
+  ini: "INI",
+  toml: "TOML",
+  nginx: "nginx",
   text: "Text",
 }
 
@@ -42,6 +58,10 @@ const ALIASES: Record<string, CodeLanguage> = {
   yml: "yaml",
   txt: "text",
   plaintext: "text",
+  django: "jinja",
+  htmldjango: "jinja",
+  env: "dotenv",
+  cfg: "ini",
 }
 
 export function normaliseLanguage(lang: string | undefined): CodeLanguage {
@@ -88,4 +108,17 @@ export async function highlight(code: string, lang: string, highlightLines?: str
       },
     ],
   })
+}
+
+/** Splits Shiki HTML into one inner-HTML string per source line (Shiki escapes newlines inside tokens). */
+export function splitHighlightedLines(html: string): string[] {
+  const inner = /<code[^>]*>([\s\S]*)<\/code>/.exec(html)?.[1] ?? ""
+  return inner
+    .split("\n")
+    .map((line) => line.replace(/^<span class="line">/, "").replace(/<\/span>$/, ""))
+}
+
+/** Highlighted HTML for each line, for visuals that style lines individually (e.g. the Code Stepper). */
+export async function highlightLines(code: string, lang: string): Promise<string[]> {
+  return splitHighlightedLines(await highlight(code, lang))
 }

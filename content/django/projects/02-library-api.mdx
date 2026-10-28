@@ -1,0 +1,193 @@
+---
+title: Library REST API
+summary: Build a JSON API for books, authors and loans with Django REST Framework. Serializers with validation, ViewSets and a router, pagination, filtering, search and ordering, token login, staff-only writes, members who only see their own loans, a race-free borrow, OpenAPI docs and a Postman collection.
+kind: guided
+difficulty: simple
+estimatedHours: 4
+code: library
+skills:
+  [
+    DRF serializers,
+    ViewSets and routers,
+    pagination and filters,
+    permissions,
+    token auth,
+    transactions,
+    OpenAPI,
+    Postman,
+    query budgets,
+  ]
+---
+
+## How this project works
+
+Same rhythm as Notes: read the milestone, build it, use the hints if needed, compare with the solution
+(the real, tested code), run the checkpoint. Download the **Postman collection** above to call every
+endpoint once your server runs.
+
+```bash
+python -m pip install "Django>=5.2,<5.3" djangorestframework django-filter drf-spectacular pytest pytest-django
+django-admin startproject config . && python manage.py startapp catalog
+```
+
+## The brief (PRD)
+
+**Problem.** A small library tracks books and loans on paper; members can't see what's available.
+
+**Users.** Members (borrow and return books, see their own loans) and librarians (staff: manage the
+catalogue).
+
+**User stories.**
+
+- Anyone can list and search books, filter by author or year, and sort by title or year.
+- Each book shows how many copies are available right now.
+- Staff can add, edit and remove books and authors.
+- A logged-in member can borrow an available book and return it.
+- Members see only their own loans.
+
+**Acceptance criteria.**
+
+- Lists are paginated (10 per page) and the book list costs a fixed number of queries.
+- ISBNs are 13 digits; years can't be in the future; errors name the field.
+- A member can't borrow a book with no copies left, or the same book twice; two simultaneous borrows
+  of the last copy can't both succeed.
+- Returning twice is refused with 409.
+- OpenAPI schema at `/api/schema/`, Swagger UI at `/api/docs/`.
+
+## Design
+
+| Model    | Fields                                                                             | Notes                                 |
+| -------- | ---------------------------------------------------------------------------------- | ------------------------------------- |
+| `Author` | `name` (unique)                                                                    |                                       |
+| `Book`   | `title`, `isbn` (unique), `author` → Author (PROTECT), `published_year`, `copies`  | index on year                         |
+| `Loan`   | `book` → Book (PROTECT), `borrower` → User, `borrowed_at`, `due_at`, `returned_at` | unique open loan per (book, borrower) |
+
+| Method            | URL                                                                      | Who    | Result                          |
+| ----------------- | ------------------------------------------------------------------------ | ------ | ------------------------------- |
+| GET               | `/api/books/` (`?author=`, `?published_year=`, `?search=`, `?ordering=`) | anyone | paginated list                  |
+| POST/PATCH/DELETE | `/api/books/`, `/api/books/<id>/`                                        | staff  | 201 / 200 / 204                 |
+| GET               | `/api/authors/`                                                          | anyone | with `book_count`               |
+| GET/POST          | `/api/loans/`                                                            | member | own loans / borrow              |
+| POST              | `/api/loans/<id>/return/`                                                | member | 200, or 409 if already returned |
+| POST              | `/api/auth/token/`                                                       | anyone | `{"token": ...}`                |
+
+<ProjectTree />
+
+## Milestone 1: models with constraints
+
+<Callout type="tip" title="Your turn">
+  Write `Author`, `Book` and `Loan`. Add a custom QuerySet method `with_availability()` that
+  annotates the number of open loans, and a conditional `UniqueConstraint` so a member can't hold
+  two open loans of the same book.
+</Callout>
+
+<Reveal kind="hint" label="Hint: conditional unique constraint">
+  `UniqueConstraint(fields=["book", "borrower"], condition=Q(returned_at__isnull=True),
+  name="...")`. For the annotation: `Count("loans", filter=Q(loans__returned_at__isnull=True))`.
+</Reveal>
+
+<Reveal label="Solution: models and migration">
+  <ProjectFiles paths="catalog/models.py catalog/migrations/0001_initial.py" />
+</Reveal>
+
+## Milestone 2: serializers and validation
+
+<Callout type="tip" title="Your turn">
+  Write `BookSerializer` with a read-only `author_name` and a computed `available`, plus
+  `validate_isbn` (13 digits) and `validate_published_year` (not in the future). Write
+  `AuthorSerializer` (with `book_count`) and `LoanSerializer` (server-set dates read-only).
+</Callout>
+
+<Reveal kind="hint" label="Hint: available without extra queries">
+  Use the `on_loan` annotation when the view provided it, and fall back to a count only when it
+  didn't (for example right after creating a book).
+</Reveal>
+
+<Reveal label="Solution: serializers">
+  <ProjectFile path="catalog/serializers.py" />
+</Reveal>
+
+## Milestone 3: ViewSets, router, filters and pagination
+
+<Callout type="tip" title="Your turn">
+  Write `AuthorViewSet` and `BookViewSet` (`ModelViewSet`) with an `IsStaffOrReadOnly` permission,
+  `filterset_fields`, `search_fields` and `ordering_fields`. Configure pagination (10) and the
+  filter backends in settings, and register the ViewSets on a `DefaultRouter`.
+</Callout>
+
+<Reveal kind="hint" label="Hint: keep the list at two queries">
+  `Book.objects.select_related("author").with_availability().order_by("title")`. The explicit
+  `order_by` matters: a query with `Count` ignores `Meta.ordering`, and unordered pagination is
+  unstable.
+</Reveal>
+
+<Reveal label="Solution: permissions, views, URLs and settings">
+  <ProjectFiles paths="catalog/permissions.py catalog/views.py catalog/urls.py config/settings.py" />
+</Reveal>
+
+<Checkpoint id="books" command="python -m pytest catalog/tests/test_books.py">
+  Pagination, the exact JSON shape, filters, search and ordering, the 2-query budget, staff-only
+  writes, 401 for anonymous writes, field errors, PATCH and DELETE, author counts, token login and
+  the schema.
+</Checkpoint>
+
+## Milestone 4: loans, safely
+
+<Callout type="tip" title="Your turn">
+  Write `LoanViewSet` with list, retrieve and create only. `get_queryset()` returns only the current
+  member's loans. `perform_create` must lock the book row, refuse when no copies are left or the
+  member already has it, and set the due date. Add a `return` action that refuses a second return
+  with 409.
+</Callout>
+
+<Reveal kind="hint" label="Hint: race-free borrowing">
+  Inside `transaction.atomic()`, `Book.objects.select_for_update().get(pk=...)` makes a second
+  borrow of the same book wait until the first commits, so both can't see "1 copy left".
+</Reveal>
+
+<Reveal label="Solution: the loan ViewSet">
+  <ProjectFile path="catalog/views.py" />
+</Reveal>
+
+<Checkpoint id="loans" command="python -m pytest catalog/tests/test_loans.py">
+  Login required, availability, no double borrow, no copies left, privacy (404 for others' loans),
+  return once, and the configurable loan period.
+</Checkpoint>
+
+## Milestone 5: docs and Postman
+
+<Callout type="tip" title="Your turn">
+  Add drf-spectacular, serve `/api/schema/` and `/api/docs/`, and fix every schema warning. Export
+  the schema and import it into Postman (or use the collection from this page).
+</Callout>
+
+<Reveal kind="hint" label="Hint: the LoanViewSet warning">
+  The schema generator can't call `get_queryset()` without a user. Add `queryset =
+  Loan.objects.none()` and return `Loan.objects.none()` when `getattr(self, "swagger_fake_view",
+  False)`.
+</Reveal>
+
+<Checkpoint
+  id="schema"
+  command="python manage.py spectacular --validate --fail-on-warn --file openapi.yaml"
+/>
+
+## Harden
+
+- Writes are staff-only; members only reach their own loans (scoped queryset, plus an object
+  permission as a second layer).
+- `ModelSerializer` copies `unique=True` into validators, so a duplicate ISBN is a 400, not a crash.
+- The database enforces one open loan per member and book, whatever the code does.
+- Token authentication for API clients; session authentication only for the browsable API.
+
+## Test
+
+<ProjectFiles paths="catalog/tests/conftest.py catalog/tests/test_books.py catalog/tests/test_loans.py" />
+
+<Checkpoint id="all" command="python -m pytest" />
+
+## Ship
+
+<ProjectFile path="README.md" />
+
+**Next:** the Auth starter adds real users: signup, sessions, password reset and JWT.

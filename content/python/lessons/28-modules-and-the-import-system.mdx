@@ -1,0 +1,412 @@
+---
+title: Modules and the import system
+summary: What actually happens when you write import, why a module's code runs only once, how Python finds modules on sys.path, what if __name__ == "__main__" is for, and how to fix ModuleNotFoundError and circular imports.
+estimatedMinutes: 24
+difficulty: medium
+section: Packages, Imports & Tooling
+objectives:
+  - Describe the import steps (cache check, sys.path search, run once, bind)
+  - Use the import forms (`import x`, `from x import y`, `import x as z`) appropriately
+  - Use `if __name__ == "__main__":` to make files both importable and runnable
+  - Diagnose ModuleNotFoundError, shadowed names and circular imports
+prerequisites:
+  - Functions
+tags: [python, modules, imports]
+practice: [py-p-047]
+interview: [py-i-011, py-i-050, py-i-051]
+---
+
+## Intuition: a library with a front desk
+
+Asking for `import shop` is asking the front desk for a book. The desk first checks whether it's
+**already on the reading table** (`sys.modules`). If not, it searches the **shelves in a fixed
+order** (`sys.path`), brings the book out, and reads it once to prepare it. Everyone who asks later
+gets the same copy from the table.
+
+## See it
+
+<ImportViz />
+
+## The precise rules
+
+1. Look up the name in `sys.modules`. If it's found, reuse it.
+2. Otherwise search each folder in `sys.path` in order: the running script's folder, then
+   `PYTHONPATH`, the standard library and site-packages. The first match wins.
+3. Create a module object, **run the file top to bottom once**, and store it in `sys.modules`.
+4. Bind a name in the importing namespace: `import shop` binds `shop`, and `from shop import TAX`
+   binds `TAX`.
+
+Inside a module, `__name__` is the module's name (`"shop"`). In the file you run directly it is
+`"__main__"`. That's why `if __name__ == "__main__":` code runs only when the file is executed, not
+when it's imported.
+
+## Worked example
+
+The example creates a module in a temporary folder, so you can paste it anywhere and run it.
+
+```python title="imports.py"
+import importlib
+import sys
+import tempfile
+import textwrap
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as tmp:
+    Path(tmp, "shop.py").write_text(
+        textwrap.dedent(
+            """
+            print("shop module is running, __name__ =", __name__)
+            TAX = 0.2
+
+            def price_with_tax(p):
+                return round(p * (1 + TAX), 2)
+
+            if __name__ == "__main__":
+                print("only when run directly")
+            """
+        ),
+        encoding="utf-8",
+    )
+    sys.path.insert(0, tmp)  # make the folder importable
+
+    import shop  # runs the module once
+
+    import shop as again  # cached: nothing printed
+
+    print(shop is again, "shop" in sys.modules, shop.price_with_tax(10))
+
+    from shop import TAX, price_with_tax
+
+    print(TAX, price_with_tax(5))
+    print(__name__)
+
+    try:
+        import shopp
+    except ModuleNotFoundError as err:
+        print("ModuleNotFoundError:", err)
+
+    importlib.reload(shop)  # runs it again, deliberately
+    sys.path.remove(tmp)
+```
+
+```text title="Output"
+shop module is running, __name__ = shop
+True True 12.0
+0.2 6.0
+__main__
+ModuleNotFoundError: No module named 'shopp'
+shop module is running, __name__ = shop
+```
+
+What to notice:
+
+- "shop module is running" printed **once** for two imports, then again only for the explicit
+  `importlib.reload`.
+- Inside `shop.py`, `__name__` was `"shop"`, so the `__main__` block didn't run. In the script
+  itself, `__name__` is `"__main__"`.
+- `from shop import TAX` copies the **binding**. If `shop.TAX` were later reassigned, your `TAX`
+  wouldn't change. Prefer `import shop` + `shop.TAX` for settings that change.
+
+## Variations
+
+### Every form of `import`
+
+```python title="import_forms.py"
+import math                              # the module object: math.sqrt
+import datetime as dt                    # an alias for a long name
+from collections import Counter          # one name from the module
+from os import path as ospath            # one name, renamed
+from statistics import *                 # every public name (avoid outside the REPL)
+
+print(math.sqrt(16), dt.date(2026, 1, 1).year, Counter("aab")["a"])
+print(ospath.basename("/tmp/report.csv"), mean([1, 2, 3]), median([5, 1, 3]))
+print(type(math).__name__, math.__name__, "sqrt" in dir(math))
+```
+
+```text title="Output"
+4.0 2026 2
+report.csv 2 3
+module math True
+```
+
+- `import x` binds the **module**; `from x import y` binds just `y`. Both run the module only the
+  first time.
+- Aliases (`as`) shorten long names and avoid clashes; common ones like `import numpy as np` are
+  conventions everyone recognises.
+- `from module import *` dumps many names into your namespace, so readers can't tell where `mean`
+  came from. It's acceptable in a quick REPL session, not in modules.
+
+### What a module knows about itself
+
+```python title="module_attrs.py"
+import json
+import sys
+
+print(json.__name__, json.__package__, json.__file__.endswith("__init__.py"))
+print(sys.__name__, hasattr(sys, "__file__"))          # built into the interpreter: no file
+print(__name__, sys.modules["__main__"].__name__)
+print(sorted(n for n in dir(json) if not n.startswith("_"))[:6])
+```
+
+```text title="Output"
+json json True
+sys False
+__main__ __main__
+['JSONDecodeError', 'JSONDecoder', 'JSONEncoder', 'codecs', 'decoder', 'detect_encoding']
+```
+
+`__file__` tells you where a module was loaded from (handy when the wrong version is imported),
+`__package__` names its package, and `dir(module)` lists what it defines. Modules like `sys` are
+compiled into the interpreter and have no file at all.
+
+### A circular import, and two fixes
+
+```python title="circular.py"
+import sys
+import tempfile
+import textwrap
+from pathlib import Path
+
+
+def run_with(files: dict, title: str):
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, code in files.items():
+            Path(tmp, name).write_text(textwrap.dedent(code), encoding="utf-8")
+        sys.path.insert(0, tmp)
+        try:
+            import orders
+            print(title, "->", orders.place("pen"))
+        except ImportError as err:
+            print(title, "-> ImportError:", str(err).split(" (")[0])
+        finally:
+            sys.path.remove(tmp)
+            for name in ("orders", "billing"):
+                sys.modules.pop(name, None)
+
+
+broken = {
+    "orders.py": """
+        from billing import invoice          # billing needs orders, which isn't finished
+        def place(item): return invoice(item)
+        TAX = 0.2
+    """,
+    "billing.py": """
+        from orders import TAX
+        def invoice(item): return f"{item} + {TAX:.0%} tax"
+    """,
+}
+fixed_module_import = {
+    "orders.py": broken["orders.py"],
+    "billing.py": """
+        import orders                        # import the MODULE, look up TAX later
+        def invoice(item): return f"{item} + {orders.TAX:.0%} tax"
+    """,
+}
+fixed_local_import = {
+    "orders.py": broken["orders.py"],
+    "billing.py": """
+        def invoice(item):
+            from orders import TAX           # import when the function runs
+            return f"{item} + {TAX:.0%} tax"
+    """,
+}
+
+run_with(broken, "broken")
+run_with(fixed_module_import, "import module")
+run_with(fixed_local_import, "import inside function")
+```
+
+```text title="Output"
+broken -> ImportError: cannot import name 'TAX' from partially initialized module 'orders'
+import module -> pen + 20% tax
+import inside function -> pen + 20% tax
+```
+
+- `orders` starts running, imports `billing`, and `billing` asks for `orders.TAX` before `orders`
+  has reached that line: a **partially initialised** module.
+- Importing the module object (`import orders`) and reading `orders.TAX` later, or importing inside
+  the function, both delay the lookup until everything is loaded.
+- The real fix is often structural: move shared constants into a third module that both import.
+
+### Importing by name at runtime
+
+```python title="dynamic_import.py"
+import importlib
+
+for name in ["json", "csv", "not_a_real_module"]:
+    try:
+        module = importlib.import_module(name)
+        print(name, "->", module.__name__, "has dumps:", hasattr(module, "dumps"))
+    except ModuleNotFoundError as err:
+        print(name, "->", err)
+
+handler = getattr(importlib.import_module("math"), "factorial")
+print(handler(5))
+```
+
+```text title="Output"
+json -> json has dumps: True
+csv -> csv has dumps: False
+not_a_real_module -> No module named 'not_a_real_module'
+120
+```
+
+`importlib.import_module("name")` takes the module name as a **string**, so a program can load
+modules chosen by configuration or discovered on disk. Combined with `getattr`, it loads a function
+by name: the basis of plug-in systems.
+
+### Running a module as a script
+
+```python title="run_module.py"
+import runpy
+import sys
+import tempfile
+import textwrap
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as tmp:
+    Path(tmp, "greet.py").write_text(textwrap.dedent("""
+        import sys
+        def main(argv):
+            return f"hello {argv[1] if len(argv) > 1 else 'world'}"
+        if __name__ == "__main__":
+            print(main(sys.argv))
+    """), encoding="utf-8")
+    sys.path.insert(0, tmp)
+
+    sys.argv = ["greet", "ada"]
+    runpy.run_module("greet", run_name="__main__")    # what `python -m greet ada` does
+
+    import greet                                      # a normal import: main block skipped
+    print(greet.main(["greet"]))
+    sys.path.remove(tmp)
+```
+
+```text title="Output"
+hello ada
+hello world
+```
+
+`python -m name` finds `name` on the import path and runs it with `__name__ == "__main__"`;
+`runpy.run_module` is the same machinery as a function. Putting the work in a `main()` function
+lets the module be both a script and an importable library.
+
+## Putting it together: a plug-in loader
+
+```python title="plugins.py"
+import importlib
+import sys
+import tempfile
+import textwrap
+from pathlib import Path
+
+PLUGINS = {
+    "upper.py": "NAME = 'upper'\ndef apply(text): return text.upper()\n",
+    "reverse.py": "NAME = 'reverse'\ndef apply(text): return text[::-1]\n",
+    "count.py": "NAME = 'count'\ndef apply(text): return f'{len(text.split())} words'\n",
+    "broken.py": "NAME = 'broken'\n# forgot to define apply()\n",
+    "notes.txt": "not a plug-in",
+}
+
+with tempfile.TemporaryDirectory() as tmp:
+    folder = Path(tmp, "textplugins")
+    folder.mkdir()
+    (folder / "__init__.py").write_text("", encoding="utf-8")
+    for name, code in PLUGINS.items():
+        (folder / name).write_text(textwrap.dedent(code), encoding="utf-8")
+    sys.path.insert(0, tmp)
+
+    registry = {}
+    for path in sorted(folder.glob("*.py")):
+        if path.stem == "__init__":
+            continue
+        module = importlib.import_module(f"textplugins.{path.stem}")
+        if callable(getattr(module, "apply", None)):
+            registry[module.NAME] = module.apply
+        else:
+            print(f"skipped {path.name}: no apply()")
+
+    text = "plug ins are modules"
+    for name, apply in registry.items():
+        print(f"{name:8} {apply(text)}")
+    sys.path.remove(tmp)
+```
+
+```text title="Output"
+skipped broken.py: no apply()
+count    4 words
+reverse  seludom era sni gulp
+upper    PLUG INS ARE MODULES
+```
+
+The host program knows nothing about individual plug-ins: it scans a folder, imports each module
+by its dotted name, and registers it if it provides the expected `apply` function. Adding a feature
+means dropping a new file into the folder.
+
+## Common mistakes
+
+<Callout type="warning" title="Naming your file like a library">
+  A file called `random.py`, `json.py` or `requests.py` in your project folder is found **first** on
+  `sys.path`, which shadows the real module. Then `random.randint` fails with `AttributeError:
+  module 'random' has no attribute 'randint'`. Rename the file, and delete its `__pycache__`.
+</Callout>
+
+- **ModuleNotFoundError for an installed package.** Usually it's installed into a _different_
+  environment. Compare `python -c "import sys; print(sys.executable)"` with where you ran `pip`
+  (lesson 30).
+- **Circular imports.** `a.py` imports `b.py`, which imports `a.py` while `a` is still half-run, so
+  you get `ImportError: cannot import name … (most likely due to a circular import)`. Fix it by
+  moving shared code into a third module, importing inside the function that needs it, or using
+  `import a` and `a.name` at call time.
+- **`from module import *`.** It pollutes your namespace and hides where names come from. Avoid it
+  outside interactive sessions.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: a module prints 'loading' at top level and is imported by 5 files. How many times does it print?"
+>
+  Once. The first import runs it and caches it in `sys.modules`, and the other four reuse the cached
+  module object.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: a module prints a message at the top level. How many times does it print if you import it three times?"
+>
+  Once. The first import runs the module and stores it in `sys.modules`; later imports reuse the
+  cached object. Only `importlib.reload` runs it again.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what does `ImportError: cannot import name 'X' from partially initialized module` usually mean?"
+>
+  A circular import: two modules import each other at the top level, and one asked for a name before
+  the other finished running. Import the module instead of the name, import inside a function, or
+  move the shared code to a third module.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why put a script's logic in `main()` under `if __name__ == '__main__':`?"
+>
+  So the file can be imported (for tests or reuse) without running the script, while `python
+  file.py` or `python -m module` still runs it.
+</Reveal>
+
+<KeyTakeaways>
+
+- `import` checks the `sys.modules` cache, searches `sys.path` in order, runs the module once, caches it, and binds a name.
+- `__name__` is `"__main__"` only in the file you run, so guard script-only code with it.
+- Don't name your files after libraries.
+- Fix circular imports by restructuring, or by importing late.
+- `import x` binds the module, `from x import y` binds a name; avoid `import *` in real code.
+- Break circular imports by importing the module (not the name), importing late, or restructuring.
+- `importlib.import_module` and `runpy` load and run modules by name, the basis of plug-ins and
+  `python -m`.
+
+</KeyTakeaways>
+
+{/* enriched */}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ product.name }}{% endblock %}
+{% block content %}
+  <h1>{{ product.name }}</h1>
+  <p>${{ product.price }} · {{ product.stock }} in stock</p>
+  <p>{{ product.description|linebreaksbr }}</p>
+  {% if product.stock %}
+    <form method="post" action="{% url 'cart-add' product.pk %}">
+      {% csrf_token %}
+      <label>Quantity <input type="number" name="quantity" value="1" min="1" max="20" /></label>
+      <button type="submit">Add to cart</button>
+    </form>
+  {% endif %}
+{% endblock %}

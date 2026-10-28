@@ -1,0 +1,503 @@
+---
+title: Files and data formats
+summary: Read and write text and binary files safely, build paths with pathlib, and convert data to and from CSV and JSON, the two formats you'll meet everywhere.
+estimatedMinutes: 26
+difficulty: simple
+section: Core Language
+objectives:
+  - Open files with the right mode and encoding, always inside `with`
+  - Build, inspect and walk paths with `pathlib.Path`
+  - Read and write CSV with `csv.DictReader` and `csv.DictWriter`
+  - Convert between Python objects and JSON with `json.dumps` / `json.loads`
+prerequisites:
+  - Context managers
+  - Dictionaries
+tags: [python, files, pathlib, csv, json]
+practice: [py-p-026, py-p-058]
+---
+
+## Intuition: a library book
+
+Opening a file is borrowing a book: you must say **how** you'll use it (read, write, append) and
+which **language** it's written in (encoding). And you must give it back (close it). `with` returns
+it automatically. CSV and JSON are agreed formats for writing structured data as text, so any program
+can read it back.
+
+## See it
+
+A recorded run that parses CSV text, totals a column, and round-trips the result through JSON. It
+uses an in-memory text stream (`io.StringIO`), which behaves exactly like an open text file.
+
+<CodeStepper
+  trace="files-csv-json"
+  title="CSV in, JSON out"
+  caption="DictReader turns each CSV row into a dict of strings; notice the scores are '9' and '7' (text), so the loop converts with int(). json.dumps writes a string; json.loads reads it back into a dict."
+/>
+
+## The precise rules
+
+| Mode      | Meaning                                               |
+| --------- | ----------------------------------------------------- |
+| `"r"`     | read text (the default); error if the file is missing |
+| `"w"`     | write text; **creates or truncates** the file         |
+| `"a"`     | append text at the end                                |
+| `"x"`     | create; error if it already exists                    |
+| add `"b"` | binary: read/write `bytes`, no encoding               |
+
+- Always pass `encoding="utf-8"` for text. Otherwise Python uses a platform default (on Windows
+  that's often not UTF-8).
+- Open CSV files with `newline=""`, so the csv module controls line endings.
+- `json` maps `dict` ↔ object, `list` ↔ array, `str`, `int` / `float`, `True` / `False` ↔
+  `true` / `false`, and `None` ↔ `null`. Tuples become lists, and other types need conversion.
+
+## Worked example
+
+```python title="files.py"
+import csv
+import json
+import tempfile
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as tmp:
+    folder = Path(tmp)
+    notes = folder / "notes.txt"  # / joins path parts on every OS
+
+    notes.write_text("first line\nsecond line\n", encoding="utf-8")
+    with notes.open("a", encoding="utf-8") as f:
+        f.write("third line\n")
+
+    with notes.open(encoding="utf-8") as f:
+        for number, line in enumerate(f, start=1):
+            print(number, line.rstrip("\n"))
+
+    print(notes.name, notes.suffix, notes.stem, notes.exists())
+
+    scores = folder / "scores.csv"
+    with scores.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["name", "score"])
+        writer.writeheader()
+        writer.writerows([{"name": "ada", "score": 9}, {"name": "bo", "score": 7}])
+
+    with scores.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    print(rows[0], sum(int(r["score"]) for r in rows))
+
+    config = {"debug": False, "ports": (80, 443), "owner": None}
+    (folder / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+    loaded = json.loads((folder / "config.json").read_text(encoding="utf-8"))
+    print(loaded, loaded == config)
+    print(sorted(p.name for p in folder.iterdir()))
+```
+
+```text title="Output"
+1 first line
+2 second line
+3 third line
+notes.txt .txt notes True
+{'name': 'ada', 'score': '9'} 16
+{'debug': False, 'ports': [80, 443], 'owner': None} False
+['config.json', 'notes.txt', 'scores.csv']
+```
+
+What to notice:
+
+- Iterating a file yields lines **with** their `\n`, which `rstrip("\n")` removes. Iterating is
+  memory-friendly even for huge files.
+- CSV values always come back as **strings** (`'9'`), so convert them yourself.
+- `loaded == config` is `False`: JSON has no tuples, so `(80, 443)` came back as `[80, 443]`.
+- `tempfile.TemporaryDirectory()` gives a scratch folder that's deleted afterwards. That's handy in
+  tests and examples.
+
+## Variations
+
+### Working with paths
+
+```python title="paths.py"
+import tempfile
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    (root / "data" / "2026" / "oct").mkdir(parents=True)      # create the whole chain
+    for name in ["a.csv", "b.csv", "notes.txt"]:
+        (root / "data" / "2026" / "oct" / name).write_text("x\n", encoding="utf-8", newline="\n")
+    (root / "data" / "readme.md").write_text("# data\n", encoding="utf-8")
+
+    print(sorted(p.name for p in (root / "data").rglob("*.csv")))         # recursive search
+    print(sorted(str(p.relative_to(root)).replace("\\", "/") for p in root.rglob("*.md")))
+
+    report = root / "data" / "2026" / "oct" / "a.csv"
+    print(report.with_suffix(".json").name, report.parent.name, report.parts[-3:])
+    print(report.stat().st_size, "bytes", report.is_file(), report.parent.is_dir())
+
+    moved = report.rename(report.with_name("archive-a.csv"))
+    print(moved.name, report.exists())
+    (root / "missing.txt").unlink(missing_ok=True)                        # no error if absent
+```
+
+```text title="Output"
+['a.csv', 'b.csv']
+['data/readme.md']
+a.json oct ('2026', 'oct', 'a.csv')
+2 bytes True True
+archive-a.csv False
+```
+
+- `mkdir(parents=True)` creates intermediate folders; add `exist_ok=True` to ignore folders that
+  already exist.
+- `glob` matches one folder, `rglob` searches all subfolders.
+- Text mode turns `"\n"` into the system's line ending when writing: on Windows `"x\n"` is saved as
+  `x\r\n` (3 bytes). `newline="\n"` writes the same bytes everywhere, so the file is 2 bytes on every
+  system.
+- `with_suffix`, `with_name`, `parent` and `relative_to` build new paths without string slicing,
+  and work the same on Windows and Linux.
+
+### Four ways to read a text file
+
+```python title="read_ways.py"
+import tempfile
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as tmp:
+    path = Path(tmp) / "poem.txt"
+    path.write_text("roses are red\nviolets are blue\nsugar is sweet\n", encoding="utf-8")
+
+    print(repr(path.read_text(encoding="utf-8")[:13]))          # 1. everything as one string
+    print(path.read_text(encoding="utf-8").splitlines())         # 2. a list of lines, no \n
+    with path.open(encoding="utf-8") as f:                       # 3. line by line (lazy)
+        print([line.split()[0] for line in f])
+    with path.open(encoding="utf-8") as f:                       # 4. position-based reads
+        print(repr(f.read(5)), f.tell())
+        f.seek(0)
+        print(repr(f.readline()))
+```
+
+```text title="Output"
+'roses are red'
+['roses are red', 'violets are blue', 'sugar is sweet']
+['roses', 'violets', 'sugar']
+'roses' 5
+'roses are red\n'
+```
+
+Reading the whole file is simplest for small files. Iterating line by line keeps memory flat for
+large ones. `read(n)`, `tell()` and `seek()` work with positions, which you rarely need for text
+but often need for binary formats.
+
+### Binary files and bytes
+
+```python title="binary.py"
+import tempfile
+from pathlib import Path
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+with tempfile.TemporaryDirectory() as tmp:
+    fake_png = Path(tmp) / "image.png"
+    fake_png.write_bytes(PNG_SIGNATURE + bytes(range(16)))
+    not_png = Path(tmp) / "image2.png"
+    not_png.write_bytes(b"GIF89a....")
+
+    for path in [fake_png, not_png]:
+        with path.open("rb") as f:
+            header = f.read(8)
+        print(path.name, header == PNG_SIGNATURE, header[:4])
+
+    data = fake_png.read_bytes()
+    print(len(data), data[8:12], list(data[8:12]), data[8:12].hex())
+```
+
+```text title="Output"
+image.png True b'\x89PNG'
+image2.png False b'GIF8'
+24 b'\x00\x01\x02\x03' [0, 1, 2, 3] 00010203
+```
+
+- Open with `"rb"` / `"wb"` (or `read_bytes` / `write_bytes`) for anything that isn't text: images,
+  archives, protocols. No encoding is involved.
+- Many formats start with a fixed **magic number**; checking the first bytes is more reliable than
+  trusting the file extension.
+- Indexing `bytes` gives integers; `.hex()` shows them compactly.
+
+### JSON beyond the basics
+
+```python title="json_more.py"
+import json
+from dataclasses import asdict, dataclass
+from datetime import date
+
+
+@dataclass
+class Event:
+    title: str
+    day: date
+
+
+def encode(obj):
+    if isinstance(obj, date):
+        return obj.isoformat()                      # dates become "2026-10-27"
+    raise TypeError(f"can't serialise {type(obj).__name__}")
+
+
+events = [Event("launch", date(2026, 10, 27)), Event("review", date(2026, 11, 3))]
+text = json.dumps([asdict(e) for e in events], default=encode, sort_keys=True)
+print(text)
+
+
+def decode(d):
+    if "day" in d:
+        d["day"] = date.fromisoformat(d["day"])
+    return d
+
+
+back = json.loads(text, object_hook=decode)
+print(back[0]["day"].strftime("%A"), type(back[1]["day"]).__name__)
+print(json.dumps({"city": "Zürich"}), json.dumps({"city": "Zürich"}, ensure_ascii=False))
+
+try:
+    json.loads('{"a": 1,}')
+except json.JSONDecodeError as err:
+    print("JSONDecodeError:", err.msg, "at column", err.colno)
+```
+
+```text title="Output"
+[{"day": "2026-10-27", "title": "launch"}, {"day": "2026-11-03", "title": "review"}]
+Tuesday date
+{"city": "Z\u00fcrich"} {"city": "Zürich"}
+JSONDecodeError: Illegal trailing comma before end of object at column 8
+```
+
+- `default=` is called for objects JSON doesn't understand; `object_hook=` post-processes every
+  decoded object. Together they round-trip custom types like dates.
+- `ensure_ascii=False` keeps non-ASCII characters readable instead of `ü` escapes.
+- `JSONDecodeError` tells you where the input broke: trailing commas aren't valid JSON.
+
+### CSV edge cases
+
+```python title="csv_more.py"
+import csv
+import io
+
+tricky = [["name", "quote"], ["ada", 'said "hi", then left'], ["bob", "line one\nline two"]]
+buffer = io.StringIO()
+csv.writer(buffer, lineterminator="\n").writerows(tricky)   # quoting is done for you
+print(buffer.getvalue(), end="")
+
+rows = list(csv.reader(io.StringIO(buffer.getvalue())))
+print(rows == tricky, rows[1][1])
+
+european = "name;price\nkiwi;1,20\nfig;0,85\n"
+for row in csv.DictReader(io.StringIO(european), delimiter=";"):
+    print(row["name"], float(row["price"].replace(",", ".")))
+```
+
+```text title="Output"
+name,quote
+ada,"said ""hi"", then left"
+bob,"line one
+line two"
+True said "hi", then left
+kiwi 1.2
+fig 0.85
+```
+
+- Never build CSV lines with `",".join(...)`: a value containing a comma, quote or newline breaks
+  the file. The `csv` module quotes such fields and reads them back intact.
+- The writer ends rows with `\r\n` by default (the CSV standard). That's right for files opened
+  with `newline=""`; `lineterminator="\n"` keeps this in-memory demo tidy.
+- Files from spreadsheets in many countries use `;` as the separator and `,` as the decimal mark;
+  pass `delimiter=";"` and convert the numbers yourself.
+
+### INI and TOML configuration files
+
+```python title="config_files.py"
+import configparser
+import tomllib
+
+ini_text = """
+[server]
+host = localhost
+port = 8080
+debug = yes
+"""
+ini = configparser.ConfigParser()
+ini.read_string(ini_text)
+server = ini["server"]
+print(server["host"], server.getint("port"), server.getboolean("debug"))
+
+toml_text = """
+title = "notebook"
+[database]
+ports = [5432, 5433]
+enabled = true
+"""
+config = tomllib.loads(toml_text)              # Python 3.11+, read-only
+print(config["title"], config["database"]["ports"], config["database"]["enabled"])
+```
+
+```text title="Output"
+localhost 8080 True
+notebook [5432, 5433] True
+```
+
+INI values are always strings, so `configparser` offers `getint` / `getboolean` to convert them.
+TOML (used by `pyproject.toml`) has real types: lists, booleans and numbers come back as Python
+objects.
+
+## Putting it together
+
+### From CSV files to a JSON summary
+
+```python title="csv_to_json.py"
+import csv
+import json
+import tempfile
+from collections import defaultdict
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as tmp:
+    folder = Path(tmp)
+    (folder / "jan.csv").write_text("region,amount\neu,120\nus,80\neu,40\n", encoding="utf-8")
+    (folder / "feb.csv").write_text("region,amount\nus,200\nasia,55\neu,10\n", encoding="utf-8")
+    (folder / "broken.csv").write_text("region,amount\neu,lots\n", encoding="utf-8")
+
+    totals = defaultdict(int)
+    problems = []
+    for path in sorted(folder.glob("*.csv")):
+        with path.open(newline="", encoding="utf-8") as f:
+            for line_no, row in enumerate(csv.DictReader(f), start=2):
+                try:
+                    totals[row["region"]] += int(row["amount"])
+                except ValueError:
+                    problems.append(f"{path.name}:{line_no} bad amount {row['amount']!r}")
+
+    summary = {"totals": dict(sorted(totals.items())), "problems": problems}
+    out = folder / "summary.json"
+    out.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(out.read_text(encoding="utf-8"))
+```
+
+```text title="Output"
+{
+  "totals": {
+    "asia": 55,
+    "eu": 170,
+    "us": 280
+  },
+  "problems": [
+    "broken.csv:2 bad amount 'lots'"
+  ]
+}
+```
+
+The program reads every CSV in a folder, aggregates by region, and records bad rows with their
+file name and line number instead of stopping. Line numbers start at 2 because line 1 is the
+header.
+
+### Finding duplicate files by content
+
+```python title="duplicates.py"
+import hashlib
+import tempfile
+from collections import defaultdict
+from pathlib import Path
+
+
+def file_hash(path: Path, chunk_size: int = 64 * 1024) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(chunk_size), b""):   # big files in pieces
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    (root / "photos").mkdir()
+    (root / "backup").mkdir()
+    (root / "photos" / "cat.jpg").write_bytes(b"\xff\xd8 cat pixels")
+    (root / "backup" / "cat-copy.jpg").write_bytes(b"\xff\xd8 cat pixels")
+    (root / "photos" / "dog.jpg").write_bytes(b"\xff\xd8 dog pixels")
+    (root / "notes.txt").write_bytes(b"\xff\xd8 cat pixels")
+
+    by_size = defaultdict(list)
+    for path in root.rglob("*"):
+        if path.is_file():
+            by_size[path.stat().st_size].append(path)
+
+    by_hash = defaultdict(list)
+    for same_size in by_size.values():
+        if len(same_size) > 1:                     # only hash files that could match
+            for path in same_size:
+                by_hash[file_hash(path)].append(path)
+
+    for paths in by_hash.values():
+        if len(paths) > 1:
+            print(sorted(p.relative_to(root).as_posix() for p in paths))
+```
+
+```text title="Output"
+['backup/cat-copy.jpg', 'notes.txt', 'photos/cat.jpg']
+```
+
+- Grouping by **size** first is cheap and rules out most files; only same-size files are hashed.
+- Hashing in chunks with `iter(callable, b"")` handles files larger than memory.
+- Identical content means identical SHA-256, whatever the file names or extensions.
+
+## Common mistakes
+
+<Callout type="warning" title="Opening an existing file with 'w'">
+  Mode `"w"` empties the file the moment it's opened, before you write anything. Use `"a"` to add,
+  or `"x"` to refuse to overwrite.
+</Callout>
+
+- **No encoding.** A file written on one OS shows `UnicodeDecodeError` or garbled text on another.
+  Always say `encoding="utf-8"`.
+- **Building paths with string `+`.** `"data/" + name` breaks across OSes. Use `Path("data") / name`.
+- **`json.dumps` on unsupported types** (sets, dates, custom objects) raises
+  `TypeError: Object of type set is not JSON serializable`. Convert them first.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: how do you count lines in a 10 GB log without loading it into memory?"
+>
+  `with open(path, encoding="utf-8") as f: count = sum(1 for _ in f)`. The file object is a lazy
+  iterator, so only one line is in memory at a time.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what's the difference between opening with `'w'` and `'a'`?"
+>
+  `'w'` truncates the file to empty (or creates it) before writing; `'a'` keeps the content and
+  writes at the end. `'x'` refuses to overwrite an existing file.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: why does `json.dumps({'when': date.today()})` fail?">
+  JSON has no date type, so the encoder raises `TypeError`. Convert first (`d.isoformat()`) or pass
+  `default=` a function that does it.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: list every `.py` file under the current folder, recursively."
+>
+  `sorted(Path(".").rglob("*.py"))`. Use `glob("*.py")` for the current folder only.
+</Reveal>
+
+<KeyTakeaways>
+
+- Use `with` and `encoding="utf-8"` every time. `"w"` truncates, and `"a"` appends.
+- `pathlib.Path` builds and inspects paths with `/`, `.name`, `.suffix` and `.exists()`.
+- CSV rows come back as strings. JSON round-trips dicts, lists and primitives, and tuples become lists.
+- Iterate files line by line for large data.
+- Use `pathlib` for paths (`/`, `rglob`, `with_suffix`, `relative_to`); open binary data with `"rb"`.
+- JSON round-trips custom types with `default=` and `object_hook=`; let the `csv` module handle
+  quoting.
+- Read big files lazily (lines, or chunks with `iter(f.read, b"")`).
+
+</KeyTakeaways>
+
+{/* enriched */}

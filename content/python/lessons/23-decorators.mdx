@@ -1,0 +1,578 @@
+---
+title: Decorators
+summary: Functions are objects, so a function can take a function and return a new one. That's a decorator, the tool behind logging, timing, caching and access checks. Build them step by step, keep their metadata with functools.wraps, and add arguments.
+estimatedMinutes: 28
+difficulty: medium
+section: Core Language
+objectives:
+  - Explain `@decorator` as `func = decorator(func)`
+  - Write a decorator that works for any arguments, and preserve metadata with `functools.wraps`
+  - Write decorator factories that take arguments
+  - Predict the order of stacked decorators
+prerequisites:
+  - Scope and closures
+tags: [python, decorators, closures, functools]
+practice: [py-p-044]
+interview: [py-i-027, py-i-028]
+---
+
+## Intuition: gift wrapping
+
+A decorator wraps a present. The present (your function) is unchanged inside, but whoever receives
+it touches the wrapping first: it can add a card (logging), check the address (permissions), or note
+the time (timing) before and after the present is opened.
+
+## See it
+
+<DecoratorViz />
+
+## The precise rules
+
+```python title="desugar.py" norun
+@shout
+def greet(name): ...
+# is exactly
+def greet(name): ...
+greet = shout(greet)
+```
+
+- A decorator is any callable that takes a function and returns a replacement, usually a
+  **wrapper** closure that calls the original.
+- The wrapper should accept `*args, **kwargs` and return the original's result, so it works for any
+  function.
+- `@functools.wraps(func)` copies `__name__`, `__doc__` and other metadata onto the wrapper.
+  Without it, every decorated function claims to be called `wrapper`.
+- **Decorator with arguments** = a function that _returns_ a decorator: `@repeat(3)` calls
+  `repeat(3)` first.
+- Stacked decorators apply **bottom-up**: `@a @b def f` means `f = a(b(f))`.
+
+## Worked example
+
+```python title="decorators.py"
+import functools
+
+
+def shout(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs).upper()
+
+    return wrapper
+
+
+@shout
+def greet(name: str) -> str:
+    """Say hello."""
+    return f"hello {name}"
+
+
+print(greet("ada"), greet.__name__, greet.__doc__)
+
+
+def repeat(times: int):  # a decorator FACTORY
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            return [func(*args, **kwargs) for _ in range(times)]
+
+        return wrapper
+
+    return decorator
+
+
+@repeat(3)
+def roll() -> str:
+    return "x"
+
+
+print(roll())
+
+
+def count_calls(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        wrapper.calls += 1  # state stored on the wrapper object
+        return func(*args, **kwargs)
+
+    wrapper.calls = 0
+    return wrapper
+
+
+@count_calls
+def ping() -> str:
+    return "pong"
+
+
+ping()
+ping()
+print(ping.calls)
+
+
+def bold(func):
+    return lambda: "<b>" + func() + "</b>"
+
+
+def italic(func):
+    return lambda: "<i>" + func() + "</i>"
+
+
+@bold
+@italic
+def text() -> str:
+    return "hi"
+
+
+print(text())
+
+
+def no_wraps(func):
+    def wrapper():
+        return func()
+
+    return wrapper
+
+
+@no_wraps
+def original() -> None:
+    """Docs that will be lost."""
+
+
+print(original.__name__, original.__doc__)
+```
+
+```text title="Output"
+HELLO ADA greet Say hello.
+['x', 'x', 'x']
+2
+<b><i>hi</i></b>
+wrapper None
+```
+
+What to notice:
+
+- With `functools.wraps`, `greet` keeps its real name and docstring. Debuggers, logs and help tools
+  depend on this.
+- `@repeat(3)` has three layers: `repeat(3)` returns `decorator`, which returns `wrapper`.
+- `bold(italic(text))`: italic wraps first (innermost), and bold ends up outermost. So the output
+  reads `<b><i>…</i></b>`.
+- The standard library is full of decorators: `functools.lru_cache`, `functools.cache`,
+  `@property`, `@classmethod`, `@staticmethod`, `@dataclass` and `@contextmanager`.
+
+## Variations
+
+### A logging decorator that shows the call
+
+```python title="log_calls.py"
+import functools
+
+
+def log_calls(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        parts = [repr(a) for a in args] + [f"{k}={v!r}" for k, v in kwargs.items()]
+        signature = f"{func.__name__}({', '.join(parts)})"
+        try:
+            result = func(*args, **kwargs)
+        except Exception as err:
+            print(f"{signature} raised {type(err).__name__}: {err}")
+            raise
+        print(f"{signature} -> {result!r}")
+        return result
+
+    return wrapper
+
+
+@log_calls
+def divide(a: float, b: float, *, digits: int = 2) -> float:
+    return round(a / b, digits)
+
+
+divide(10, 3)
+divide(1, 8, digits=3)
+try:
+    divide(1, 0)
+except ZeroDivisionError:
+    pass
+print(divide.__wrapped__(9, 3))       # wraps() keeps the original reachable
+```
+
+```text title="Output"
+divide(10, 3) -> 3.33
+divide(1, 8, digits=3) -> 0.125
+divide(1, 0) raised ZeroDivisionError: division by zero
+3.0
+```
+
+- The wrapper sees every argument, so it can log, check or transform them before calling the real
+  function, and it can observe the result **or** the exception.
+- Re-raising with a bare `raise` keeps the decorator transparent: callers still get the original
+  error.
+- `functools.wraps` also stores the undecorated function as `__wrapped__`, useful in tests.
+
+### Registration decorators: no wrapper needed
+
+```python title="registry.py"
+COMMANDS = {}
+
+
+def command(name: str):
+    def register(func):
+        COMMANDS[name] = func
+        return func                   # return the original unchanged
+    return register
+
+
+@command("greet")
+def greet(who="world"):
+    return f"hello {who}"
+
+
+@command("add")
+def add(a, b):
+    return int(a) + int(b)
+
+
+def run(line: str):
+    name, *args = line.split()
+    func = COMMANDS.get(name)
+    return func(*args) if func else f"unknown command {name!r}"
+
+
+print(sorted(COMMANDS))
+for line in ["greet", "greet ada", "add 2 40", "fly"]:
+    print(f"{line!r:12} -> {run(line)}")
+```
+
+```text title="Output"
+['add', 'greet']
+'greet'      -> hello world
+'greet ada'  -> hello ada
+'add 2 40'   -> 42
+'fly'        -> unknown command 'fly'
+```
+
+A decorator doesn't have to wrap anything. Returning the function unchanged after recording it
+somewhere is how web frameworks register routes (`@app.get("/users")`), how pytest finds fixtures
+and how plug-in systems discover handlers.
+
+### A decorator that works with and without arguments
+
+```python title="optional_args.py"
+import functools
+
+
+def retry(func=None, *, times: int = 3):
+    if func is None:                          # used as @retry(times=5)
+        return lambda f: retry(f, times=times)
+
+    @functools.wraps(func)                    # used as plain @retry
+    def wrapper(*args, **kwargs):
+        for attempt in range(1, times + 1):
+            try:
+                return func(*args, **kwargs)
+            except ConnectionError as err:
+                print(f"  {func.__name__} attempt {attempt} failed: {err}")
+        raise ConnectionError(f"{func.__name__} failed {times} times")
+
+    return wrapper
+
+
+calls = {"n": 0}
+
+
+@retry
+def flaky():
+    calls["n"] += 1
+    if calls["n"] < 3:
+        raise ConnectionError("timeout")
+    return "ok"
+
+
+@retry(times=2)
+def always_down():
+    raise ConnectionError("refused")
+
+
+print(flaky())
+try:
+    always_down()
+except ConnectionError as err:
+    print(err)
+```
+
+```text title="Output"
+  flaky attempt 1 failed: timeout
+  flaky attempt 2 failed: timeout
+ok
+  always_down attempt 1 failed: refused
+  always_down attempt 2 failed: refused
+always_down failed 2 times
+```
+
+If the decorator receives a function, it was used bare (`@retry`); if it receives only keyword
+arguments, it was called first (`@retry(times=2)`) and must return the real decorator. The
+keyword-only `*` makes the two forms impossible to confuse.
+
+### Decorating methods and classes
+
+```python title="methods_classes.py"
+import functools
+
+
+def require_positive(func):
+    @functools.wraps(func)
+    def wrapper(self, amount, *args, **kwargs):   # self arrives as the first argument
+        if amount <= 0:
+            raise ValueError(f"{func.__name__}: amount must be positive")
+        return func(self, amount, *args, **kwargs)
+    return wrapper
+
+
+def with_repr(cls):                                # a CLASS decorator
+    def __repr__(self):
+        fields = ", ".join(f"{k}={v!r}" for k, v in vars(self).items())
+        return f"{cls.__name__}({fields})"
+    cls.__repr__ = __repr__
+    return cls
+
+
+@with_repr
+class Wallet:
+    def __init__(self, owner):
+        self.owner = owner
+        self.balance = 0
+
+    @require_positive
+    def deposit(self, amount):
+        self.balance += amount
+        return self.balance
+
+
+w = Wallet("ada")
+w.deposit(50)
+print(w)
+try:
+    w.deposit(-5)
+except ValueError as err:
+    print("ValueError:", err)
+```
+
+```text title="Output"
+Wallet(owner='ada', balance=50)
+ValueError: deposit: amount must be positive
+```
+
+- Method decorators work unchanged because `self` is just the first positional argument.
+- A class decorator receives the class and can add or replace attributes. `@dataclass` is a class
+  decorator that writes `__init__`, `__repr__` and `__eq__` for you (lesson 25).
+
+### Standard-library decorators worth knowing
+
+```python title="stdlib_decorators.py"
+import functools
+
+
+@functools.cache                        # unbounded memoisation (same as lru_cache(maxsize=None))
+def ways_to_climb(steps: int) -> int:
+    if steps <= 1:
+        return 1
+    return ways_to_climb(steps - 1) + ways_to_climb(steps - 2)
+
+
+print(ways_to_climb(50), ways_to_climb.cache_info().misses)
+
+
+@functools.singledispatch               # choose an implementation by argument type
+def describe(value) -> str:
+    return f"something: {value!r}"
+
+
+@describe.register
+def _(value: int) -> str:
+    return f"int with {len(str(abs(value)))} digit(s)"
+
+
+@describe.register
+def _(value: list) -> str:
+    return f"list of {len(value)}: " + ", ".join(describe(v) for v in value)
+
+
+print(describe(12345))
+print(describe([7, "x"]))
+print(describe(3.5))
+```
+
+```text title="Output"
+20365011074 51
+int with 5 digit(s)
+list of 2: int with 1 digit(s), something: 'x'
+something: 3.5
+```
+
+- `@functools.cache` turns an exponential recursive function into a linear one: 51 distinct calls
+  instead of tens of billions.
+- `@singledispatch` picks a function based on the **type** of the first argument, a tidy
+  alternative to `if isinstance(...)` chains.
+
+## Putting it together
+
+### A tiny web router with access control
+
+```python title="router.py"
+import functools
+
+ROUTES = {}
+
+
+def route(path: str):
+    def register(func):
+        ROUTES[path] = func
+        return func
+    return register
+
+
+def require_role(role: str):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(user, *args, **kwargs):
+            if role not in user["roles"]:
+                return 403, f"{user['name']} needs role {role!r}"
+            return func(user, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
+@route("/profile")
+def profile(user):
+    return 200, f"profile of {user['name']}"
+
+
+@route("/admin")
+@require_role("admin")                       # applied first, so the router stores the wrapper
+def admin_panel(user):
+    return 200, "admin panel"
+
+
+def handle(path, user):
+    view = ROUTES.get(path)
+    return view(user) if view else (404, "not found")
+
+
+ada = {"name": "ada", "roles": {"admin"}}
+bob = {"name": "bob", "roles": set()}
+for path, user in [("/profile", bob), ("/admin", ada), ("/admin", bob), ("/nope", ada)]:
+    print(path, user["name"], handle(path, user))
+```
+
+```text title="Output"
+/profile bob (200, 'profile of bob')
+/admin ada (200, 'admin panel')
+/admin bob (403, "bob needs role 'admin'")
+/nope ada (404, 'not found')
+```
+
+Decorators apply bottom-up, so `@require_role` wraps `admin_panel` first and `@route` registers
+the **protected** wrapper. Swapping their order would register the unprotected function: a real
+security bug that order-sensitive decorators can cause.
+
+### Checking argument types from annotations
+
+```python title="typecheck.py"
+import functools
+import inspect
+
+
+def check_types(func):
+    sig = inspect.signature(func)
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        bound = sig.bind(*args, **kwargs)
+        bound.apply_defaults()
+        for name, value in bound.arguments.items():
+            expected = sig.parameters[name].annotation
+            if expected is not inspect.Parameter.empty and not isinstance(value, expected):
+                raise TypeError(f"{name}={value!r} is not {expected.__name__}")
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+@check_types
+def repeat_text(text: str, times: int = 2) -> str:
+    return text * times
+
+
+print(repeat_text("ab"), repeat_text("x", times=3))
+for bad in [(5,), ("ab", "3")]:
+    try:
+        repeat_text(*bad)
+    except TypeError as err:
+        print("TypeError:", err)
+```
+
+```text title="Output"
+abab xxx
+TypeError: text=5 is not str
+TypeError: times='3' is not int
+```
+
+`inspect.signature(...).bind` maps the actual arguments to parameter names, exactly as Python
+would, so the decorator can compare each value with its annotation. Libraries like `pydantic` and
+FastAPI take this idea much further, validating and converting request data from type hints.
+
+## Common mistakes
+
+<Callout type="warning" title="Forgetting to return the result">
+  A wrapper that calls `func(*args, **kwargs)` but doesn't `return` it makes every decorated
+  function return `None`.
+</Callout>
+
+- **`@repeat` instead of `@repeat(3)`.** That passes the function as `times`, and the program fails
+  confusingly later. Factories must be called.
+- **Decorating at the wrong time.** The decorator body runs **once** at definition, and only the
+  wrapper runs on each call.
+- **Skipping `functools.wraps`.** You lose the name, the docstring and introspection.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: write the skeleton of a decorator that prints how long a function took."
+>
+  `def timed(func):` → `@functools.wraps(func) def wrapper(*args, **kwargs): start =
+  time.perf_counter(); result = func(*args, **kwargs); print(func.__name__, time.perf_counter() -
+  start); return result` → `return wrapper`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: when does the code in a decorator's outer body run?">
+  Once, when the decorated `def` is executed (usually at import time). Only the inner `wrapper` runs
+  on every call.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: what does `@a` / `@b` / `def f` become?">
+  `f = a(b(f))`: `b` wraps the function first, then `a` wraps that result. At call time, `a`'s
+  wrapper runs first (outermost).
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why might a registration decorator return the function unchanged?"
+>
+  Its job is to record the function (a route, a command, a plug-in), not to change how it runs.
+  Returning the original keeps the function directly usable and testable.
+</Reveal>
+
+<KeyTakeaways>
+
+- `@decorator` means `func = decorator(func)`, and it runs once, at definition time.
+- Wrappers take `*args, **kwargs`, call the original, and return its result.
+- Always use `functools.wraps`. Factories (`@repeat(3)`) add an extra outer layer.
+- Stacked decorators apply bottom-up, so calls go outside-in.
+- Wrappers can log, validate, retry or cache; registration decorators just record the function.
+- `def deco(func=None, *, option=...)` supports both `@deco` and `@deco(option=...)`.
+- Decorator order matters: the bottom one wraps first, so put access checks below registration.
+
+</KeyTakeaways>
+
+{/* enriched */}

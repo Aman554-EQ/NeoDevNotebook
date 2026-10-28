@@ -1,0 +1,434 @@
+---
+title: Scope and closures
+summary: How Python decides which variable a name refers to (the LEGB rule), why assigning inside a function creates a local, how global and nonlocal change that, and how closures remember variables.
+estimatedMinutes: 25
+difficulty: simple
+section: Basics
+objectives:
+  - Apply the LEGB rule to predict which variable a name refers to
+  - Explain and fix UnboundLocalError with `nonlocal` or `global`
+  - Build closures that remember state between calls
+  - Avoid the late-binding trap with lambdas created in a loop
+prerequisites:
+  - Functions
+tags: [python, scope, closures, lambda]
+practice: [py-p-030, py-p-034]
+interview: [py-i-012, py-i-013, py-i-029]
+---
+
+## Intuition: nested rooms
+
+Picture rooms inside rooms. Your function body is the innermost room (**Local**). Around it may be
+another function's room (**Enclosing**), around that the module (**Global**), and around everything
+Python's own room of built-ins (**Built-in**).
+
+To **read** a name, you look around your own room first, then each bigger room outward. To
+**create or change** a name with `=`, you only ever write in your own room, unless you explicitly
+say otherwise.
+
+## See it
+
+<ScopeLegbViz />
+
+## The precise rules
+
+1. **Lookup order (LEGB):** Local → Enclosing functions (innermost first) → Global → Built-in.
+   The first match wins. No match raises `NameError`.
+2. **Assignment makes a name local to the whole function.** Python decides this at **compile
+   time**. If a function assigns to `x` anywhere, every `x` in that function is local, even on
+   lines before the assignment. Reading it before it's assigned raises `UnboundLocalError`.
+3. `nonlocal x` makes `x` refer to the nearest enclosing function's variable. `global x` makes it
+   refer to the module-level variable.
+4. A **closure** is a function that remembers variables from the enclosing scope after that scope
+   has finished. Python looks up those variables **when the inner function runs**, not when it's
+   created (this is called late binding).
+
+## Worked example
+
+```python title="scope.py"
+x = "global"
+
+
+def outer() -> str:
+    x = "enclosing"
+
+    def inner() -> str:
+        return x  # read only: found in Enclosing
+
+    return inner()
+
+
+print(outer(), x)
+
+count = 0
+
+
+def bump() -> None:
+    count += 1  # assignment makes count local, so the read before it fails
+
+
+try:
+    bump()
+except UnboundLocalError as err:
+    print("UnboundLocalError:", err)
+
+
+def make_counter():
+    n = 0
+
+    def tick() -> int:
+        nonlocal n  # rebind the enclosing n instead of creating a local
+        n += 1
+        return n
+
+    return tick
+
+
+counter = make_counter()
+print(counter(), counter(), counter())
+print(counter.__closure__[0].cell_contents)  # the remembered n
+
+late = [lambda: i for i in range(3)]
+print([f() for f in late])  # all see the final i
+
+fixed = [lambda i=i: i for i in range(3)]
+print([f() for f in fixed])  # a default captures the value now
+```
+
+```text title="Output"
+enclosing global
+UnboundLocalError: cannot access local variable 'count' where it is not associated with a value
+1 2 3
+3
+[2, 2, 2]
+[0, 1, 2]
+```
+
+What to notice:
+
+- `inner` only **reads** `x`, so LEGB finds the enclosing one. The global `x` is untouched.
+- `count += 1` means `count = count + 1`. The assignment makes `count` local for the whole of
+  `bump`, so reading it on the right-hand side fails. Fix it with `global count`, or better, return
+  a new value instead of modifying a global.
+- Each `make_counter()` call creates a fresh `n`, and the returned `tick` keeps it alive. This is
+  private state without a class.
+- All three lambdas look up `i` when they're **called**, after the loop has finished with `i == 2`.
+  The default argument `i=i` is evaluated **when the lambda is created**, which freezes each value.
+
+## Variations
+
+### Shadowing a built-in
+
+The **B** in LEGB means built-ins are found last, so any name you assign hides them.
+
+```python title="shadow_builtin.py"
+import builtins
+
+words = ["b", "a"]
+list = sorted(words)          # oops: the name list now means this list
+try:
+    list("abc")
+except TypeError as err:
+    print("TypeError:", err)
+
+del list                      # remove the global; lookup falls through to the built-in again
+print(list("abc"))
+print(builtins.max is max, "sum" in dir(builtins))
+```
+
+```text title="Output"
+TypeError: 'list' object is not callable
+['a', 'b', 'c']
+True True
+```
+
+Names like `list`, `dict`, `str`, `id`, `input`, `sum` and `type` are tempting variable names. A
+linter warns about them; prefer `items`, `mapping`, `text`, `user_id`.
+
+### Which constructs create a scope?
+
+```python title="what_scopes.py"
+for i in range(3):
+    pass
+print("loop variable after the loop:", i)          # loops don't create a scope
+
+if True:
+    inside_if = "visible"
+print(inside_if)                                     # neither do if blocks
+
+squares = [n * n for n in range(4)]
+try:
+    print(n)
+except NameError as err:
+    print("NameError:", err)                         # comprehensions DO have their own scope
+
+total = 10
+doubled = [total * k for k in range(3)]              # ...but they can read outer names
+print(doubled)
+```
+
+```text title="Output"
+loop variable after the loop: 2
+visible
+NameError: name 'n' is not defined
+[0, 10, 20]
+```
+
+Only **functions** (and classes, lambdas and comprehensions) create new scopes. Blocks like `for`,
+`while`, `if` and `with` don't, which surprises people coming from C, Java or JavaScript's `let`.
+
+### Function factories
+
+```python title="factories.py"
+def make_multiplier(factor):
+    def multiply(x):
+        return x * factor          # factor comes from the enclosing call
+    return multiply
+
+
+double, triple = make_multiplier(2), make_multiplier(3)
+print(double(5), triple(5), [double(n) for n in range(4)])
+print(double.__code__.co_freevars, double.__closure__[0].cell_contents)
+
+
+def make_formatter(prefix: str, width: int):
+    def fmt(value) -> str:
+        return f"{prefix}{value:>{width}}"
+    return fmt
+
+
+money = make_formatter("$", 8)
+print(money(42), money(1234.5), sep="\n")
+```
+
+```text title="Output"
+10 15 [0, 2, 4, 6]
+('factor',) 2
+$      42
+$  1234.5
+```
+
+- Each call to `make_multiplier` creates a new scope, so `double` and `triple` keep **different**
+  `factor` values.
+- `__code__.co_freevars` lists the names a function takes from enclosing scopes; `__closure__`
+  holds their current values.
+
+### State in a closure: `nonlocal` or a mutable container
+
+```python title="closure_state.py"
+def make_averager():
+    total = 0.0
+    count = 0
+
+    def add(value: float) -> float:
+        nonlocal total, count            # we REBIND these names
+        total += value
+        count += 1
+        return total / count
+
+    return add
+
+
+avg = make_averager()
+print([avg(v) for v in [10, 20, 60]])
+
+
+def make_history():
+    items = []                           # we only MUTATE the list, never rebind it
+
+    def remember(x):
+        items.append(x)                  # no nonlocal needed
+        return list(items)
+
+    return remember
+
+
+remember = make_history()
+remember("a")
+print(remember("b"))
+```
+
+```text title="Output"
+[10.0, 15.0, 30.0]
+['a', 'b']
+```
+
+`nonlocal` is required only when you **assign** to the enclosing name (`total += value`).
+Calling a method on an enclosing object (`items.append`) doesn't assign to `items`, so it works
+without it.
+
+### A cache in a closure
+
+```python title="memo.py"
+def memoize(func):
+    cache = {}
+
+    def wrapper(n):
+        if n not in cache:
+            cache[n] = func(n)
+        return cache[n]
+
+    wrapper.cache = cache        # expose it so we can look inside
+    return wrapper
+
+
+calls = 0
+
+
+@memoize
+def fib(n: int) -> int:
+    global calls
+    calls += 1
+    return n if n < 2 else fib(n - 1) + fib(n - 2)
+
+
+print(fib(30), "computed with", calls, "calls")
+print(len(fib.cache), "values cached")
+```
+
+```text title="Output"
+832040 computed with 31 calls
+31 values cached
+```
+
+- The `cache` dict lives in `memoize`'s scope and survives between calls to `wrapper`.
+- Without the cache, `fib(30)` would make about 2.7 million calls. With it, each `n` is computed
+  once: 31 calls. This is `functools.cache` in miniature (lesson 09 and 23 use the real one).
+
+### Fixing late binding with `functools.partial`
+
+```python title="partial_fix.py"
+from functools import partial
+
+
+def on_click(name: str) -> str:
+    return f"{name} clicked"
+
+
+buttons = ["save", "open", "quit"]
+late = [lambda: on_click(b) for b in buttons]
+print([f() for f in late])                  # every handler sees the last b
+
+handlers = [partial(on_click, b) for b in buttons]
+print([h() for h in handlers])              # partial stores the argument NOW
+
+power_of_two = partial(pow, 2)
+print(power_of_two(10), partial(int, base=2)("1011"))
+```
+
+```text title="Output"
+['quit clicked', 'quit clicked', 'quit clicked']
+['save clicked', 'open clicked', 'quit clicked']
+1024 11
+```
+
+`partial(func, *args, **kwargs)` makes a new callable with some arguments filled in. Because it
+stores the argument values immediately, it doesn't suffer from late binding, and it reads better
+than the `lambda b=b:` default-argument trick.
+
+## Putting it together: a tiny event bus
+
+```python title="event_bus.py"
+def make_event_bus():
+    subscribers: dict[str, list] = {}
+
+    def subscribe(event: str, handler):
+        subscribers.setdefault(event, []).append(handler)
+
+        def unsubscribe():
+            subscribers[event].remove(handler)   # closes over event AND handler
+
+        return unsubscribe
+
+    def publish(event: str, **data):
+        results = [handler(**data) for handler in subscribers.get(event, [])]
+        print(f"{event}: {len(results)} handler(s) -> {results}")
+
+    return subscribe, publish
+
+
+subscribe, publish = make_event_bus()
+
+
+def make_logger(tag: str):
+    return lambda **data: f"[{tag}] {data}"
+
+
+stop_email = subscribe("signup", make_logger("email"))
+subscribe("signup", make_logger("stats"))
+publish("signup", user="ada")
+stop_email()
+publish("signup", user="alan")
+publish("logout")
+```
+
+```text title="Output"
+signup: 2 handler(s) -> ["[email] {'user': 'ada'}", "[stats] {'user': 'ada'}"]
+signup: 1 handler(s) -> ["[stats] {'user': 'alan'}"]
+logout: 0 handler(s) -> []
+```
+
+- `subscribers` is private: nothing outside `make_event_bus` can reach it except through
+  `subscribe` and `publish`.
+- `subscribe` returns an `unsubscribe` function that remembers which event and handler to remove,
+  a pattern used by many UI and event libraries.
+- `make_logger(tag)` builds a handler that remembers its own tag.
+
+## Common mistakes
+
+<Callout type="warning" title="Reaching for global">
+  `global` works, but it couples functions to module state and makes testing hard. Pass values in as
+  parameters and `return` results. Use a closure or a class when you need private state.
+</Callout>
+
+- **Shadowing by accident.** A local named like a global hides it in that function, and the
+  global silently keeps its old value.
+- **Assuming loops create a scope.** They don't. A loop variable still exists after the loop, with
+  its last value.
+- **Long lambdas.** A lambda is limited to a single expression. If you need statements or a name
+  for debugging, write a `def`.
+
+## Practice
+
+<Reveal
+  kind="hint"
+  label="Quick check: why does this print 10? total = 10; def f(): print(total); f()"
+>
+  `f` only **reads** `total` and never assigns it, so `total` isn't local. LEGB finds the global
+  `total = 10`. Add `total = 5` anywhere inside `f` and the same `print` raises `UnboundLocalError`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what does `x = 1; def f(): print(x); x = 2` print when you call f()?"
+>
+  Nothing: it raises `UnboundLocalError`. The assignment `x = 2` makes `x` local to the whole of
+  `f`, so the earlier `print(x)` reads a local that hasn't been assigned yet.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: do you need `nonlocal` to do `seen.add(x)` on an enclosing set?"
+>
+  No. `seen.add(x)` mutates the set but never rebinds the name `seen`. You need `nonlocal` only for
+  assignments such as `seen = set()` or `count += 1`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: after `for i in range(5): pass`, what is `i`?">
+  `4`. Loops don't create a scope, so the loop variable stays defined with the last value it took.
+</Reveal>
+
+<KeyTakeaways>
+
+- Reading a name searches **Local → Enclosing → Global → Built-in**.
+- Assigning a name anywhere in a function makes it local everywhere in that function.
+- `nonlocal` rebinds an enclosing variable, and `global` rebinds a module variable. Use both sparingly.
+- Closures remember variables and look them up **at call time**. Freeze values with a default argument.
+- Only functions, classes, lambdas and comprehensions create scopes; `for`, `if` and `with` don't.
+- Factories return closures that each keep their own enclosing variables; use `nonlocal` only to
+  rebind them.
+- `functools.partial` fixes arguments now and avoids late-binding surprises.
+
+</KeyTakeaways>
+
+{/* enriched */}

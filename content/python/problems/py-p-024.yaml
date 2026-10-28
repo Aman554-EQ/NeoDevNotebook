@@ -1,0 +1,69 @@
+id: py-p-024
+title: Parse a key=value config string
+difficulty: simple
+tags:
+  - strings
+  - dicts
+  - conversion
+statement: |
+  Write `parse_config(text)` for strings like `"host=db.local; port=5432; debug=true"`.
+  Return a dict where `true`/`false` become bools, whole numbers become ints, and everything
+  else stays a stripped string. Ignore empty segments. Raise `ValueError` for a segment
+  without `=`.
+constraints:
+  - Keys and values never contain `;`.
+examples:
+  - input: parse_config("host=db.local; port=5432; debug=true;")
+    output: "{'host': 'db.local', 'port': 5432, 'debug': True}"
+hints:
+  - "`segment.partition('=')` splits once and tells you if `=` was found."
+  - Convert in a small helper function.
+solution:
+  language: python
+  code: |
+    def convert(raw: str) -> bool | int | str:
+        if raw.lower() in ("true", "false"):
+            return raw.lower() == "true"
+        try:
+            return int(raw)
+        except ValueError:
+            return raw
+
+
+    def parse_config(text: str) -> dict:
+        config = {}
+        for segment in text.split(";"):
+            if not segment.strip():
+                continue  # tolerate trailing or double semicolons
+            key, sep, value = segment.partition("=")
+            if not sep:
+                raise ValueError(f"missing '=' in {segment.strip()!r}")
+            config[key.strip()] = convert(value.strip())
+        return config
+
+
+    print(parse_config("host=db.local; port=5432; debug=true;"))
+  explanation: |
+    Splitting on `;` gives the segments, and blank ones are skipped. `partition("=")` splits
+    only at the **first** `=`, so a value like `token=a=b` stays intact. Its middle result
+    is `""` when there's no `=`, which we turn into a clear error.
+
+    `convert` keeps the type rules in one place: booleans first, then a guarded `int()`,
+    otherwise the string. Checking for booleans before ints matters if you later accept
+    `1`/`0` as booleans.
+complexity:
+  time: O(n)
+  space: O(n)
+variations:
+  - Support quoted values that may contain ';' (consider the `shlex` module).
+verify: |
+  assert parse_config("host=db.local; port=5432; debug=true;") == {"host": "db.local", "port": 5432, "debug": True}
+  assert parse_config("") == {}
+  assert parse_config("token=a=b") == {"token": "a=b"}
+  assert parse_config("x = -3 ; flag = FALSE") == {"x": -3, "flag": False}
+  try:
+      parse_config("oops")
+  except ValueError as err:
+      assert "oops" in str(err)
+  else:
+      raise AssertionError

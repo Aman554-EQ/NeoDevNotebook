@@ -1,0 +1,598 @@
+---
+title: URLs & views
+summary: How Django maps a URL to code. path() and converters, include() and namespaces, reverse() so you never hard-code a URL, the request and response objects, function-based views with decorators, and class-based and generic views.
+estimatedMinutes: 25
+difficulty: easy
+section: Django Core
+objectives:
+  - Write URL patterns with converters, include() and app namespaces
+  - Build URLs with reverse() and {% url %} instead of hard-coding them
+  - Read everything a view needs from HttpRequest and return the right HttpResponse
+  - Restrict views by method and turn missing objects into 404s
+  - Choose between function-based views, class-based views and generic views
+prerequisites:
+  - Django in one picture
+tags: [django, urls, views, routing, cbv]
+practice: [dj-p-002, dj-p-006, dj-p-008]
+interview: [dj-i-003]
+---
+
+## Intuition: a switchboard and the people who answer
+
+The **URLconf** is a switchboard: it reads the address on each incoming call (the path) and connects
+it to the right person. A **view** is the person who answers: it reads the request, does the work,
+and gives back exactly one response. Keep the switchboard declarative (a list of patterns) and keep
+each view focused on one job.
+
+## See it
+
+<UrlResolverViz />
+
+## The precise rules
+
+**Patterns:**
+
+```python norun
+from django.urls import include, path, re_path
+
+urlpatterns = [
+    path("", views.home, name="home"),
+    path("books/<int:pk>/", views.book_detail, name="book-detail"),
+    path("books/<slug:slug>/reviews/", views.reviews, name="book-reviews"),
+    re_path(r"^archive/(?P<year>[0-9]{4})/$", views.archive, name="archive"),
+    path("shop/", include("shop.urls")),  # a whole app's URLs under a prefix
+]
+```
+
+- Patterns are tried **top to bottom**; the first match wins. Paths have **no leading slash** and
+  usually end with `/` (with `APPEND_SLASH`, `/books/7` redirects to `/books/7/`).
+- Built-in converters: `str` (default, no `/`), `int`, `slug` (letters, digits, `-`, `_`), `uuid`,
+  `path` (may contain `/`). Captured values are passed to the view as **keyword arguments**,
+  already converted.
+- `include()` strips the matched prefix and continues in another URLconf. With `app_name = "shop"`
+  in that file, names become **namespaced**: `"shop:product-detail"`.
+
+**Names and reverse:** give every pattern a `name`, then build URLs with `reverse("shop:product-detail",
+args=[42])` in Python, `{% url "shop:product-detail" 42 %}` in templates, and `redirect("home")` in
+views. Rename a path and every link still works.
+
+**The request:** `request.method`, `request.path`, `request.GET` (query string), `request.POST`
+(form data), `request.body` (raw bytes, e.g. JSON), `request.headers` (case-insensitive),
+`request.COOKIES`, `request.user` (after authentication middleware), `request.session`.
+`GET` and `POST` are **QueryDicts**: a key may appear several times (`getlist()`).
+
+**The response:** `HttpResponse(content, status=..., content_type=...)`, `JsonResponse(dict)`,
+`HttpResponseRedirect`/`redirect()`, `HttpResponseNotFound`, `FileResponse`,
+`StreamingHttpResponse`. Set headers like a dict: `response["Cache-Control"] = "no-store"`.
+
+**Function-based views (FBVs)** are plain functions. Decorators add rules:
+`@require_http_methods(["GET", "POST"])`, `@require_POST`, `@login_required` (lesson 15).
+`get_object_or_404(Model, pk=pk)` turns a missing row into a 404.
+
+**Class-based views (CBVs)** put each HTTP method in its own method (`get`, `post`). Django's
+**generic views** (`ListView`, `DetailView`, `CreateView`, `UpdateView`, `DeleteView`,
+`TemplateView`, `RedirectView`) implement the common patterns; you configure them with attributes
+and override hooks such as `get_queryset()` and `get_context_data()`. Wire a CBV with
+`MyView.as_view()`.
+
+## Worked example
+
+A project URLconf that includes an app's URLs under a prefix, with a namespace, a converter, and
+`reverse()` working in both directions.
+
+```python title="routing.py"
+from playground import setup
+
+setup()
+
+from django.http import HttpResponse, JsonResponse
+from django.test import Client
+from django.urls import include, path, resolve, reverse
+
+PRODUCTS = {42: "Dune", 7: "Chess set"}
+
+
+def product_list(request):
+    return JsonResponse({"products": PRODUCTS, "page": request.GET.get("page", "1")})
+
+
+def product_detail(request, pk):
+    if pk not in PRODUCTS:
+        return JsonResponse({"error": "not found"}, status=404)
+    return JsonResponse({"id": pk, "name": PRODUCTS[pk], "self": reverse("shop:product-detail", args=[pk])})
+
+
+shop_patterns = [  # in a project: shop/urls.py with app_name = "shop"
+    path("", product_list, name="product-list"),
+    path("products/<int:pk>/", product_detail, name="product-detail"),
+]
+urlpatterns = [
+    path("", lambda request: HttpResponse("home"), name="home"),
+    path("shop/", include((shop_patterns, "shop"))),
+]
+
+client = Client()
+print(client.get("/shop/products/42/").json())
+print(client.get("/shop/?page=2").json()["page"])
+print(reverse("shop:product-list"), reverse("shop:product-detail", kwargs={"pk": 7}))
+match = resolve("/shop/products/7/")
+print(match.view_name, match.kwargs, match.func.__name__)
+print(client.get("/shop/products/seven/").status_code)
+```
+
+```text title="Output"
+{'id': 42, 'name': 'Dune', 'self': '/shop/products/42/'}
+2
+/shop/ /shop/products/7/
+shop:product-detail {'pk': 7} product_detail
+404
+```
+
+- `include((patterns, "shop"))` mounts the app's patterns under `shop/` and namespaces their names.
+  In a project you'd write `include("shop.urls")` and put `app_name = "shop"` in that file.
+- `reverse()` builds a URL from a name; `resolve()` goes the other way and tells you which view and
+  arguments a path maps to (handy when debugging routing).
+- `/shop/products/seven/` matches no pattern because the `int` converter refuses `seven`: Django
+  answers `404` before any view runs.
+
+## Variations
+
+### Everything a view can read from the request
+
+```python
+import json
+
+from playground import setup
+
+setup()
+
+from django.http import JsonResponse
+from django.test import Client
+from django.urls import path
+from django.views.decorators.csrf import csrf_exempt
+
+
+@csrf_exempt  # only for this demo: API clients don't send CSRF tokens (lesson 13 explains)
+def inspect(request):
+    return JsonResponse({
+        "method": request.method,
+        "path": request.path,
+        "tags": request.GET.getlist("tag"),
+        "page": request.GET.get("page", "1"),
+        "agent": request.headers.get("user-agent"),
+        "json_body": json.loads(request.body) if request.body else None,
+        "cookie": request.COOKIES.get("theme"),
+    })
+
+
+urlpatterns = [path("inspect/", inspect)]
+client = Client()
+client.cookies["theme"] = "dark"
+r = client.post("/inspect/?tag=python&tag=django", data={"x": 1}, content_type="application/json",
+                headers={"User-Agent": "my-app/1.0"})
+for key, value in r.json().items():
+    print(f"{key:<9} {value}")
+```
+
+```text title="Output"
+method    POST
+path      /inspect/
+tags      ['python', 'django']
+page      1
+agent     my-app/1.0
+json_body {'x': 1}
+cookie    dark
+```
+
+`request.GET.getlist("tag")` returns every value of a repeated parameter; `get()` would return only
+the last one. A JSON body arrives as bytes in `request.body` (`request.POST` is only for form
+encodings).
+
+### Shaping the response
+
+```python
+from playground import setup
+
+setup()
+
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import redirect
+from django.test import Client
+from django.urls import path
+
+
+def created(request):
+    response = JsonResponse({"id": 41}, status=201)
+    response["Location"] = "/orders/41/"
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+def csv_export(request):
+    response = HttpResponse("id,total\n41,25.00\n", content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="orders.csv"'
+    return response
+
+
+def remember_theme(request):
+    response = redirect("export")  # 302 to a named URL
+    response.set_cookie("theme", "dark", max_age=3600, httponly=True, samesite="Lax")
+    return response
+
+
+urlpatterns = [
+    path("orders/new/", created),
+    path("orders/export/", csv_export, name="export"),
+    path("theme/", remember_theme),
+]
+client = Client()
+r = client.get("/orders/new/")
+print(r.status_code, r["Location"], r["Cache-Control"])
+r = client.get("/orders/export/")
+print(r["Content-Type"], r["Content-Disposition"])
+r = client.get("/theme/")
+print(r.status_code, r["Location"], r.cookies["theme"].value, r.cookies["theme"]["httponly"])
+```
+
+```text title="Output"
+201 /orders/41/ no-store
+text/csv attachment; filename="orders.csv"
+302 /orders/export/ dark True
+```
+
+A response is a dict-like object for headers plus a body. `redirect()` accepts a URL name, a model
+(using its `get_absolute_url()`), or a plain URL.
+
+### Restricting methods and handling missing objects
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404
+from django.test import Client
+from django.urls import path
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+
+
+class Note(models.Model):
+    text = models.CharField(max_length=100)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "DELETE"])
+def note_detail(request, pk):
+    note = get_object_or_404(Note, pk=pk)  # missing row -> Http404 -> 404 response
+    if request.method == "DELETE":
+        note.delete()
+        return HttpResponse(status=204)  # 204: no body at all
+    return JsonResponse({"id": note.pk, "text": note.text})
+
+
+urlpatterns = [path("notes/<int:pk>/", note_detail)]
+migrate()
+Note.objects.create(text="buy milk")
+client = Client()
+print(client.get("/notes/1/").json())
+r = client.put("/notes/1/")
+print(r.status_code, r["Allow"])
+print(client.delete("/notes/1/").status_code, client.get("/notes/1/").status_code)
+```
+
+```text title="Output"
+{'id': 1, 'text': 'buy milk'}
+405 GET, DELETE
+204 404
+```
+
+`require_http_methods` answers `405 Method Not Allowed` with an `Allow` header for anything not
+listed, so the view body only ever sees methods it handles.
+
+### The same view as a class
+
+```python
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404
+from django.test import Client
+from django.urls import path
+from django.utils.decorators import method_decorator
+from django.views import View
+from django.views.decorators.csrf import csrf_exempt
+
+
+class Note(models.Model):
+    text = models.CharField(max_length=100)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class NoteDetail(View):
+    http_method_names = ["get", "delete"]  # anything else: 405
+
+    def get(self, request, pk):
+        note = get_object_or_404(Note, pk=pk)
+        return JsonResponse({"id": note.pk, "text": note.text})
+
+    def delete(self, request, pk):
+        get_object_or_404(Note, pk=pk).delete()
+        return HttpResponse(status=204)  # 204: no body at all
+
+
+urlpatterns = [path("notes/<int:pk>/", NoteDetail.as_view())]
+migrate()
+Note.objects.create(text="buy milk")
+client = Client()
+print(client.get("/notes/1/").json(), client.patch("/notes/1/").status_code)
+print(client.delete("/notes/1/").status_code, client.get("/notes/1/").status_code)
+```
+
+```text title="Output"
+{'id': 1, 'text': 'buy milk'} 405
+204 404
+```
+
+`as_view()` turns the class into a function Django can call; `dispatch()` picks the method named
+after the HTTP verb. Decorators made for functions are applied to CBVs with `method_decorator`.
+
+### Generic views: list and detail with almost no code
+
+```python
+from playground import migrate, setup
+
+setup(templates={
+    "shop/product_list.html": "{% for p in products %}{{ p.name }};{% endfor %} page {{ page_obj.number }}/{{ paginator.num_pages }}",
+    "shop/product_detail.html": "{{ product.name }} costs {{ product.price }}",
+})
+
+from django.db import models
+from django.test import Client
+from django.urls import path
+from django.views.generic import DetailView, ListView
+
+
+class Product(models.Model):
+    name = models.CharField(max_length=100)
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    active = models.BooleanField(default=True)
+
+
+class ProductList(ListView):
+    template_name = "shop/product_list.html"
+    context_object_name = "products"
+    paginate_by = 2
+
+    def get_queryset(self):
+        return Product.objects.filter(active=True).order_by("name")
+
+
+class ProductDetail(DetailView):
+    model = Product
+    template_name = "shop/product_detail.html"
+
+
+urlpatterns = [path("products/", ProductList.as_view()), path("products/<int:pk>/", ProductDetail.as_view())]
+migrate()
+for name, price, active in [("Dune", "12.50", True), ("Emma", "8.00", True),
+                            ("Chess set", "30.00", True), ("Old stock", "1.00", False)]:
+    Product.objects.create(name=name, price=price, active=active)
+
+client = Client()
+print(client.get("/products/").content.decode())
+print(client.get("/products/?page=2").content.decode())
+print(client.get("/products/1/").content.decode())
+print(client.get("/products/?page=9").status_code)
+```
+
+```text title="Output"
+Chess set;Dune; page 1/2
+Emma; page 2/2
+Dune costs 12.50
+404
+```
+
+`ListView` fetches `get_queryset()`, paginates it (`?page=`), and renders the template with
+`products`, `page_obj` and `paginator` in the context; an out-of-range page is a 404. `DetailView`
+looks the object up by `pk` (or `slug`) and 404s if it's missing. Override hooks when you need
+more; switch to an FBV when you find yourself fighting the class.
+
+### A custom converter
+
+```python
+from playground import setup
+
+setup()
+
+from django.http import JsonResponse
+from django.test import Client
+from django.urls import path, register_converter, reverse
+
+
+class YearConverter:
+    regex = "[0-9]{4}"
+
+    def to_python(self, value):
+        return int(value)
+
+    def to_url(self, value):
+        return f"{value:04d}"
+
+
+register_converter(YearConverter, "yyyy")
+
+
+def archive(request, year):
+    return JsonResponse({"year": year, "next": reverse("archive", args=[year + 1])})
+
+
+urlpatterns = [path("archive/<yyyy:year>/", archive, name="archive")]
+client = Client()
+print(client.get("/archive/2026/").json())
+print(client.get("/archive/26/").status_code)
+```
+
+```text title="Output"
+{'year': 2026, 'next': '/archive/2027/'}
+404
+```
+
+A converter is a regex plus two conversions: `to_python` for incoming URLs and `to_url` for
+`reverse()`. Use one when several URLs share a format (years, short codes, IDs with prefixes).
+
+## Putting it together
+
+A small bookmarks app: an FBV for a JSON list with filtering, a CBV for detail and delete, a create
+view that redirects to the new bookmark, namespaced URLs, and `reverse()` everywhere.
+
+```python title="bookmarks.py"
+import json
+
+from playground import migrate, setup
+
+setup()
+
+from django.db import models
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect
+from django.test import Client
+from django.urls import include, path, reverse
+from django.utils.decorators import method_decorator
+from django.views import View
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+
+
+class Bookmark(models.Model):
+    url = models.URLField()
+    tag = models.CharField(max_length=30)
+
+    def get_absolute_url(self):
+        return reverse("bookmarks:detail", args=[self.pk])
+
+    def as_dict(self):
+        return {"id": self.pk, "url": self.url, "tag": self.tag, "href": self.get_absolute_url()}
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def bookmark_list(request):
+    if request.method == "POST":
+        data = json.loads(request.body or "{}")
+        if not str(data.get("url", "")).startswith(("http://", "https://")):
+            return JsonResponse({"error": {"url": "must start with http:// or https://"}}, status=400)
+        bookmark = Bookmark.objects.create(url=data["url"], tag=data.get("tag", "misc"))
+        return redirect(bookmark)  # 302 to get_absolute_url()
+    marks = Bookmark.objects.order_by("id")
+    if tag := request.GET.get("tag"):
+        marks = marks.filter(tag=tag)
+    return JsonResponse({"results": [m.as_dict() for m in marks]})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class BookmarkDetail(View):
+    http_method_names = ["get", "delete"]
+
+    def get(self, request, pk):
+        return JsonResponse(get_object_or_404(Bookmark, pk=pk).as_dict())
+
+    def delete(self, request, pk):
+        get_object_or_404(Bookmark, pk=pk).delete()
+        return HttpResponse(status=204)  # 204: no body at all
+
+
+bookmark_patterns = [
+    path("", bookmark_list, name="list"),
+    path("<int:pk>/", BookmarkDetail.as_view(), name="detail"),
+]
+urlpatterns = [path("api/bookmarks/", include((bookmark_patterns, "bookmarks")))]
+migrate()
+
+client = Client()
+list_url = reverse("bookmarks:list")
+r = client.post(list_url, {"url": "https://djangoproject.com", "tag": "docs"}, content_type="application/json")
+print("create:", r.status_code, "->", r["Location"])
+client.post(list_url, {"url": "https://pypi.org"}, content_type="application/json")
+print("bad:", client.post(list_url, {"url": "ftp://x"}, content_type="application/json").json())
+print("follow:", client.get(r["Location"]).json())
+print("by tag:", [b["url"] for b in client.get(list_url, {"tag": "docs"}).json()["results"]])
+print("delete:", client.delete(reverse("bookmarks:detail", args=[1])).status_code)
+print("left:", [b["id"] for b in client.get(list_url).json()["results"]])
+print("wrong method:", client.put(reverse("bookmarks:detail", args=[2])).status_code)
+```
+
+```text title="Output"
+create: 302 -> /api/bookmarks/1/
+bad: {'error': {'url': 'must start with http:// or https://'}}
+follow: {'id': 1, 'url': 'https://djangoproject.com', 'tag': 'docs', 'href': '/api/bookmarks/1/'}
+by tag: ['https://djangoproject.com']
+delete: 204
+left: [2]
+wrong method: 405
+```
+
+No URL is written by hand outside `urlpatterns`: the model knows its own URL, the views redirect by
+object, and the client builds URLs by name. Renaming `api/bookmarks/` would change one line.
+
+## Common mistakes
+
+<Callout type="warning" title="Pattern order">
+  `path("books/<str:slug>/", ...)` placed before `path("books/new/", ...)` swallows `/books/new/`,
+  because `str` matches `new`. Put specific patterns first, or use converters that can't overlap.
+</Callout>
+
+- **Hard-coding URLs** (`"/shop/products/" + str(pk)`) in views and templates. Use `reverse()`,
+  `{% url %}` and `get_absolute_url()`.
+- **A leading slash in `path("/books/")`.** Django paths never start with `/`; this pattern never
+  matches (and `check` warns about it).
+- **Forgetting `.as_view()`** for a class-based view: `TypeError: ... takes 1 positional argument but 2 were given`.
+- **Using `Model.objects.get()` in a view without handling `DoesNotExist`.** A missing row becomes a
+  `500`. Use `get_object_or_404`.
+- **Reading `request.POST` for a JSON body.** It's empty; parse `request.body` (or use DRF).
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: which converter fits /files/reports/2026/q1.pdf as a single argument?">
+  `<path:filepath>`: unlike `str`, the `path` converter also matches `/`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: write the reverse() call for the 'detail' URL in the 'orders' namespace with pk 41.">
+  `reverse("orders:detail", args=[41])` or `reverse("orders:detail", kwargs={"pk": 41})`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: a GET to a view decorated with @require_POST returns what?">
+  `405 Method Not Allowed`, with the header `Allow: POST`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: in a ListView, how do you show only the current user's orders?"
+>
+  Override `get_queryset()`: `return Order.objects.filter(user=self.request.user)`. Never filter in
+  the template.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: when is an FBV clearer than a generic CBV?">
+  When the view does something that doesn't match a generic pattern (several forms, unusual flows, a
+  webhook): a straightforward function beats overriding five hooks.
+</Reveal>
+
+<KeyTakeaways>
+
+- `urlpatterns` are tried in order; converters match and convert; `include()` + `app_name` give
+  apps their own namespaced URLs.
+- Name every URL and build links with `reverse()`, `{% url %}`, `redirect()` and
+  `get_absolute_url()`.
+- A view gets an `HttpRequest` (method, GET, POST, body, headers, cookies, user) and returns one
+  `HttpResponse`.
+- `require_http_methods` for 405s, `get_object_or_404` for 404s.
+- FBVs are explicit; CBVs split methods; generic views (ListView, DetailView, ...) remove
+  boilerplate for common patterns.
+
+</KeyTakeaways>

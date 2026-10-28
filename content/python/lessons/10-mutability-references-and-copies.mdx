@@ -1,0 +1,466 @@
+---
+title: Mutability, references and copies
+summary: Which objects can change in place, why changes can appear through another name, the difference between identity and equality, and exactly what shallow and deep copies do.
+estimatedMinutes: 28
+difficulty: medium
+section: Basics
+objectives:
+  - Classify types as mutable or immutable
+  - Explain aliasing and predict when a change is visible through another name
+  - Choose between assignment, a shallow copy and a deep copy
+  - Avoid the mutable-default-argument and `[[0] * n] * m` traps
+prerequisites:
+  - Variables, objects and types
+  - Functions
+tags: [python, mutability, copy, references]
+practice: [py-p-011, py-p-029, py-p-042]
+interview: [py-i-001, py-i-005, py-i-007]
+---
+
+## Intuition: shared documents
+
+A **mutable** object is like a shared online document: everyone who has the link sees your edits.
+An **immutable** object is like a printed page. To "change" it, you print a new page, and anyone
+holding the old page still sees the old text.
+
+| Immutable (can't change in place)                                    | Mutable (can change in place)                            |
+| -------------------------------------------------------------------- | -------------------------------------------------------- |
+| `int`, `float`, `bool`, `str`, `bytes`, `tuple`, `frozenset`, `None` | `list`, `dict`, `set`, `bytearray`, most class instances |
+
+## See it
+
+<MemoryViz scenario="copies" />
+
+## The precise rules
+
+- `b = a` **aliases**: both names point at one object. Mutating it through either name is
+  visible through both.
+- A **shallow copy** (`a.copy()`, `list(a)`, `a[:]`, `copy.copy(a)`) creates a new **outer**
+  container but copies the **references** inside it, so nested objects are shared.
+- A **deep copy** (`copy.deepcopy(a)`) recursively copies the nested objects too.
+- `a == b` asks "equal values?" and `a is b` asks "the same object?".
+- `+=` on a list **mutates** it (like `extend`). `x = x + [...]` builds a **new** list. On
+  immutable types, `+=` always builds a new object.
+- CPython frees an object when nothing references it any more (**reference counting**), and a
+  cycle collector cleans up groups of objects that only reference each other.
+
+## Worked example
+
+```python title="copies.py"
+import copy
+
+a = [1, [2, 3]]
+b = a  # alias
+c = a.copy()  # shallow
+c[1].append(4)  # mutates the SHARED inner list
+d = copy.deepcopy(a)  # fully independent
+print(a, b is a, c is a, c[1] is a[1], d[1] is a[1])
+d[1].append(5)
+print(a, d)
+
+x, y = [1, 2], [1, 2]
+print(x == y, x is y)
+
+nums = [1, 2]
+alias = nums
+nums += [3]  # in place: alias sees it
+nums = nums + [4]  # new list: alias does not
+print(alias, nums)
+
+t = (1, [2])
+t[1].append(3)  # the tuple can't change, but the list inside it can
+print(t)
+
+
+def add_item(item, bucket=[]):  # BUG: one list shared by every call
+    bucket.append(item)
+    return bucket
+
+
+def add_item_fixed(item, bucket=None):
+    if bucket is None:
+        bucket = []
+    bucket.append(item)
+    return bucket
+
+
+print(add_item(1), add_item(2))
+print(add_item_fixed(1), add_item_fixed(2))
+
+bad_grid = [[0] * 3] * 2  # two references to ONE row
+bad_grid[0][0] = 9
+good_grid = [[0] * 3 for _ in range(2)]  # two separate rows
+good_grid[0][0] = 9
+print(bad_grid, good_grid)
+```
+
+```text title="Output"
+[1, [2, 3, 4]] True False True False
+[1, [2, 3, 4]] [1, [2, 3, 4, 5]]
+True False
+[1, 2, 3] [1, 2, 3, 4]
+(1, [2, 3])
+[1, 2] [1, 2]
+[1] [2]
+[[9, 0, 0], [9, 0, 0]] [[9, 0, 0], [0, 0, 0]]
+```
+
+What to notice:
+
+- `c is a` is `False` (a new outer list), but `c[1] is a[1]` is `True` (a shared inner list).
+  That's the whole story of shallow copies.
+- `nums += [3]` mutated the shared list, so `alias` changed. `nums = nums + [4]` created a new
+  list and moved only the `nums` name.
+- A tuple's slots are fixed, but a mutable object _inside_ a tuple can still change. Such a tuple
+  isn't hashable, so it can't be a dict key.
+- The default `bucket=[]` was created **once**, when `def` ran, so every call appends to the same
+  list. Use `None` as the default and create the list inside the function.
+- `[[0] * 3] * 2` repeats a **reference** to one row. Use a comprehension to build separate rows.
+
+## Variations
+
+### Which types can change in place?
+
+```python title="mutable_or_not.py"
+import operator
+
+
+def changes_in_place(value, extra, op) -> bool:
+    before = id(value)
+    value = op(value, extra)       # iadd is +=, ior is |=: mutate if allowed, else rebind
+    return id(value) == before
+
+
+cases = [(5, 1, operator.iadd), ("ab", "c", operator.iadd), ((1,), (2,), operator.iadd),
+         (frozenset({1}), frozenset({2}), operator.ior), ([1], [2], operator.iadd),
+         ({1}, {2}, operator.ior), ({"a": 1}, {"b": 2}, operator.ior),
+         (bytearray(b"a"), b"b", operator.iadd)]
+for value, extra, op in cases:
+    print(f"{type(value).__name__:10} mutable: {changes_in_place(value, extra, op)}")
+```
+
+```text title="Output"
+int        mutable: False
+str        mutable: False
+tuple      mutable: False
+frozenset  mutable: False
+list       mutable: True
+set        mutable: True
+dict       mutable: True
+bytearray  mutable: True
+```
+
+- **Immutable:** `int`, `float`, `bool`, `str`, `tuple`, `frozenset`, `bytes`. Every "change"
+  creates a new object.
+- **Mutable:** `list`, `dict`, `set`, `bytearray` and most objects you define with `class`.
+- `operator.iadd(a, b)` is exactly what `a += b` runs (and `operator.ior` is `a |= b`). For a
+  mutable object it changes the object and returns it, so the id stays the same.
+
+### Copying each kind of container
+
+```python title="copy_containers.py"
+import copy
+
+settings = {"theme": "dark", "fonts": ["mono", "sans"]}
+s1 = settings.copy()            # shallow, like dict(settings) or {**settings}
+s2 = copy.deepcopy(settings)
+s1["theme"] = "light"           # top-level change: independent
+s1["fonts"].append("serif")     # nested change: SHARED with settings
+print(settings)
+print(s2)
+
+tags = {"a", "b"}
+tags_copy = set(tags)           # sets: set(x) or x.copy()
+tags_copy.add("c")
+print(sorted(tags), sorted(tags_copy))
+
+row = [1, 2, 3]
+print(row[:] is row, list(row) == row, [*row] is row)   # three ways to copy a list
+```
+
+```text title="Output"
+{'theme': 'dark', 'fonts': ['mono', 'sans', 'serif']}
+{'theme': 'dark', 'fonts': ['mono', 'sans']}
+['a', 'b'] ['a', 'b', 'c']
+False True False
+```
+
+Reassigning a **key** in a shallow copy is independent; mutating a **nested** value is shared.
+The question to ask is always "how deep does my change go?".
+
+### What a function can and can't change
+
+```python title="pass_by_reference.py"
+def rebind(items):
+    items = ["new"]          # moves the LOCAL name only
+    return items
+
+
+def mutate(items):
+    items.append("added")    # changes the caller's object
+
+
+def mutate_slice(items):
+    items[:] = ["replaced"]  # slice assignment replaces the CONTENTS
+
+
+data = ["original"]
+rebind(data)
+print(data)
+mutate(data)
+print(data)
+mutate_slice(data)
+print(data)
+```
+
+```text title="Output"
+['original']
+['original', 'added']
+['replaced']
+```
+
+Python passes **references to objects** ("call by sharing"). Assigning to a parameter never
+affects the caller; calling a mutating method (or assigning to a slice or item) does.
+
+### Changing a collection while looping over it
+
+```python title="mutate_while_looping.py"
+nums = [1, 2, 2, 3, 4]
+for n in nums:                       # BUG: skips the second 2
+    if n % 2 == 0:
+        nums.remove(n)
+print("buggy:", nums)
+
+nums = [1, 2, 2, 3, 4]
+print("copy :", [n for n in nums if n % 2])     # build a new list instead
+
+stock = {"pen": 0, "ink": 4, "pad": 0}
+try:
+    for item in stock:
+        if stock[item] == 0:
+            del stock[item]
+except RuntimeError as err:
+    print("RuntimeError:", err)
+
+stock = {"pen": 0, "ink": 4, "pad": 0}
+for item in list(stock):              # loop over a snapshot of the keys
+    if stock[item] == 0:
+        del stock[item]
+print(stock)
+```
+
+```text title="Output"
+buggy: [1, 2, 3]
+copy : [1, 3]
+RuntimeError: dictionary changed size during iteration
+{'ink': 4}
+```
+
+- Removing from a list moves the following items left, so the loop's hidden index jumps over one.
+- Dicts and sets detect the change and raise `RuntimeError`, which is better than silently
+  skipping.
+- The fix is the same for both: loop over a **copy** (`list(stock)`), or build a new collection.
+
+### Mutability and hashing
+
+```python title="hashability.py"
+locations = {(52.5, 13.4): "Berlin"}       # tuples of immutables can be keys
+print(locations[(52.5, 13.4)])
+
+for key in [[1, 2], (1, [2]), {1}, frozenset({1})]:
+    try:
+        hash(key)
+        print(type(key).__name__, "is hashable")
+    except TypeError as err:
+        print(type(key).__name__, "->", err)
+
+groups = {frozenset({"ann", "bob"}): "team A"}   # order-free key
+print(groups[frozenset({"bob", "ann"})])
+```
+
+```text title="Output"
+Berlin
+list -> unhashable type: 'list'
+tuple -> unhashable type: 'list'
+set -> unhashable type: 'set'
+frozenset is hashable
+team A
+```
+
+A dict finds keys by their hash, so a key must never change. That's why lists, dicts and sets
+(and tuples **containing** them) can't be keys, while `frozenset` can.
+
+### Handing out data without letting it be changed
+
+```python title="read_only.py"
+from types import MappingProxyType
+
+
+class Playlist:
+    def __init__(self, songs):
+        self._songs = list(songs)          # defensive copy IN
+
+    @property
+    def songs(self) -> tuple:
+        return tuple(self._songs)          # immutable copy OUT
+
+
+mine = ["a", "b"]
+p = Playlist(mine)
+mine.append("c")                           # doesn't leak into p
+print(p.songs)
+try:
+    p.songs.append("x")
+except AttributeError as err:
+    print("AttributeError:", err)
+
+CONFIG = MappingProxyType({"debug": False})
+try:
+    CONFIG["debug"] = True
+except TypeError as err:
+    print("TypeError:", err)
+```
+
+```text title="Output"
+('a', 'b')
+AttributeError: 'tuple' object has no attribute 'append'
+TypeError: 'mappingproxy' object does not support item assignment
+```
+
+Copying on the way in and returning a tuple on the way out means no caller can change the
+playlist behind its back. `MappingProxyType` gives a **read-only view** of a dict without copying
+it.
+
+## Putting it together
+
+### Undo history needs real copies
+
+```python title="undo.py"
+import copy
+
+
+class Editor:
+    def __init__(self):
+        self.doc = {"title": "Draft", "lines": []}
+        self.history = []
+
+    def save_snapshot(self, deep: bool):
+        self.history.append(copy.deepcopy(self.doc) if deep else self.doc.copy())
+
+    def add_line(self, text: str, deep: bool = True):
+        self.save_snapshot(deep)
+        self.doc["lines"].append(text)
+
+    def undo(self):
+        self.doc = self.history.pop()
+
+
+for deep in (False, True):
+    ed = Editor()
+    ed.add_line("first", deep)
+    ed.add_line("second", deep)
+    ed.undo()
+    print("deep" if deep else "shallow", "undo ->", ed.doc["lines"])
+```
+
+```text title="Output"
+shallow undo -> ['first', 'second']
+deep undo -> ['first']
+```
+
+With shallow snapshots, every snapshot shares the **same** `lines` list, so "undo" restores a
+dict whose list already contains the line we wanted to remove. Snapshots of nested state need
+`deepcopy` (or an immutable design).
+
+### Merging settings without touching the defaults
+
+```python title="merge_config.py"
+DEFAULTS = {"db": {"host": "localhost", "port": 5432}, "debug": False, "tags": ["web"]}
+
+
+def merged(base: dict, override: dict) -> dict:
+    """Return a new dict; nested dicts are merged, everything else is replaced."""
+    result = {}
+    keys = [*base, *(k for k in override if k not in base)]   # base order, then new keys
+    for key in keys:
+        both_dicts = isinstance(base.get(key), dict) and isinstance(override.get(key), dict)
+        if both_dicts:
+            result[key] = merged(base[key], override[key])
+        elif key in override:
+            result[key] = override[key]
+        else:
+            result[key] = base[key]
+    return result
+
+
+prod = merged(DEFAULTS, {"db": {"host": "db.prod"}, "debug": False})
+prod["tags"] = prod["tags"] + ["prod"]       # new list: DEFAULTS keeps its own
+print(prod)
+print(DEFAULTS)
+```
+
+```text title="Output"
+{'db': {'host': 'db.prod', 'port': 5432}, 'debug': False, 'tags': ['web', 'prod']}
+{'db': {'host': 'localhost', 'port': 5432}, 'debug': False, 'tags': ['web']}
+```
+
+- `merged` builds **new** dicts at every level it touches, so `DEFAULTS` is never modified.
+- Values it doesn't merge (like the `tags` list) are still shared, which is why the program
+  replaces `prod["tags"]` with a new list instead of calling `append`.
+
+## Common mistakes
+
+<Callout type="warning" title="Accidental sharing">
+  If changing one variable mysteriously changes another, print `a is b` and `a[i] is b[i]`. Shared
+  references are the usual cause. Copy deliberately, and only as deep as you need.
+</Callout>
+
+- **Over-using `deepcopy`.** It's slow and copies everything. Often a shallow copy, or building new
+  data, is clearer.
+- **`is` for small numbers.** `256 is 256` is `True` in CPython (small ints are cached), but larger
+  values may differ. It's an implementation detail, so never rely on it.
+- **Returning internal lists from a class.** Callers can then mutate your object's state. Return a
+  copy or a tuple.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: after m = {'k': [1]}; n = dict(m); n['k'].append(2); n['j'] = 0, what is m?">
+  `{'k': [1, 2]}`. `dict(m)` is a shallow copy: a new outer dict (so `'j'` only goes into `n`) that
+  shares the same inner list (so the `append` shows up in both).
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: after `a = [[]] * 3` and `a[0].append(1)`, what is `a`?">
+  `[[1], [1], [1]]`. The `* 3` copied three references to **one** inner list. Build separate lists
+  with `[[] for _ in range(3)]`.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: does `def f(n): n += 1` change the caller's integer?">
+  No. Integers are immutable, so `n += 1` rebinds the local `n` to a new int. Return the new value
+  instead: `def f(n): return n + 1`.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: why can't `([1], 2)` be a dict key even though tuples are immutable?"
+>
+  Hashing a tuple hashes its items, and the list inside is unhashable (it could change). A tuple is
+  only hashable when everything inside it is.
+</Reveal>
+
+<KeyTakeaways>
+
+- Assignment aliases. It never copies.
+- A shallow copy makes a new container that shares the inner objects. A deep copy copies everything.
+- `==` compares values and `is` compares identity.
+- Never use a mutable default argument. Use `None` and create the object inside.
+- `+=` mutates lists in place, while `x = x + y` rebinds to a new object.
+- Passing an object to a function passes a reference: mutation is visible to the caller,
+  rebinding the parameter isn't.
+- Never add or remove items from a collection while looping over it; loop over a copy or build a
+  new one.
+- Copy defensively at boundaries (in and out of classes) and use deep copies for snapshots of
+  nested state.
+
+</KeyTakeaways>
+
+{/* enriched */}

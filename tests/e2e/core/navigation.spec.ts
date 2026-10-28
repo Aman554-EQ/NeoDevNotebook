@@ -6,8 +6,18 @@ test.describe("navigation", () => {
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Remember it")
     for (const part of [0, 1, 2, 3, 4, 5, 6])
       await expect(page.getByTestId(`part-${part}`)).toBeVisible()
-    await expect(page.getByTestId("part-0").getByRole("link", { name: "Start Here" })).toBeVisible()
-    await expect(page.getByTestId("part-1")).toContainText("Coming soon")
+    // A part is linked exactly when a module for it exists in content/; others say "Coming soon".
+    for (const part of [0, 1, 2, 3, 4, 5, 6]) {
+      const modules = content.filter((b) => b.module.part === part)
+      const card = page.getByTestId(`part-${part}`)
+      if (modules.length) {
+        for (const b of modules) {
+          await expect(card.getByRole("link", { name: b.module.title })).toBeVisible()
+        }
+      } else {
+        await expect(card).toContainText("Coming soon")
+      }
+    }
   })
 
   test("start → lesson 1 → next → lesson 2 → previous", async ({ page }) => {
@@ -44,13 +54,19 @@ test.describe("navigation", () => {
   })
 
   test("every content route responds 200", async ({ request }) => {
-    const routes = content.flatMap(({ module: m, lessons, problems, interview }) => [
+    test.setTimeout(120_000) // a few hundred routes, and the list grows with every module
+    const routes = content.flatMap(({ module: m, lessons, problems, interview, projects }) => [
       `/learn/${m.slug}`,
       ...lessons.map((l) => `/learn/${m.slug}/${l.slug}`),
       ...problems.map((p) => `/practice/${m.slug}/${p.id}`),
       ...interview.map((q) => `/interview/${m.slug}/${q.id}`),
+      ...projects.map((p) => `/projects/${m.slug}/${p.slug}`),
     ])
-    for (const r of routes) expect((await request.get(r)).status(), r).toBe(200)
+    for (let i = 0; i < routes.length; i += 8) {
+      const batch = routes.slice(i, i + 8)
+      const statuses = await Promise.all(batch.map(async (r) => (await request.get(r)).status()))
+      batch.forEach((r, j) => expect(statuses[j], r).toBe(200))
+    }
   })
 
   for (const path of [

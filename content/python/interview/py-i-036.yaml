@@ -1,0 +1,40 @@
+id: py-i-036
+question: What's the difference between `__repr__` and `__str__`?
+difficulty: easy
+tags:
+  - oop
+  - dunder-methods
+shortAnswer: |
+  `__repr__` is the unambiguous, developer-facing representation, ideally valid Python that
+  recreates the object. It's used by the REPL, by containers and by debuggers. `__str__` is
+  the readable, user-facing text used by `print()` and `str()`. If only `__repr__` is
+  defined, `str()` falls back to it, so always define `__repr__` first.
+detailedAnswer: |
+  Containers always use `repr` for their elements: `print([obj])` shows `[Money(cents=420)]`,
+  even if `str(obj)` is `"€4.20"`.
+
+  In f-strings, `{x!r}` forces repr, which is useful in log and error messages because it
+  shows quotes around strings and makes whitespace visible. Dataclasses generate a good
+  `__repr__` automatically.
+code:
+  language: python
+  code: |
+    class Money:
+        def __init__(self, cents: int) -> None:
+            self.cents = cents
+
+        def __repr__(self) -> str:
+            return f"Money(cents={self.cents})"
+
+        def __str__(self) -> str:
+            return f"€{self.cents / 100:.2f}"
+
+
+    m = Money(420)
+    print(m, repr(m), [m], f"{m!r}")
+pitfalls:
+  - Only defining `__str__`, which leaves unhelpful `<Money object at 0x…>` in logs and containers.
+followUps:
+  - What does `!r` do in an f-string?
+verify: |
+  assert str(m) == '€4.20' and repr([m]) == '[Money(cents=420)]'

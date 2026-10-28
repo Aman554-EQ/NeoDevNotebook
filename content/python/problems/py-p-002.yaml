@@ -1,0 +1,48 @@
+id: py-p-002
+title: Count the vowels
+difficulty: easy
+tags:
+  - strings
+  - membership
+statement: |
+  Write `count_vowels(text)` that returns how many characters in `text` are vowels
+  (`a e i o u`, upper or lower case).
+constraints:
+  - "`0 <= len(text) <= 10**6`"
+examples:
+  - input: count_vowels("Programming")
+    output: "3"
+  - input: count_vowels("rhythm")
+    output: "0"
+  - input: count_vowels("AEIOU aeiou")
+    output: "10"
+hints:
+  - Lower-case the text once, then test each character with `in`.
+  - "`sum(1 for ch in ... if ...)` counts without building a list."
+solution:
+  language: python
+  code: |
+    VOWELS = set("aeiou")
+
+
+    def count_vowels(text: str) -> int:
+        return sum(1 for ch in text.lower() if ch in VOWELS)
+
+
+    print(count_vowels("Programming"), count_vowels("rhythm"))
+  explanation: |
+    `text.lower()` makes the check case-insensitive in one step. A `set` of vowels makes
+    each `ch in VOWELS` test O(1) (a string `"aeiou"` would also work, since it's tiny).
+
+    The generator expression yields `1` for every vowel, and `sum` adds them up without
+    creating an intermediate list.
+complexity:
+  time: O(n)
+  space: O(1)
+variations:
+  - Return a dict with the count of each vowel (`collections.Counter` helps).
+verify: |
+  assert count_vowels("Programming") == 3
+  assert count_vowels("rhythm") == 0
+  assert count_vowels("AEIOU aeiou") == 10
+  assert count_vowels("") == 0

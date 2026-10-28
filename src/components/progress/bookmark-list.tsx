@@ -4,7 +4,12 @@ import Link from "next/link"
 import { X } from "lucide-react"
 import { useBookmarks } from "@/lib/progress/store"
 
-const TYPE_LABEL = { lesson: "Lesson", problem: "Problem", interview: "Interview" } as const
+const TYPE_LABEL = {
+  lesson: "Lesson",
+  problem: "Problem",
+  interview: "Interview",
+  project: "Project",
+} as const
 
 export function BookmarkList() {
   const { bookmarks, toggleBookmark } = useBookmarks()

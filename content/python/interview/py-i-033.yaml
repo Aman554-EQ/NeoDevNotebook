@@ -1,0 +1,54 @@
+id: py-i-033
+question: What is `@property` for?
+difficulty: simple
+tags:
+  - oop
+  - properties
+  - encapsulation
+shortAnswer: |
+  `@property` turns a method into an attribute-style getter, and optional `.setter` and
+  `.deleter` add validation or computation behind plain attribute syntax. It lets you start
+  with a public attribute and later add logic without changing any caller. That's why Python
+  code doesn't need Java-style `get_x()` and `set_x()` methods.
+detailedAnswer: |
+  Common uses: computed values (`full_name`, `area`), read-only attributes (a getter with no
+  setter), validation in a setter, and lazy or cached values (`functools.cached_property`
+  computes once per instance).
+
+  Properties are **descriptors** defined on the class. Accessing `obj.x` calls the getter
+  through the class, so a property can't be shadowed by an instance attribute.
+code:
+  language: python
+  code: |
+    class Temperature:
+        def __init__(self, celsius: float) -> None:
+            self.celsius = celsius  # goes through the setter
+
+        @property
+        def celsius(self) -> float:
+            return self._c
+
+        @celsius.setter
+        def celsius(self, value: float) -> None:
+            if value < -273.15:
+                raise ValueError("below absolute zero")
+            self._c = value
+
+        @property
+        def fahrenheit(self) -> float:
+            return self._c * 9 / 5 + 32
+
+
+    t = Temperature(25)
+    print(t.fahrenheit)
+    try:
+        t.celsius = -300
+    except ValueError as err:
+        print("ValueError:", err)
+pitfalls:
+  - Doing slow work (network, DB) inside a property. Callers expect attribute access to be cheap.
+followUps:
+  - What's a descriptor?
+  - property vs cached_property?
+verify: |
+  assert Temperature(100).fahrenheit == 212.0

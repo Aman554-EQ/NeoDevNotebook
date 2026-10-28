@@ -1,0 +1,49 @@
+id: py-p-004
+title: Sum of digits
+difficulty: easy
+tags:
+  - integers
+  - divmod
+statement: |
+  Write `digit_sum(n)` that returns the sum of the decimal digits of the integer `n`.
+  Negative numbers use their absolute value. Solve it **without** converting to a string.
+constraints:
+  - "`-10**18 <= n <= 10**18`"
+examples:
+  - input: digit_sum(9045)
+    output: "18"
+  - input: digit_sum(-27)
+    output: "9"
+  - input: digit_sum(0)
+    output: "0"
+hints:
+  - "`divmod(n, 10)` gives the number without its last digit, and the last digit."
+solution:
+  language: python
+  code: |
+    def digit_sum(n: int) -> int:
+        n = abs(n)
+        total = 0
+        while n:
+            n, last = divmod(n, 10)
+            total += last
+        return total
+
+
+    print(digit_sum(9045), digit_sum(-27), digit_sum(0))
+  explanation: |
+    `divmod(n, 10)` returns `(n // 10, n % 10)`: the number with its last digit removed,
+    and that last digit. Unpacking it into `n, last` advances the loop and gives us the
+    digit to add in one step.
+
+    The loop stops when `n` becomes `0` (falsy). `abs` handles negative input, and `0`
+    never enters the loop, so it correctly returns `0`. The string version,
+    `sum(map(int, str(abs(n))))`, is shorter but does extra conversions.
+complexity:
+  time: O(d) for d digits
+  space: O(1)
+variations:
+  - Keep summing until a single digit remains (the digital root).
+verify: |
+  for n in [0, 7, 9045, -27, 10**18, -(10**18) + 1, 123456789]:
+      assert digit_sum(n) == sum(map(int, str(abs(n)))), n

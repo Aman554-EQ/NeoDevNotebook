@@ -1,0 +1,64 @@
+id: dj-p-001
+title: A JSON status endpoint
+difficulty: easy
+tags:
+  - views
+  - json
+  - urls
+statement: |
+  Write a view `status` mounted at `/status/` that returns the JSON
+  `{"service": "shop", "healthy": true}` with status 200 for `GET`, and `405 Method Not Allowed`
+  for any other method.
+
+  Use the playground (`from playground import setup`) so the script runs on its own.
+constraints:
+  - Only GET is allowed.
+  - The response must have Content-Type application/json.
+examples:
+  - input: GET /status/
+    output: '200 {"service": "shop", "healthy": true}'
+  - input: POST /status/
+    output: "405"
+hints:
+  - "`JsonResponse(dict)` serialises and sets the content type."
+  - '`@require_GET` (or `require_http_methods(["GET"])`) answers 405 for other methods.'
+solution:
+  language: python
+  code: |
+    from playground import setup
+
+    setup()
+
+    from django.http import JsonResponse
+    from django.urls import path
+    from django.views.decorators.http import require_GET
+
+
+    @require_GET
+    def status(request):
+        return JsonResponse({"service": "shop", "healthy": True})
+
+
+    urlpatterns = [path("status/", status)]
+  explanation: |
+    `JsonResponse` turns the dict into JSON and sets `Content-Type: application/json`, so the
+    client can parse it without guessing. `require_GET` is a decorator from `django.views.decorators.http`:
+    for any other method it returns `405 Method Not Allowed` with an `Allow: GET` header before your view
+    runs, which is the correct HTTP answer for "this URL exists but doesn't support that method". The URL
+    is wired by listing `path("status/", status)` in `urlpatterns` (the playground uses the script itself as
+    the URLconf). A health or status endpoint like this is what load balancers and uptime monitors call.
+complexity:
+  time: O(1)
+  space: O(1)
+variations:
+  - Add a `version` read from settings.
+  - Return 503 when a dependency check fails.
+verify: |
+  from django.test import Client
+
+  c = Client()
+  r = c.get("/status/")
+  assert r.status_code == 200 and r["Content-Type"] == "application/json"
+  assert r.json() == {"service": "shop", "healthy": True}
+  assert c.post("/status/").status_code == 405
+  assert c.get("/status/")["Content-Type"].startswith("application/json")

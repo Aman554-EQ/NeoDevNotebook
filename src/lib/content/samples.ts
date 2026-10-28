@@ -3,6 +3,8 @@ import type { ContentBundle } from "./load"
 /** A runnable Python snippet found in content, plus how to check it. */
 export type CodeSample = {
   source: string
+  /** Module slug: the verifier puts content/<module>/support/*.py next to the sample. */
+  module: string
   code: string
   /** If set, stdout must equal this (from a following ```text title="Output" block). */
   expectedOutput?: string
@@ -29,7 +31,7 @@ const flagsOf = (meta: string) =>
     .split(/\s+/)
     .filter(Boolean)
 
-function fromMarkdown(md: string, source: string): CodeSample[] {
+function fromMarkdown(md: string, source: string, module: string): CodeSample[] {
   const blocks = parseFences(md)
   const samples: CodeSample[] = []
   blocks.forEach((b, i) => {
@@ -39,6 +41,7 @@ function fromMarkdown(md: string, source: string): CodeSample[] {
       next && next.lang === "text" && /title="Output"/i.test(next.meta) ? next.code : undefined
     samples.push({
       source: `${source}#block${i + 1}`,
+      module,
       code: b.code,
       expectedOutput,
       flags: flagsOf(b.meta),
@@ -49,18 +52,21 @@ function fromMarkdown(md: string, source: string): CodeSample[] {
 
 export function extractSamples(bundles: ContentBundle[]): CodeSample[] {
   const samples: CodeSample[] = []
-  for (const { lessons, problems, interview } of bundles) {
-    for (const l of lessons) samples.push(...fromMarkdown(l.body, `lesson:${l.module}/${l.slug}`))
+  for (const { module, lessons, problems, interview } of bundles) {
+    const mod = module.slug
+    for (const l of lessons)
+      samples.push(...fromMarkdown(l.body, `lesson:${l.module}/${l.slug}`, mod))
     for (const p of problems) {
       if (p.solution.language === "python") {
         samples.push({
           source: `problem:${p.id}:solution`,
+          module: mod,
           code: p.verify ? `${p.solution.code}\n\n# --- verify ---\n${p.verify}` : p.solution.code,
           flags: [],
         })
       }
       samples.push(
-        ...fromMarkdown(p.statement, `problem:${p.id}:statement`).map((s) => ({
+        ...fromMarkdown(p.statement, `problem:${p.id}:statement`, mod).map((s) => ({
           ...s,
           flags: [...s.flags, "norun"],
         })),
@@ -70,11 +76,12 @@ export function extractSamples(bundles: ContentBundle[]): CodeSample[] {
       if (q.code?.language === "python") {
         samples.push({
           source: `interview:${q.id}:code`,
+          module: mod,
           code: q.verify ? `${q.code.code}\n\n# --- verify ---\n${q.verify}` : q.code.code,
           flags: [],
         })
       }
-      samples.push(...fromMarkdown(q.detailedAnswer, `interview:${q.id}:answer`))
+      samples.push(...fromMarkdown(q.detailedAnswer, `interview:${q.id}:answer`, mod))
     }
   }
   return samples

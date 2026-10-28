@@ -1,0 +1,50 @@
+id: py-p-022
+title: First non-repeating character
+difficulty: simple
+tags:
+  - counter
+  - strings
+statement: |
+  Write `first_unique(text)` that returns the first character that appears exactly once, or
+  `None`.
+constraints:
+  - "`0 <= len(text) <= 10**6`"
+examples:
+  - input: first_unique("swiss")
+    output: "'w'"
+  - input: first_unique("aabb")
+    output: None
+hints:
+  - Count first (one pass), then scan in the original order (second pass).
+solution:
+  language: python
+  code: |
+    from collections import Counter
+
+
+    def first_unique(text: str) -> str | None:
+        counts = Counter(text)
+        for ch in text:
+            if counts[ch] == 1:
+                return ch
+        return None
+
+
+    print(first_unique("swiss"), first_unique("aabb"))
+  explanation: |
+    Two linear passes beat calling `text.count(ch)` for every character, which would be
+    O(n²). The `Counter` answers "how many times does `ch` appear?" in O(1).
+
+    The second loop walks the **original** text, so the first character with a count of 1
+    is the answer in order of appearance. Iterating the Counter itself would also be in
+    first-seen order, but scanning the text makes the intent obvious.
+complexity:
+  time: O(n)
+  space: O(k) for k distinct characters
+variations:
+  - "Process a stream: report the first unique character after each new character."
+verify: |
+  assert first_unique("swiss") == "w"
+  assert first_unique("aabb") is None
+  assert first_unique("") is None
+  assert first_unique("z") == "z"

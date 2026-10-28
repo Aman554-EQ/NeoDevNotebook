@@ -1,0 +1,69 @@
+id: dj-p-003
+title: A model the database protects
+difficulty: easy
+tags:
+  - models
+  - constraints
+statement: |
+  Define a `Product` model with `sku` (unique, max 20), `name` (max 100), `price`
+  (Decimal, 2 places) and `stock` (non-negative integer, default 0). The **database** must refuse a
+  negative price and a duplicate SKU, even when code skips validation.
+constraints:
+  - Use Meta.constraints for the price rule.
+examples:
+  - input: Product.objects.create(sku='A1', name='Dune', price='-1')
+    output: IntegrityError
+hints:
+  - "`unique=True` on the field."
+  - "`models.CheckConstraint(condition=Q(price__gte=0), name=...)`."
+solution:
+  language: python
+  code: |
+    from playground import migrate, setup
+
+    setup()
+
+    from django.db import models
+    from django.db.models import Q
+
+
+    class Product(models.Model):
+        sku = models.CharField(max_length=20, unique=True)
+        name = models.CharField(max_length=100)
+        price = models.DecimalField(max_digits=8, decimal_places=2)
+        stock = models.PositiveIntegerField(default=0)
+
+        class Meta:
+            constraints = [models.CheckConstraint(condition=Q(price__gte=0), name="price_not_negative")]
+
+        def __str__(self):
+            return self.name
+
+
+    migrate()
+  explanation: |
+    Validation in forms and serializers gives friendly messages, but only the database can
+    guarantee a rule for **every** writer: a script, a bulk update, a bug, two requests at once.
+    `unique=True` creates a unique index on `sku`; the `CheckConstraint` adds `CHECK (price >= 0)` to the
+    table; `PositiveIntegerField` adds a check that `stock >= 0`. Violations raise
+    `django.db.IntegrityError`. In a real project you'd also mirror these rules in validation so users see
+    a helpful message instead of a 500.
+complexity:
+  time: O(1) per write
+  space: O(n) rows
+verify: |
+  from decimal import Decimal
+
+  from django.db import IntegrityError, transaction
+
+  Product.objects.create(sku="A1", name="Dune", price=Decimal("12.50"))
+  for bad in [dict(sku="A2", name="X", price=Decimal("-1")), dict(sku="A1", name="Dup", price=Decimal("1")),
+              dict(sku="A3", name="Y", price=Decimal("1"), stock=-2)]:
+      try:
+          with transaction.atomic():
+              Product.objects.create(**bad)
+      except IntegrityError:
+          continue
+      raise AssertionError(f"accepted {bad}")
+  assert Product.objects.count() == 1 and str(Product.objects.get()) == "Dune"
+  assert Product.objects.get().stock == 0

@@ -1,0 +1,540 @@
+---
+title: Exceptions
+summary: Errors in Python are objects that travel up the call stack until something catches them. Learn try/except/else/finally, raising and chaining exceptions, custom exception classes, and handling several errors at once.
+estimatedMinutes: 28
+difficulty: medium
+section: Core Language
+objectives:
+  - Trace how an exception unwinds the call stack, and when finally runs
+  - Use try / except / else / finally, each for its purpose
+  - Raise exceptions with clear messages, and chain them with `from`
+  - Define custom exceptions and handle ExceptionGroup with `except*`
+prerequisites:
+  - Functions
+tags: [python, exceptions, errors]
+practice: [py-p-013, py-p-027]
+interview: [py-i-053]
+---
+
+## Intuition: a problem escalating up the chain
+
+A junior employee hits a problem they can't solve, so they pass it to their manager. The manager
+can't either and escalates it to the director, who decides what to do. On the way, everyone tidies
+their desk (`finally`). If nobody can handle it, the company stops: your program crashes with a
+traceback.
+
+## See it
+
+<ExceptionUnwindViz />
+
+## The precise rules
+
+```python title="shape.py" norun
+try:
+    risky()
+except ValueError as err:       # runs if a ValueError (or subclass) was raised
+    handle(err)
+except (KeyError, IndexError):  # several types at once
+    ...
+else:                           # runs only if NO exception happened
+    use_result()
+finally:                        # ALWAYS runs: success, error, return or break
+    cleanup()
+```
+
+- `except` clauses are tried in order, and the first match wins. A clause catches its class **and
+  subclasses**, so put specific exceptions first.
+- `raise NewError(...) from err` records the original as `__cause__`. The traceback shows both:
+  "The above exception was the direct cause of…".
+- A bare `raise` inside `except` re-raises the current exception unchanged.
+- `except*` handles parts of an `ExceptionGroup` (several errors raised together, for example by
+  concurrent tasks).
+
+## Worked example
+
+```python title="exceptions.py"
+def parse(text):
+    return int(text)
+
+
+def load(path):
+    try:
+        return parse("x")
+    finally:
+        print("closing", path)
+
+
+def main():
+    try:
+        load("ages.txt")
+    except ValueError as err:
+        print("bad data:", err)
+
+
+main()
+
+
+def parse_age(text: str) -> int:
+    try:
+        age = int(text)
+    except ValueError as err:
+        raise ValueError(f"age must be a number, got {text!r}") from err
+    if age < 0:
+        raise ValueError("age cannot be negative")
+    return age
+
+
+for raw in ["42", "x", "-1"]:
+    try:
+        print(parse_age(raw))
+    except ValueError as err:
+        print("ValueError:", err, "| caused by:", type(err.__cause__).__name__ if err.__cause__ else None)
+
+
+def divide(x: float) -> None:
+    try:
+        result = 10 / x
+    except ZeroDivisionError:
+        print("cannot divide by zero")
+    else:
+        print("result", result)
+    finally:
+        print("cleanup")
+
+
+divide(2)
+divide(0)
+
+
+class InsufficientFunds(Exception):
+    def __init__(self, needed: int) -> None:
+        super().__init__(f"need {needed} more")
+        self.needed = needed
+
+
+try:
+    raise InsufficientFunds(5)
+except InsufficientFunds as err:
+    print(type(err).__name__, err, err.needed)
+
+try:
+    raise ExceptionGroup("batch failed", [ValueError("bad"), TypeError("worse")])
+except* ValueError as group:
+    print("values:", [str(e) for e in group.exceptions])
+except* TypeError as group:
+    print("types:", [str(e) for e in group.exceptions])
+```
+
+```text title="Output"
+closing ages.txt
+bad data: invalid literal for int() with base 10: 'x'
+42
+ValueError: age must be a number, got 'x' | caused by: ValueError
+ValueError: age cannot be negative | caused by: None
+result 5.0
+cleanup
+cannot divide by zero
+cleanup
+InsufficientFunds need 5 more 5
+values: ['bad']
+types: ['worse']
+```
+
+What to notice:
+
+- The first three functions are exactly the program in the visual: `finally` printed before the
+  handler in `main` ran.
+- `from err` keeps the low-level cause (the original `int()` failure) while giving the caller a
+  clear, domain-level message.
+- The `else` block runs only when no exception happened. Keep the `try` body small, so you don't
+  accidentally catch errors from code that was never meant to be protected.
+- Custom exceptions subclass `Exception`, can carry extra data (`needed`), and let callers catch
+  _your_ errors specifically.
+
+## Variations
+
+### The exception hierarchy: catch a family
+
+```python title="hierarchy.py"
+print([cls.__name__ for cls in KeyError.__mro__])
+print(issubclass(FileNotFoundError, OSError), issubclass(ZeroDivisionError, ArithmeticError))
+
+
+def first_item(container, key):
+    try:
+        return container[key]
+    except LookupError as err:        # covers KeyError AND IndexError
+        return f"missing ({type(err).__name__})"
+
+
+print(first_item({"a": 1}, "b"), first_item([1, 2], 5), first_item("hi", 0))
+
+try:
+    open("definitely-missing-file.txt")
+except OSError as err:                # FileNotFoundError, PermissionError, ... are all OSErrors
+    print(type(err).__name__, err.errno, err.filename)
+```
+
+```text title="Output"
+['KeyError', 'LookupError', 'Exception', 'BaseException', 'object']
+True True
+missing (KeyError) missing (IndexError) h
+FileNotFoundError 2 definitely-missing-file.txt
+```
+
+- Every exception class sits in a tree. `KeyError` and `IndexError` both inherit from
+  `LookupError`, so one `except LookupError` handles "not found" for dicts and sequences alike.
+- `OSError` is the parent of file and network errors, and carries details like `errno` and
+  `filename`.
+
+### Looking inside an exception
+
+```python title="inspect_exc.py"
+import traceback
+
+port_text = "80x"
+try:
+    port = int(port_text)
+except ValueError as err:
+    print(type(err).__name__, "|", err, "|", err.args)
+    print(repr(err))
+    err.add_note("while reading the 'port' setting")      # Python 3.11+
+    print(err.__notes__)
+    print("".join(traceback.format_exception_only(err)).strip())
+```
+
+```text title="Output"
+ValueError | invalid literal for int() with base 10: '80x' | ("invalid literal for int() with base 10: '80x'",)
+ValueError("invalid literal for int() with base 10: '80x'")
+["while reading the 'port' setting"]
+ValueError: invalid literal for int() with base 10: '80x'
+while reading the 'port' setting
+```
+
+- `str(err)` is the message; `err.args` holds the constructor arguments; `repr(err)` shows the
+  class too, which is better for logs.
+- `add_note` attaches extra context that is printed under the traceback, without wrapping the
+  exception in a new one.
+
+### Chaining: `from`, implicit context and `from None`
+
+```python title="chaining.py"
+def explicit():
+    try:
+        int("x")
+    except ValueError as err:
+        raise RuntimeError("config is invalid") from err        # deliberate: __cause__
+
+
+def implicit():
+    try:
+        int("x")
+    except ValueError:
+        raise RuntimeError("bug in the handler")               # accidental: __context__
+
+
+def hidden():
+    try:
+        int("x")
+    except ValueError:
+        raise RuntimeError("clean message") from None          # suppress the chain
+
+
+for func in [explicit, implicit, hidden]:
+    try:
+        func()
+    except RuntimeError as err:
+        print(f"{func.__name__:8} cause={type(err.__cause__).__name__:10} "
+              f"context={type(err.__context__).__name__:10} suppress={err.__suppress_context__}")
+```
+
+```text title="Output"
+explicit cause=ValueError context=ValueError suppress=True
+implicit cause=NoneType   context=ValueError suppress=False
+hidden   cause=NoneType   context=ValueError suppress=True
+```
+
+- Raising inside an `except` block always records the original as `__context__` ("During handling
+  of the above exception, another exception occurred").
+- `from err` marks it as the **cause** ("The above exception was the direct cause of…"), which
+  tells readers the wrapping was intentional.
+- `from None` hides the chain when the original error is an implementation detail.
+
+### `finally` always wins, even over `return`
+
+```python title="finally_return.py"
+def returns_from_try():
+    try:
+        return "try"
+    finally:
+        print("  finally runs before the function actually returns")
+
+
+def overrides():
+    try:
+        return "try"
+    finally:
+        return "finally"        # don't do this: it replaces the return value...
+
+
+def swallows():
+    try:
+        raise ValueError("lost")
+    finally:
+        return "finally"        # ...and silently discards exceptions
+
+
+print(returns_from_try())
+print(overrides(), swallows())
+```
+
+```text title="Output"
+  finally runs before the function actually returns
+try
+finally finally
+```
+
+`finally` is for cleanup. A `return` (or `break`) inside it overrides the try's result **and**
+swallows any exception in flight. Linters flag it, and Python 3.14 emits a `SyntaxWarning`.
+
+### Ignoring an expected error: `contextlib.suppress`
+
+```python title="suppress_demo.py"
+import os
+from contextlib import suppress
+
+with suppress(FileNotFoundError):
+    os.remove("no-such-file.tmp")          # fine if it's already gone
+print("continued")
+
+values = ["1", "two", "3"]
+numbers = []
+for v in values:
+    with suppress(ValueError):
+        numbers.append(int(v))
+print(numbers)
+```
+
+```text title="Output"
+continued
+[1, 3]
+```
+
+`with suppress(SomeError):` is a readable `try: ... except SomeError: pass` for the case where an
+error genuinely means "nothing to do". Keep it as narrow as `except` would be.
+
+### EAFP vs LBYL
+
+```python title="eafp_lbyl.py"
+settings = {"timeout": "30", "retries": "three"}
+
+
+def lbyl(key):                         # Look Before You Leap
+    if key in settings and settings[key].isdigit():
+        return int(settings[key])
+    return None
+
+
+def eafp(key):                         # Easier to Ask Forgiveness than Permission
+    try:
+        return int(settings[key])
+    except (KeyError, ValueError):
+        return None
+
+
+for key in ["timeout", "retries", "missing"]:
+    print(key, lbyl(key), eafp(key))
+```
+
+```text title="Output"
+timeout 30 30
+retries None None
+missing None None
+```
+
+Both give the same answers here. EAFP is the more common Python style: it doesn't duplicate the
+checks the operation does anyway, and it avoids race conditions (a file can disappear between
+"does it exist?" and "open it"). LBYL reads well when the check is cheap and failure is common.
+
+## Putting it together
+
+### Importing a batch: collect errors, keep going
+
+```python title="batch_import.py"
+ROWS = [
+    {"id": "1", "email": "ada@example.com", "age": "36"},
+    {"id": "2", "email": "bob-at-example", "age": "41"},
+    {"id": "x", "email": "cy@example.com", "age": "29"},
+    {"id": "4", "email": "dee@example.com", "age": "-3"},
+    {"id": "5", "email": "eve@example.com"},
+]
+
+
+class RowError(Exception):
+    pass
+
+
+def validate(row: dict) -> dict:
+    try:
+        user_id, email, age = int(row["id"]), row["email"], int(row["age"])
+    except KeyError as err:
+        raise RowError(f"missing field {err}") from err
+    except ValueError as err:
+        raise RowError(f"not a number: {err}") from err
+    if "@" not in email:
+        raise RowError(f"bad email {email!r}")
+    if age < 0:
+        raise RowError(f"negative age {age}")
+    return {"id": user_id, "email": email, "age": age}
+
+
+imported, errors = [], []
+for line_no, row in enumerate(ROWS, start=1):
+    try:
+        imported.append(validate(row))
+    except RowError as err:
+        errors.append(f"row {line_no}: {err}")
+
+print("imported:", [u["id"] for u in imported])
+for e in errors:
+    print(" ", e)
+```
+
+```text title="Output"
+imported: [1]
+  row 2: bad email 'bob-at-example'
+  row 3: not a number: invalid literal for int() with base 10: 'x'
+  row 4: negative age -3
+  row 5: missing field 'age'
+```
+
+- Each row is validated in its own `try`, so one bad row doesn't stop the import.
+- Low-level errors (`KeyError`, `ValueError`) are translated into one domain error, `RowError`, with
+  a message the user can act on, while `from err` keeps the original for debugging.
+
+### A money transfer with an exception hierarchy
+
+```python title="transfer.py"
+class BankError(Exception):
+    """Base class: callers can catch every banking error at once."""
+
+
+class AccountNotFound(BankError):
+    pass
+
+
+class InsufficientFunds(BankError):
+    def __init__(self, account: str, short_by: int):
+        super().__init__(f"{account} is short by {short_by}")
+        self.short_by = short_by
+
+
+accounts = {"ada": 100, "bob": 20}
+audit = []
+
+
+def transfer(src: str, dst: str, amount: int) -> None:
+    try:
+        if src not in accounts or dst not in accounts:
+            raise AccountNotFound(src if src not in accounts else dst)
+        if accounts[src] < amount:
+            raise InsufficientFunds(src, amount - accounts[src])
+        accounts[src] -= amount
+        accounts[dst] += amount
+    except BankError as err:
+        audit.append(f"FAILED {src}->{dst} {amount}: {type(err).__name__} {err}")
+        raise                                  # log it here, let the caller decide
+    else:
+        audit.append(f"OK {src}->{dst} {amount}")
+    finally:
+        audit.append(f"balances {accounts}")
+
+
+for src, dst, amount in [("ada", "bob", 30), ("bob", "ada", 80), ("ada", "zed", 5)]:
+    try:
+        transfer(src, dst, amount)
+    except InsufficientFunds as err:
+        print("declined, short by", err.short_by)
+    except BankError as err:
+        print("error:", err)
+
+print(*audit, sep="\n")
+```
+
+```text title="Output"
+declined, short by 30
+error: zed
+OK ada->bob 30
+balances {'ada': 70, 'bob': 50}
+FAILED bob->ada 80: InsufficientFunds bob is short by 30
+balances {'ada': 70, 'bob': 50}
+FAILED ada->zed 5: AccountNotFound zed
+balances {'ada': 70, 'bob': 50}
+```
+
+- A base class (`BankError`) lets callers choose: catch one specific problem, or every banking
+  problem at once.
+- `except` logs and re-raises with a bare `raise`, `else` records success, `finally` records the
+  balances either way: each clause does exactly one job.
+- The checks happen **before** any balance changes, so a failed transfer never leaves the accounts
+  half-updated.
+
+## Common mistakes
+
+<Callout type="warning" title="Swallowing every error">
+  `except Exception: pass` hides real bugs, and a bare `except:` also catches `KeyboardInterrupt`
+  and `SystemExit`. Catch the narrowest exception you can actually handle, and log or re-raise the
+  rest.
+</Callout>
+
+- **A `try` block that's too big.** You end up catching errors from code you didn't mean to
+  protect.
+- **Using exceptions for normal control flow** in hot loops. Checking first (`if key in d`) can be
+  clearer. Both styles exist: "ask forgiveness" (EAFP) and "look before you leap" (LBYL).
+- **Losing the original error.** Re-raising a new exception without `from` (or a bare `raise`)
+  hides the root cause.
+
+## Practice
+
+<Reveal kind="hint" label="Quick check: if the try block returns, does finally still run?">
+  Yes. `finally` runs on the way out regardless: after a `return`, `break`, `continue` or an
+  exception. That's why it's the place for cleanup (closing files, releasing locks). Context
+  managers (next lesson) package exactly this.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: which clause handles `[][0]` in `except LookupError:` / `except IndexError:`?"
+>
+  `except LookupError`, because it comes first and `IndexError` is a subclass. Put the more specific
+  `IndexError` first if you want it to handle the error.
+</Reveal>
+
+<Reveal
+  kind="hint"
+  label="Quick check: what does `def f(): try: return 1 / finally: print('x')` do when called?"
+>
+  It prints `x`, then returns `1`. `finally` runs on the way out of the function, after the return
+  value is computed but before the caller receives it.
+</Reveal>
+
+<Reveal kind="hint" label="Quick check: when should you write `raise NewError(...) from None`?">
+  When the original exception is an internal detail that would only confuse the reader, for example
+  translating a `KeyError` from your own lookup table into a clear `ValueError` for callers.
+</Reveal>
+
+<KeyTakeaways>
+
+- Exceptions climb the call stack until a matching `except` catches them, and `finally` runs on the way.
+- `else` runs only without an error, and `finally` always runs.
+- Raise clear errors, chain them with `from`, and define custom exception classes for your domain.
+- Catch the narrowest exception you can handle. Never silently swallow errors.
+- Catch exception **families** with base classes (`LookupError`, `OSError`, your own `AppError`).
+- `from err` marks a deliberate cause, `from None` hides an irrelevant one; `add_note` adds
+  context.
+- Never `return` from `finally`; validate before mutating, and collect per-item errors in batch
+  jobs.
+
+</KeyTakeaways>
+
+{/* enriched */}

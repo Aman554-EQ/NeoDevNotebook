@@ -1,0 +1,41 @@
+id: py-i-004
+question: What do `*args` and `**kwargs` mean in a function definition and in a call?
+difficulty: easy
+tags:
+  - functions
+  - arguments
+  - unpacking
+shortAnswer: |
+  In a **definition**, `*args` collects extra positional arguments into a tuple and
+  `**kwargs` collects extra keyword arguments into a dict. In a **call**, `*seq` spreads a
+  sequence into positional arguments and `**mapping` spreads a dict into keyword arguments.
+detailedAnswer: |
+  The names `args` and `kwargs` are only conventions. The stars do the work.
+
+  Typical uses:
+
+  - Functions that accept any number of values: `def total(*numbers)`.
+  - Wrappers and decorators that forward everything:
+    `def wrapper(*args, **kwargs): return func(*args, **kwargs)`.
+  - Forwarding options to another API.
+
+  Parameters after a bare `*` (or after `*args`) are **keyword-only**, and parameters before
+  `/` are **positional-only**. In calls, `f(*[1, 2], **{"sep": "-"})` is equivalent to
+  `f(1, 2, sep="-")`.
+code:
+  language: python
+  code: |
+    def report(title, *values, sep=", ", **meta):
+        return f"{title}: {sep.join(map(str, values))} {meta}"
+
+
+    print(report("scores", 9, 7, 8, sep=" | ", owner="ada"))
+    args, opts = [1, 2], {"sep": "-"}
+    print(report("spread", *args, **opts))
+pitfalls:
+  - Forgetting that `args` is a tuple (immutable), not a list.
+followUps:
+  - What are keyword-only and positional-only parameters for?
+verify: |
+  assert report("scores", 9, 7, 8, sep=" | ", owner="ada") == "scores: 9 | 7 | 8 {'owner': 'ada'}"
+  assert report("spread", *args, **opts) == "spread: 1-2 {}"
