@@ -27,7 +27,7 @@ const jetbrains = JetBrains_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
-  title: { default: `${SITE_NAME} — learn by seeing`, template: `%s · ${SITE_NAME}` },
+  title: { default: SITE_NAME, template: `%s · ${SITE_NAME}` },
   description:
     "A visual, tutor-style digital notebook for Python, Django, FastAPI, Git, Docker, PyTorch, machine learning and LLMs: lessons, projects, practice problems and interview answers.",
 }
