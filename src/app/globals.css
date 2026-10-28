@@ -41,6 +41,26 @@
   --series-3: #1baf7a;
   --series-4: #eda100;
   --series-5: #e87ba4;
+
+  /* Tech logos (brand colours, nudged where they would vanish on the paper). Never used for text. */
+  --brand-python: #3776ab;
+  --brand-django: #0c4b33;
+  --brand-fastapi: #009688;
+  --brand-git: #f05032;
+  --brand-github: #1c1b19;
+  --brand-docker: #2496ed;
+  --brand-pytorch: #ee4c2c;
+  --brand-javascript: #c9a400;
+  --brand-typescript: #3178c6;
+  --brand-shell: #3e8a1e;
+  --brand-react: #0a8eb5;
+  --brand-nextjs: #1c1b19;
+  --brand-ml: #7c3aed;
+  --brand-llm: #db2777;
+
+  /* Decorative backdrop: logo pattern and drifting nodes stay far below text contrast. */
+  --backdrop-ink: #4f46e5;
+  --backdrop-opacity: 0.055;
 }
 
 [data-theme="dark"] {
@@ -77,6 +97,24 @@
   --series-3: #199e70;
   --series-4: #c98500;
   --series-5: #d55181;
+
+  --brand-python: #5a9fd4;
+  --brand-django: #44b78b;
+  --brand-fastapi: #2bbfae;
+  --brand-git: #f4714f;
+  --brand-github: #e6e4df;
+  --brand-docker: #4aabf2;
+  --brand-pytorch: #f2694d;
+  --brand-javascript: #f7df1e;
+  --brand-typescript: #5b9be0;
+  --brand-shell: #6cc24a;
+  --brand-react: #61dafb;
+  --brand-nextjs: #e6e4df;
+  --brand-ml: #a78bfa;
+  --brand-llm: #f472b6;
+
+  --backdrop-ink: #8b93ff;
+  --backdrop-opacity: 0.07;
 }
 
 @theme inline {
@@ -271,4 +309,28 @@ pre,
   display: inline-block;
   width: 100%;
   background: color-mix(in srgb, var(--highlight) 50%, var(--code-bg));
+}
+
+/* ------------------------------------------------------------------ */
+/* Homepage mini lab (src/components/home/hero-lab.tsx)               */
+/* ------------------------------------------------------------------ */
+.hero-plate {
+  background-image:
+    linear-gradient(var(--rule) 1px, transparent 1px),
+    linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+  background-size: 16px 16px;
+  background-position: -1px -1px;
+}
+.hero-plate > section {
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+.hero-plate svg * {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
 }

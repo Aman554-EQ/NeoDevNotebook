@@ -14,7 +14,24 @@ export const moduleSchema = z.object({
   part: z.number().int().min(0),
   order: z.number().int().min(0),
   description: nonEmpty,
-  icon: z.enum(["compass", "code", "server", "git", "container", "flame", "brain", "sparkles"]),
+  /** A lucide icon, or a tech logo (python … llm) drawn by <TechLogo>. */
+  icon: z.enum([
+    "compass",
+    "code",
+    "server",
+    "container",
+    "flame",
+    "brain",
+    "sparkles",
+    "python",
+    "django",
+    "fastapi",
+    "git",
+    "docker",
+    "pytorch",
+    "ml",
+    "llm",
+  ]),
   /** Prefix for problem/interview IDs in this module, e.g. "py" → py-p-001, py-i-001 */
   idPrefix: z.string().regex(/^[a-z]{2,4}$/),
   /** Minimum content counts promised by the part plan, checked by `pnpm verify:content`. */

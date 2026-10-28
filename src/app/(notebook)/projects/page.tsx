@@ -1,13 +1,15 @@
 import type { Metadata } from "next"
 import { ProjectCard } from "@/components/project/project-card"
 import { getNavTree } from "@/lib/content"
+import { HubBackdrop } from "@/components/brand/hub-backdrop"
 
 export const metadata: Metadata = { title: "Projects" }
 
 export default async function ProjectsHub() {
   const modules = (await getNavTree()).filter((m) => m.projects.length > 0)
   return (
-    <main>
+    <main className="relative isolate">
+      <HubBackdrop />
       <h1 className="font-display text-3xl font-semibold sm:text-4xl">Projects</h1>
       <p className="text-muted mt-2 max-w-2xl">
         Build real applications step by step: read the brief, try each milestone yourself, use the

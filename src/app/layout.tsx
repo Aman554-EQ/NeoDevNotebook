@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next"
 import { Fraunces, Inter, JetBrains_Mono } from "next/font/google"
 import { ExtensionAttrScript } from "@/components/layout/extension-attr-script"
+import { SiteFooter } from "@/components/layout/site-footer"
 import { ThemeScript } from "@/components/layout/theme-script"
 import { TopBar } from "@/components/layout/top-bar"
 import { SITE_NAME } from "@/lib/utils"
@@ -28,7 +29,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
   title: { default: `${SITE_NAME} — learn by seeing`, template: `%s · ${SITE_NAME}` },
   description:
-    "A visual, tutor-style digital notebook for Python, Django, Flask, FastAPI, Git, Docker, PyTorch, ML and LLM interview preparation.",
+    "A visual, tutor-style digital notebook for Python, Django, FastAPI, Git, Docker, PyTorch, machine learning and LLMs: lessons, projects, practice problems and interview answers.",
 }
 
 export const viewport: Viewport = {
@@ -57,12 +58,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           Skip to content
         </a>
         <TopBar />
-        <div id="main" className="flex-1">
+        {/* At least one screen tall: the footer starts below the fold, so late font swaps above it never shift it into view. */}
+        <div id="main" className="min-h-[calc(100dvh-4rem)] flex-1">
           {children}
         </div>
-        <footer className="border-rule text-muted border-t py-8 text-center text-sm">
-          <p>{SITE_NAME} · concept → visual → example → practice</p>
-        </footer>
+        <SiteFooter />
       </body>
     </html>
   )

@@ -1,21 +1,70 @@
+import type { TechLogoName } from "@/components/brand/tech-logo"
+
 /**
- * The full learning path (see plan/README.md). A part shows as available as soon as
- * any of its module folders exists in content/; otherwise it is listed as upcoming.
+ * The full learning path, in order. A track shows as available as soon as content/<slug>/
+ * exists; otherwise it is listed as coming soon.
  */
-export const ROADMAP = [
-  { part: 0, title: "Start Here", blurb: "How this notebook teaches, and how to use it." },
-  { part: 1, title: "Python", blurb: "Basics, data structures, debugging, 50+ problems." },
+export type Track = {
+  slug: string
+  title: string
+  blurb: string
+  /** Brand logos shown on the card; Start Here has none (it uses its module icon). */
+  logos: TechLogoName[]
+}
+
+export const ROADMAP: Track[] = [
   {
-    part: 2,
-    title: "Django · Flask · FastAPI",
-    blurb: "Three frameworks, CRUD, APIs, databases, caching.",
+    slug: "start-here",
+    title: "Start Here",
+    blurb: "How this notebook teaches, and how to use it.",
+    logos: [],
   },
-  { part: 3, title: "Git & GitHub", blurb: "Version control, branching, reviews, recovery." },
-  { part: 4, title: "Docker", blurb: "Images, containers, Dockerfiles for Python and Node." },
-  { part: 5, title: "PyTorch", blurb: "Tensors, autograd, training loops, 10+ models." },
   {
-    part: 6,
-    title: "ML & LLMs",
-    blurb: "Backprop, loss, gradient descent, LoRA, attention, KV cache.",
+    slug: "python",
+    title: "Python",
+    blurb: "Basics, data structures, debugging, 50+ problems.",
+    logos: ["python"],
   },
-] as const
+  {
+    slug: "django",
+    title: "Django",
+    blurb: "Models, the ORM, DRF APIs, auth, testing and deployment, with real projects.",
+    logos: ["django"],
+  },
+  {
+    slug: "fastapi",
+    title: "FastAPI",
+    blurb: "Typed async APIs: Pydantic, dependencies, auth, background work and tests.",
+    logos: ["fastapi"],
+  },
+  {
+    slug: "git",
+    title: "Git & GitHub",
+    blurb: "Version control, branching, reviews, recovery.",
+    logos: ["git", "github"],
+  },
+  {
+    slug: "docker",
+    title: "Docker",
+    blurb: "Images, containers, Dockerfiles for Python and Node.",
+    logos: ["docker"],
+  },
+  {
+    slug: "pytorch",
+    title: "PyTorch",
+    blurb: "Tensors, autograd, training loops, 10+ models.",
+    logos: ["pytorch"],
+  },
+  {
+    slug: "ml",
+    title: "Machine Learning",
+    blurb: "Loss, gradient descent, backprop, regularisation and evaluation.",
+    logos: ["ml"],
+  },
+  {
+    slug: "llm",
+    title: "LLMs",
+    blurb: "Tokens, attention, the KV cache, LoRA fine-tuning and retrieval.",
+    logos: ["llm"],
+  },
+]
